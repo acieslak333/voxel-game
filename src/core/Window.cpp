@@ -61,6 +61,15 @@ void Window::framebufferSize(int& outWidth, int& outHeight) const {
     glfwGetFramebufferSize(window_, &outWidth, &outHeight);
 }
 
+void Window::setCursorDisabled(bool disabled) const {
+    glfwSetInputMode(window_, GLFW_CURSOR,
+                     disabled ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL);
+    // Raw motion gives unaccelerated deltas, which feel better for mouse-look.
+    if (disabled && glfwRawMouseMotionSupported()) {
+        glfwSetInputMode(window_, GLFW_RAW_MOUSE_MOTION, GLFW_TRUE);
+    }
+}
+
 void Window::waitWhileMinimized() const {
     int w = 0, h = 0;
     glfwGetFramebufferSize(window_, &w, &h);

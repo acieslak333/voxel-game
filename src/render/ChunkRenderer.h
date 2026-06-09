@@ -38,8 +38,13 @@ public:
     ChunkRenderer(const ChunkRenderer&) = delete;
     ChunkRenderer& operator=(const ChunkRenderer&) = delete;
 
-    // Record draw commands inside the active render pass for the given frame.
-    void record(VkCommandBuffer cmd, uint32_t frameIndex, VkExtent2D extent);
+    // Record draw commands inside the active render pass for the given frame,
+    // using the supplied camera matrices. `extent` sizes the viewport/scissor.
+    void record(VkCommandBuffer cmd, uint32_t frameIndex, VkExtent2D extent,
+                const glm::mat4& view, const glm::mat4& proj);
+
+    // Collision query for the player: is the block at (x,y,z) solid?
+    [[nodiscard]] bool isSolidAt(int x, int y, int z) const;
 
 private:
     // Matches the std140 layout of CameraUBO in the vertex shader.

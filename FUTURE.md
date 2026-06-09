@@ -35,9 +35,20 @@ the current code should make them hard to add. Search the codebase for
   allocations that vertex data and textures will need.
 
 ### Window / input
-- **`Window`** owns GLFW and exposes the raw `GLFWwindow*`. Input handling
-  (keyboard/mouse) will attach here or in a dedicated `Input` class in
-  Milestone 2; the player controller will consume it.
+- **`Input`** collapses GLFW polling into a per-frame `InputState` struct, so the
+  player controller has no dependency on the windowing library. Rebindable keys
+  or gamepad support would slot in here.
+
+### Player
+- **`PlayerController`** holds `health_` and is where additional survival stats
+  (hunger, thirst, stamina) and a damage API will live (see its `TODO(future)`).
+- Collision goes through a `SolidFn` predicate, so the controller is independent
+  of how the world is stored — it works unchanged when the single chunk becomes
+  a streamed multi-chunk world.
+- Collision response is currently per-axis with a one-frame gap; a swept-AABB
+  solve (move exactly to contact) is a noted refinement.
+- **`Camera`** is intentionally minimal (position + yaw/pitch); other drivers
+  (spectator, cutscene) could reuse it.
 
 ### World / meshing
 - **`BlockRegistry`** is the single source of truth for block properties and the

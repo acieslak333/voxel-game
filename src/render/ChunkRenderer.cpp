@@ -37,23 +37,43 @@ ChunkRenderer::~ChunkRenderer() {
 }
 
 void ChunkRenderer::buildWorld() {
-    // ---- Hardcode a simple layered terrain (Milestone 1) --------------------
+    // ---- Hardcode a simple layered terrain ----------------------------------
     //   y 0-1 : stone
     //   y 2-4 : dirt
     //   y 5   : grass
     //   above : air
     // Flat layers make the greedy mesher's per-material merging and the
     // per-block texture tiling easy to see.
+    auto place = [&](int x, int y, int z, BlockId id) {
+        if (Chunk::inBounds(x, y, z)) {
+            chunk_.set(x, y, z, Block{static_cast<uint16_t>(id), 0});
+        }
+    };
+
     for (int z = 0; z < Chunk::kSize; ++z) {
         for (int x = 0; x < Chunk::kSize; ++x) {
             for (int y = 0; y <= 5; ++y) {
-                uint16_t id;
-                if (y <= 1)      id = static_cast<uint16_t>(BlockId::Stone);
-                else if (y <= 4) id = static_cast<uint16_t>(BlockId::Dirt);
-                else             id = static_cast<uint16_t>(BlockId::Grass);
-                chunk_.set(x, y, z, Block{id, 0});
+                BlockId id = (y <= 1) ? BlockId::Stone
+                           : (y <= 4) ? BlockId::Dirt
+                                      : BlockId::Grass;
+                place(x, y, z, id);
             }
         }
+    }
+
+    // A few features so the camera, collision and jumping have something to do
+    // (Milestone 2): a staircase, a low wall, and a stone pillar.
+    for (int s = 0; s < 4; ++s) {                 // staircase climbing in +x
+        for (int y = 6; y <= 6 + s; ++y) {
+            place(3 + s, y, 4, BlockId::Stone);
+        }
+    }
+    for (int z = 8; z < 14; ++z) {                // a 2-high wall to walk into
+        place(11, 6, z, BlockId::Dirt);
+        place(11, 7, z, BlockId::Grass);
+    }
+    for (int y = 6; y <= 9; ++y) {                // a tall pillar landmark
+        place(13, y, 3, BlockId::Stone);
     }
 
     // ---- Mesh it and upload to the GPU --------------------------------------
@@ -141,20 +161,12 @@ void ChunkRenderer::createDescriptorSets(uint32_t n) {
     }
 }
 
-void ChunkRenderer::record(VkCommandBuffer cmd, uint32_t frameIndex, VkExtent2D extent) {
+void ChunkRenderer::record(VkCommandBuffer cmd, uint32_t frameIndex, VkExtent2D extent,
+                           const glm::mat4& view, const glm::mat4& proj) {
     // --- Update this frame's camera UBO --------------------------------------
-    const float aspect = extent.height == 0
-                             ? 1.0f
-                             : static_cast<float>(extent.width) / static_cast<float>(extent.height);
-    const glm::vec3 center(Chunk::kSize * 0.5f, 4.0f, Chunk::kSize * 0.5f);
-    const glm::vec3 eye = center + glm::vec3(22.0f, 16.0f, 28.0f);
-
     CameraUBO ubo{};
-    ubo.view = glm::lookAt(eye, center, glm::vec3(0.0f, 1.0f, 0.0f));
-    ubo.proj = glm::perspective(glm::radians(45.0f), aspect, 0.1f, 200.0f);
-    // GLM was written for OpenGL whose clip-space Y points up; Vulkan's points
-    // down, so flip it here to avoid rendering everything upside down.
-    ubo.proj[1][1] *= -1.0f;
+    ubo.view = view;
+    ubo.proj = proj;
     uniformBuffers_[frameIndex].upload(&ubo, sizeof(ubo));
 
     // --- Bind pipeline + dynamic state ---------------------------------------
@@ -189,6 +201,10 @@ void ChunkRenderer::record(VkCommandBuffer cmd, uint32_t frameIndex, VkExtent2D 
     vkCmdBindIndexBuffer(cmd, indexBuffer_.handle(), 0, VK_INDEX_TYPE_UINT32);
 
     vkCmdDrawIndexed(cmd, indexCount_, 1, 0, 0, 0);
+}
+
+bool ChunkRenderer::isSolidAt(int x, int y, int z) const {
+    return registry_.isSolid(chunk_.getOrAir(x, y, z).id);
 }
 
 } // namespace vg

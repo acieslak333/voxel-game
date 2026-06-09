@@ -1,5 +1,9 @@
 #include "core/App.h"
 
+#include <glm/gtc/matrix_transform.hpp>
+
+#include <algorithm>
+
 // Asset/shader directories are baked in at build time by CMake so the executable
 // can find them regardless of the working directory.
 #ifndef VG_SHADER_DIR
@@ -18,18 +22,46 @@ App::App()
       renderer_(context_, swapchain_, window_),
       chunkRenderer_(context_, swapchain_.renderPass(),
                      static_cast<uint32_t>(Renderer::kMaxFramesInFlight),
-                     VG_SHADER_DIR, std::string(VG_ASSET_DIR) + "/textures") {}
+                     VG_SHADER_DIR, std::string(VG_ASSET_DIR) + "/textures"),
+      input_(window_),
+      // Spawn standing above the centre of the chunk so the player falls onto it.
+      player_(glm::vec3(8.0f, 9.0f, 8.0f)) {
+    // The player collides against the chunk through this predicate.
+    player_.setSolidFn([this](int x, int y, int z) {
+        return chunkRenderer_.isSolidAt(x, y, z);
+    });
+    // FPS-style mouse look.
+    window_.setCursorDisabled(true);
+}
 
 void App::run(long maxFrames, const std::string& screenshotPath) {
-    // Milestone 1: render the greedy-meshed, textured chunk each frame. The
-    // record callback runs inside the render pass (see Renderer::drawFrame).
+    double lastTime = glfwGetTime();
     long frame = 0;
+
     while (!window_.shouldClose()) {
         window_.pollEvents();
 
+        // Delta time, clamped so a hitch (or a slow first frame) cannot launch
+        // the player through the world.
+        const double now = glfwGetTime();
+        const float dt = static_cast<float>(std::min(now - lastTime, 0.05));
+        lastTime = now;
+
+        const InputState in = input_.poll();
+        player_.update(dt, in);
+
         renderer_.drawFrame([this](VkCommandBuffer cmd, uint32_t frameIndex,
                                    VkExtent2D extent) {
-            chunkRenderer_.record(cmd, frameIndex, extent);
+            const Camera& cam = player_.camera();
+            const float aspect = extent.height == 0
+                                     ? 1.0f
+                                     : static_cast<float>(extent.width) /
+                                           static_cast<float>(extent.height);
+            glm::mat4 view = cam.viewMatrix();
+            glm::mat4 proj = glm::perspective(glm::radians(cam.fovDegrees), aspect,
+                                              cam.nearZ, cam.farZ);
+            proj[1][1] *= -1.0f; // flip Y for Vulkan's clip space
+            chunkRenderer_.record(cmd, frameIndex, extent, view, proj);
         });
 
         if (maxFrames >= 0 && ++frame >= maxFrames) {

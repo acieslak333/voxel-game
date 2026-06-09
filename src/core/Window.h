@@ -43,6 +43,10 @@ public:
     // Blocks until the window has a non-zero framebuffer (e.g. un-minimised).
     void waitWhileMinimized() const;
 
+    // Lock + hide the cursor for FPS mouse-look (and request raw motion if the
+    // platform supports it). Passing false restores the normal cursor.
+    void setCursorDisabled(bool disabled) const;
+
     // Set true by the resize callback; the renderer polls + clears this so it
     // knows to rebuild the swapchain.
     [[nodiscard]] bool framebufferResized() const { return framebufferResized_; }
