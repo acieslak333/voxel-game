@@ -197,10 +197,12 @@ add_executable(voxelgame
     src/render/Buffer.cpp
     src/render/TextureArray.cpp
     src/render/Pipeline.cpp
-    src/render/ChunkRenderer.cpp
+    src/render/WorldRenderer.cpp
     src/render/Screenshot.cpp
     src/world/BlockRegistry.cpp
     src/world/ChunkMesher.cpp
+    src/world/Noise.cpp
+    src/world/World.cpp
     src/player/Camera.cpp
     src/player/PlayerController.cpp
 )

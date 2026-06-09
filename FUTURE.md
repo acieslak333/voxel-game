@@ -54,19 +54,27 @@ the current code should make them hard to add. Search the codebase for
 - **`BlockRegistry`** is the single source of truth for block properties and the
   per-face texture layers. Add a block by adding an id in `Block.h` and one
   `registerBlock(...)` call — `internTexture()` deduplicates texture layers.
-- **`Chunk::getOrAir`** is the hook for cross-chunk meshing: it currently returns
-  air outside the chunk, but in a multi-chunk world it should sample the
-  neighbouring chunk so faces between chunks are culled (see its `TODO(future)`).
+- **`World`** generates a *fixed* grid of chunks up front. Two extension points:
+  *chunk streaming* (load/unload chunks around the player instead of one fixed
+  grid) and *island shaping* (multiply the height field by a radial falloff so
+  land is surrounded by water). The generator (`columnHeight` + material noise)
+  is the place to add biomes, caves, ores, trees.
+- **Cross-chunk meshing**: chunks are currently meshed treating neighbours as
+  air, so faces on chunk boundaries between two solid chunks are emitted but
+  hidden (correct, slightly wasteful). Feeding the mesher a neighbour-aware
+  sampler (the `Chunk::getOrAir` seam) would cull them.
+- **`WorldRenderer`** meshes the whole world once. The seam for editing/streaming
+  is per-chunk remeshing: rebuild only the chunk(s) whose blocks changed and
+  swap their GPU buffers, rather than everything.
 - **`ChunkMesher`** only handles cube blocks. Non-cube render types (cross,
   custom model) should be detected via a future `BlockProperties::renderType` and
   emit their own geometry, bypassing the greedy pass.
 - **`Block::metadata`** is reserved for orientation/state.
 
 ### Application
-- **`App`** constructs subsystems in dependency order. New long-lived systems
-  (world, player, asset manager) become members here, constructed after the
-  renderer. In Milestone 3 the single `ChunkRenderer` chunk + buffers become a
-  collection keyed by chunk coordinate.
+- **`App`** constructs subsystems in dependency order (window → Vulkan →
+  swapchain → renderer → world → world renderer → input → player). New
+  long-lived systems (asset manager, entity manager, UI) become members here.
 
 ---
 

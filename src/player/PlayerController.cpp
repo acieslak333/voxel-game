@@ -30,6 +30,17 @@ void PlayerController::syncCameraToBody() {
     camera_.position = feet_ + glm::vec3(0.0f, kEyeHeight, 0.0f);
 }
 
+void PlayerController::teleport(glm::vec3 feet) {
+    feet_ = feet;
+    velocity_ = glm::vec3(0.0f);
+    syncCameraToBody();
+}
+
+void PlayerController::setMode(Mode m) {
+    mode_ = m;
+    velocity_ = glm::vec3(0.0f);
+}
+
 void PlayerController::update(float dt, const InputState& input) {
     // --- Look --------------------------------------------------------------
     camera_.addLook(input.look.x, input.look.y, kSensitivity);

@@ -1,97 +1,70 @@
-#include "render/ChunkRenderer.h"
+#include "render/WorldRenderer.h"
 
 #include "render/Pipeline.h"
 #include "render/TextureArray.h"
 #include "render/VulkanContext.h"
 #include "world/ChunkMesher.h"
+#include "world/World.h"
 
-// GLM_FORCE_RADIANS / GLM_FORCE_DEPTH_ZERO_TO_ONE are defined globally by CMake.
 #include <glm/gtc/matrix_transform.hpp>
 
 #include <array>
+#include <iostream>
 #include <stdexcept>
 
 namespace vg {
 
-ChunkRenderer::ChunkRenderer(VulkanContext& ctx, VkRenderPass renderPass,
-                             uint32_t framesInFlight, const std::string& shaderDir,
-                             const std::string& textureDir)
-    : ctx_(ctx) {
-    // Load the textures named by the registry into the array, in layer order.
-    textures_ = std::make_unique<TextureArray>(ctx_, registry_.texturePaths(), textureDir);
-
+WorldRenderer::WorldRenderer(VulkanContext& ctx, VkRenderPass renderPass,
+                             uint32_t framesInFlight, const World& world,
+                             const std::string& shaderDir, const std::string& textureDir)
+    : ctx_(ctx), world_(world) {
+    textures_ = std::make_unique<TextureArray>(ctx_, world_.registry().texturePaths(),
+                                               textureDir);
     pipeline_ = std::make_unique<Pipeline>(ctx_, renderPass,
                                            shaderDir + "/chunk.vert.spv",
                                            shaderDir + "/chunk.frag.spv");
-
-    buildWorld();
+    buildMeshes();
     createUniformBuffers(framesInFlight);
     createDescriptorSets(framesInFlight);
 }
 
-ChunkRenderer::~ChunkRenderer() {
-    // Descriptor sets are freed with the pool.
+WorldRenderer::~WorldRenderer() {
     if (descriptorPool_) {
         vkDestroyDescriptorPool(ctx_.device(), descriptorPool_, nullptr);
     }
 }
 
-void ChunkRenderer::buildWorld() {
-    // ---- Hardcode a simple layered terrain ----------------------------------
-    //   y 0-1 : stone
-    //   y 2-4 : dirt
-    //   y 5   : grass
-    //   above : air
-    // Flat layers make the greedy mesher's per-material merging and the
-    // per-block texture tiling easy to see.
-    auto place = [&](int x, int y, int z, BlockId id) {
-        if (Chunk::inBounds(x, y, z)) {
-            chunk_.set(x, y, z, Block{static_cast<uint16_t>(id), 0});
-        }
-    };
+void WorldRenderer::buildMeshes() {
+    const glm::ivec3 counts = world_.chunkCounts();
+    for (int cz = 0; cz < counts.z; ++cz) {
+        for (int cy = 0; cy < counts.y; ++cy) {
+            for (int cx = 0; cx < counts.x; ++cx) {
+                MeshData mesh = ChunkMesher::greedyMesh(world_.chunk(cx, cy, cz),
+                                                        world_.registry());
+                if (mesh.empty()) {
+                    continue; // air (or fully-occluded) chunk: nothing to draw
+                }
 
-    for (int z = 0; z < Chunk::kSize; ++z) {
-        for (int x = 0; x < Chunk::kSize; ++x) {
-            for (int y = 0; y <= 5; ++y) {
-                BlockId id = (y <= 1) ? BlockId::Stone
-                           : (y <= 4) ? BlockId::Dirt
-                                      : BlockId::Grass;
-                place(x, y, z, id);
+                ChunkMesh cm;
+                cm.vertexBuffer = Buffer::createDeviceLocal(
+                    ctx_, mesh.vertices.data(), sizeof(Vertex) * mesh.vertices.size(),
+                    VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+                cm.indexBuffer = Buffer::createDeviceLocal(
+                    ctx_, mesh.indices.data(), sizeof(uint32_t) * mesh.indices.size(),
+                    VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
+                cm.indexCount = static_cast<uint32_t>(mesh.indices.size());
+                cm.worldPos = glm::vec3(cx, cy, cz) * static_cast<float>(Chunk::kSize);
+
+                totalTriangles_ += cm.indexCount / 3;
+                meshes_.push_back(std::move(cm));
             }
         }
     }
-
-    // A few features so the camera, collision and jumping have something to do
-    // (Milestone 2): a staircase, a low wall, and a stone pillar.
-    for (int s = 0; s < 4; ++s) {                 // staircase climbing in +x
-        for (int y = 6; y <= 6 + s; ++y) {
-            place(3 + s, y, 4, BlockId::Stone);
-        }
-    }
-    for (int z = 8; z < 14; ++z) {                // a 2-high wall to walk into
-        place(11, 6, z, BlockId::Dirt);
-        place(11, 7, z, BlockId::Grass);
-    }
-    for (int y = 6; y <= 9; ++y) {                // a tall pillar landmark
-        place(13, y, 3, BlockId::Stone);
-    }
-
-    // ---- Mesh it and upload to the GPU --------------------------------------
-    MeshData mesh = ChunkMesher::greedyMesh(chunk_, registry_);
-    if (mesh.empty()) {
-        throw std::runtime_error("Chunk produced an empty mesh");
-    }
-
-    vertexBuffer_ = Buffer::createDeviceLocal(
-        ctx_, mesh.vertices.data(), sizeof(Vertex) * mesh.vertices.size(),
-        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
-    indexBuffer_ = Buffer::createDeviceLocal(
-        ctx_, mesh.indices.data(), sizeof(uint32_t) * mesh.indices.size(),
-        VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
-    indexCount_ = static_cast<uint32_t>(mesh.indices.size());
+    std::cout << "[world] meshed " << meshes_.size() << " chunks, "
+              << totalTriangles_ << " triangles\n";
 }
 
-void ChunkRenderer::createUniformBuffers(uint32_t n) {
+void WorldRenderer::createUniformBuffers(uint32_t n) {
     uniformBuffers_.reserve(n);
     for (uint32_t i = 0; i < n; ++i) {
         uniformBuffers_.emplace_back(ctx_, sizeof(CameraUBO),
@@ -101,8 +74,7 @@ void ChunkRenderer::createUniformBuffers(uint32_t n) {
     }
 }
 
-void ChunkRenderer::createDescriptorSets(uint32_t n) {
-    // Pool big enough for n sets, each with one UBO and one sampler.
+void WorldRenderer::createDescriptorSets(uint32_t n) {
     std::array<VkDescriptorPoolSize, 2> sizes{};
     sizes[0] = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, n};
     sizes[1] = {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, n};
@@ -129,7 +101,6 @@ void ChunkRenderer::createDescriptorSets(uint32_t n) {
         throw std::runtime_error("Failed to allocate descriptor sets");
     }
 
-    // Point each set at its own UBO + the shared texture array.
     for (uint32_t i = 0; i < n; ++i) {
         VkDescriptorBufferInfo bufferInfo{};
         bufferInfo.buffer = uniformBuffers_[i].handle();
@@ -161,22 +132,16 @@ void ChunkRenderer::createDescriptorSets(uint32_t n) {
     }
 }
 
-void ChunkRenderer::record(VkCommandBuffer cmd, uint32_t frameIndex, VkExtent2D extent,
+void WorldRenderer::record(VkCommandBuffer cmd, uint32_t frameIndex, VkExtent2D extent,
                            const glm::mat4& view, const glm::mat4& proj) {
-    // --- Update this frame's camera UBO --------------------------------------
-    CameraUBO ubo{};
-    ubo.view = view;
-    ubo.proj = proj;
+    CameraUBO ubo{view, proj};
     uniformBuffers_[frameIndex].upload(&ubo, sizeof(ubo));
 
-    // --- Bind pipeline + dynamic state ---------------------------------------
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_->handle());
 
     VkViewport viewport{};
-    viewport.x = 0.0f;
-    viewport.y = 0.0f;
-    viewport.width  = static_cast<float>(extent.width);
-    viewport.height = static_cast<float>(extent.height);
+    viewport.width    = static_cast<float>(extent.width);
+    viewport.height   = static_cast<float>(extent.height);
     viewport.minDepth = 0.0f;
     viewport.maxDepth = 1.0f;
     vkCmdSetViewport(cmd, 0, 1, &viewport);
@@ -189,22 +154,18 @@ void ChunkRenderer::record(VkCommandBuffer cmd, uint32_t frameIndex, VkExtent2D 
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_->layout(),
                             0, 1, &descriptorSets_[frameIndex], 0, nullptr);
 
-    // Single chunk at the origin -> identity model matrix. In Milestone 3 this
-    // becomes per-chunk world translation.
-    glm::mat4 model(1.0f);
-    vkCmdPushConstants(cmd, pipeline_->layout(), VK_SHADER_STAGE_VERTEX_BIT, 0,
-                       Pipeline::kPushConstantSize, &model);
+    // One draw per chunk, each translated to its world position via push constant.
+    for (const ChunkMesh& m : meshes_) {
+        glm::mat4 model = glm::translate(glm::mat4(1.0f), m.worldPos);
+        vkCmdPushConstants(cmd, pipeline_->layout(), VK_SHADER_STAGE_VERTEX_BIT, 0,
+                           Pipeline::kPushConstantSize, &model);
 
-    VkBuffer vbs[] = {vertexBuffer_.handle()};
-    VkDeviceSize offsets[] = {0};
-    vkCmdBindVertexBuffers(cmd, 0, 1, vbs, offsets);
-    vkCmdBindIndexBuffer(cmd, indexBuffer_.handle(), 0, VK_INDEX_TYPE_UINT32);
-
-    vkCmdDrawIndexed(cmd, indexCount_, 1, 0, 0, 0);
-}
-
-bool ChunkRenderer::isSolidAt(int x, int y, int z) const {
-    return registry_.isSolid(chunk_.getOrAir(x, y, z).id);
+        VkBuffer vbs[] = {m.vertexBuffer.handle()};
+        VkDeviceSize offsets[] = {0};
+        vkCmdBindVertexBuffers(cmd, 0, 1, vbs, offsets);
+        vkCmdBindIndexBuffer(cmd, m.indexBuffer.handle(), 0, VK_INDEX_TYPE_UINT32);
+        vkCmdDrawIndexed(cmd, m.indexCount, 1, 0, 0, 0);
+    }
 }
 
 } // namespace vg
