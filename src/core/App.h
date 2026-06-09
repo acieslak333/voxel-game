@@ -1,9 +1,12 @@
 #pragma once
 
 #include "core/Window.h"
+#include "render/ChunkRenderer.h"
 #include "render/Renderer.h"
 #include "render/Swapchain.h"
 #include "render/VulkanContext.h"
+
+#include <string>
 
 namespace vg {
 
@@ -18,12 +21,7 @@ namespace vg {
 class App {
 public:
     App();
-
-    // Run the main loop. If maxFrames >= 0 the loop exits after that many
-    // frames; this is used for headless smoke-testing / CI where there is no
-    // way to interactively close the window. A negative value runs until the
-    // window is closed.
-    void run(long maxFrames = -1);
+    void run(long maxFrames = -1, const std::string& screenshotPath = "");
 
 private:
     static constexpr int kWidth  = 1280;
@@ -33,6 +31,7 @@ private:
     VulkanContext context_;
     Swapchain     swapchain_;
     Renderer      renderer_;
+    ChunkRenderer chunkRenderer_;
 };
 
 } // namespace vg

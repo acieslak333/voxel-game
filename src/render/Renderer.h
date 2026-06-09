@@ -5,6 +5,7 @@
 #include <array>
 #include <cstdint>
 #include <functional>
+#include <string>
 #include <vector>
 
 namespace vg {
@@ -28,10 +29,11 @@ class Window;
 class Renderer {
 public:
     // Records draw commands inside an already-begun render pass. Receives the
-    // command buffer, the index of the swapchain image being rendered, and the
-    // current framebuffer extent (handy for setting viewport/scissor).
+    // command buffer, the current frame-in-flight index (use it to pick
+    // per-frame resources such as uniform buffers / descriptor sets), and the
+    // framebuffer extent (handy for setting viewport/scissor).
     using RecordFn = std::function<void(VkCommandBuffer cmd,
-                                        uint32_t imageIndex,
+                                        uint32_t frameIndex,
                                         VkExtent2D extent)>;
 
     Renderer(VulkanContext& ctx, Swapchain& swapchain, Window& window);
@@ -49,6 +51,10 @@ public:
     void waitIdle() const;
 
     void setClearColor(float r, float g, float b) { clearColor_ = {r, g, b, 1.0f}; }
+
+    // Write the most-recently-rendered frame to a PNG. Call after the render
+    // loop (and after waitIdle). Used by the --screenshot flag for verification.
+    void saveScreenshot(const std::string& path) const;
 
     static constexpr int kMaxFramesInFlight = 2;
 
@@ -79,7 +85,8 @@ private:
     // render into an image a previous frame has not finished with.
     std::vector<VkFence>     imagesInFlight_;
 
-    uint32_t currentFrame_ = 0;
+    uint32_t currentFrame_   = 0;
+    uint32_t lastImageIndex_ = 0; // swapchain image rendered most recently
 
     std::array<float, 4> clearColor_ = {0.45f, 0.70f, 1.0f, 1.0f}; // sky blue
 };

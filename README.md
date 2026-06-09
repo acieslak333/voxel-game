@@ -5,8 +5,10 @@ A first-person voxel survival game built from scratch in modern **C++20** with
 generated island; this repository builds that foundation up in small, verifiable
 milestones.
 
-> **Status:** Milestone 0 complete — cross-platform CMake project that opens a
-> window, initialises Vulkan, and clears the screen to a solid colour.
+> **Status:** Milestone 1 complete — a textured, greedy-meshed 16×16×16 chunk
+> rendered in 3D.
+
+![A greedy-meshed, textured chunk](docs/screenshots/milestone1.png)
 
 ---
 
@@ -102,9 +104,13 @@ cmake --build build -j
 Launch the executable from anywhere; it locates its `shaders/` and `assets/`
 folders relative to its own location.
 
-| Flag          | Meaning                                                        |
-|---------------|---------------------------------------------------------------|
-| `--frames N`  | Render `N` frames then exit (used for headless smoke-testing). |
+| Flag                | Meaning                                                  |
+|---------------------|----------------------------------------------------------|
+| `--frames N`        | Render `N` frames then exit (headless smoke-testing).    |
+| `--screenshot PATH` | Render a few frames, write `PATH` as a PNG, then exit.   |
+
+Milestone 1 renders a single hardcoded chunk (stone / dirt / grass layers) from
+a fixed 3/4 view. Interactive camera controls arrive in Milestone 2.
 
 In **Debug** builds the Vulkan validation layers are enabled automatically and
 report warnings/errors to the console.
@@ -115,9 +121,10 @@ The project runs without a physical GPU using a virtual display and Mesa's
 software Vulkan driver (lavapipe) — handy for CI:
 
 ```bash
-sudo apt install xvfb mesa-vulkan-drivers
+sudo apt install xvfb mesa-vulkan-drivers vulkan-validationlayers
 export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json
-xvfb-run -a -s "-screen 0 1280x720x24" ./build/bin/voxelgame --frames 10
+# Render a few frames and dump a screenshot to verify rendering end-to-end:
+xvfb-run -a -s "-screen 0 1280x720x24" ./build/bin/voxelgame --screenshot out.png
 ```
 
 ---
@@ -127,23 +134,39 @@ xvfb-run -a -s "-screen 0 1280x720x24" ./build/bin/voxelgame --frames 10
 ```
 src/
   core/      app, window, (input & timing later)
-  render/    Vulkan: context (instance/device), swapchain, renderer
-  world/     blocks, chunks, meshing, world gen   (later milestones)
-  player/    camera, controller                   (later milestones)
-shaders/     GLSL compiled to SPIR-V at build time (later milestones)
-assets/      textures                             (later milestones)
+  render/    Vulkan: context, swapchain, renderer, pipeline, buffers,
+             texture array, chunk renderer, screenshot
+  world/     block, block registry, chunk, greedy mesher
+  player/    camera, controller                   (Milestone 2)
+shaders/     GLSL (chunk.vert/frag), compiled to SPIR-V at build time
+assets/      textures/  (one solid-colour PNG per block face)
+third_party/ vendored single-header libs (stb_image)
+scripts/     gen_textures.py (regenerates the placeholder textures)
 ```
 
 Vulkan setup is split into focused, RAII-wrapped classes
-(`VulkanContext`, `Swapchain`, `Renderer`) rather than one giant file, so each
-stage is readable on its own.
+(`VulkanContext`, `Swapchain`, `Renderer`, `Pipeline`, `Buffer`,
+`TextureArray`, …) rather than one giant file, so each stage is readable on its
+own.
+
+### How the rendering works (Milestone 1)
+
+- **Greedy meshing** (`world/ChunkMesher`) merges adjacent coplanar faces of the
+  same block type into large quads, and only emits faces where a solid block
+  borders a non-opaque one (built-in face culling).
+- Because a merged quad spans many blocks, a naive atlas would *stretch* the
+  texture across it. Instead we use a **Vulkan texture array**
+  (`VK_IMAGE_VIEW_TYPE_2D_ARRAY`) and express UVs in **block units** with a
+  **REPEAT** sampler, so each block shows one full texture tile.
+- A **block registry** (`world/BlockRegistry`) is the single source of truth for
+  block properties and per-face texture layers, and is trivial to extend.
 
 ---
 
 ## Roadmap
 
 - [x] **Milestone 0** — Project skeleton: window + Vulkan + clear screen.
-- [ ] **Milestone 1** — Render one greedy-meshed, textured chunk.
+- [x] **Milestone 1** — Render one greedy-meshed, textured chunk.
 - [ ] **Milestone 2** — First-person camera, walking + collision, free-fly.
 - [ ] **Milestone 3** — Procedural multi-chunk noise terrain.
 

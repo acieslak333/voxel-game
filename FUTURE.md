@@ -39,10 +39,23 @@ the current code should make them hard to add. Search the codebase for
   (keyboard/mouse) will attach here or in a dedicated `Input` class in
   Milestone 2; the player controller will consume it.
 
+### World / meshing
+- **`BlockRegistry`** is the single source of truth for block properties and the
+  per-face texture layers. Add a block by adding an id in `Block.h` and one
+  `registerBlock(...)` call — `internTexture()` deduplicates texture layers.
+- **`Chunk::getOrAir`** is the hook for cross-chunk meshing: it currently returns
+  air outside the chunk, but in a multi-chunk world it should sample the
+  neighbouring chunk so faces between chunks are culled (see its `TODO(future)`).
+- **`ChunkMesher`** only handles cube blocks. Non-cube render types (cross,
+  custom model) should be detected via a future `BlockProperties::renderType` and
+  emit their own geometry, bypassing the greedy pass.
+- **`Block::metadata`** is reserved for orientation/state.
+
 ### Application
 - **`App`** constructs subsystems in dependency order. New long-lived systems
   (world, player, asset manager) become members here, constructed after the
-  renderer.
+  renderer. In Milestone 3 the single `ChunkRenderer` chunk + buffers become a
+  collection keyed by chunk coordinate.
 
 ---
 
