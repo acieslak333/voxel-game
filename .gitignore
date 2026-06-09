@@ -1,0 +1,20 @@
+# Build output
+/build/
+/out/
+cmake-build-*/
+
+# Fetched dependencies (pulled by CMake FetchContent at configure time)
+/_deps/
+
+# Compiled shader output (generated at build time)
+*.spv
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*~
+
+# OS cruft
+.DS_Store
+Thumbs.db
