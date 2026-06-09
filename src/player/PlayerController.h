@@ -36,6 +36,11 @@ public:
     // Advance one frame given elapsed time and this frame's input.
     void update(float dt, const InputState& input);
 
+    // Move the player to a new position (clears velocity). Used for spawning /
+    // the debug fly-overview.
+    void teleport(glm::vec3 feet);
+    void setMode(Mode m);
+
     [[nodiscard]] Camera&       camera()       { return camera_; }
     [[nodiscard]] const Camera& camera() const { return camera_; }
     [[nodiscard]] Mode  mode()    const { return mode_; }

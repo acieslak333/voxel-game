@@ -5,12 +5,14 @@ A first-person voxel survival game built from scratch in modern **C++20** with
 generated island; this repository builds that foundation up in small, verifiable
 milestones.
 
-> **Status:** Milestone 2 complete — first-person camera with mouse-look,
-> walking with gravity + AABB collision, jumping, and a free-fly toggle.
+> **Status:** Milestone 3 complete — procedural, multi-chunk terrain from
+> layered noise, with first-person walking + collision over it.
 
-| Greedy-meshed chunk (M1) | First-person, walking on terrain (M2) |
-|---|---|
-| ![chunk](docs/screenshots/milestone1.png) | ![first person](docs/screenshots/milestone2.png) |
+![Procedural terrain, bird's-eye view](docs/screenshots/milestone3_overview.png)
+
+| Greedy-meshed chunk (M1) | First-person (M2) | Walking the terrain (M3) |
+|---|---|---|
+| ![chunk](docs/screenshots/milestone1.png) | ![fp](docs/screenshots/milestone2.png) | ![terrain](docs/screenshots/milestone3_fpv.png) |
 
 ---
 
@@ -110,6 +112,7 @@ folders relative to its own location.
 |---------------------|----------------------------------------------------------|
 | `--frames N`        | Render `N` frames then exit (headless smoke-testing).    |
 | `--screenshot PATH` | Render a few frames, write `PATH` as a PNG, then exit.   |
+| `--flycam`          | Start in free-fly looking down over the whole world.     |
 
 ### Controls
 
@@ -125,8 +128,8 @@ folders relative to its own location.
 
 In **walking** mode the player has gravity and collides with solid blocks
 (stand on, walk into, jump onto). **Free-fly** mode disables both for debugging
-and exploration. The world is still a single hardcoded chunk; procedural
-multi-chunk terrain arrives in Milestone 3.
+and exploration. The player spawns standing on the procedurally generated
+terrain.
 
 In **Debug** builds the Vulkan validation layers are enabled automatically and
 report warnings/errors to the console.
@@ -151,8 +154,8 @@ xvfb-run -a -s "-screen 0 1280x720x24" ./build/bin/voxelgame --screenshot out.pn
 src/
   core/      app, window, input, timing (delta time in the main loop)
   render/    Vulkan: context, swapchain, renderer, pipeline, buffers,
-             texture array, chunk renderer, screenshot
-  world/     block, block registry, chunk, greedy mesher
+             texture array, world renderer, screenshot
+  world/     block, block registry, chunk, greedy mesher, noise, world gen
   player/    camera, player controller (gravity, AABB collision, free-fly)
 shaders/     GLSL (chunk.vert/frag), compiled to SPIR-V at build time
 assets/      textures/  (one solid-colour PNG per block face)
@@ -177,6 +180,19 @@ own.
 - A **block registry** (`world/BlockRegistry`) is the single source of truth for
   block properties and per-face texture layers, and is trivial to extend.
 
+### Procedural terrain (Milestone 3)
+
+- `world/Noise` is a seedable Perlin-noise implementation with `fbm()` (fractal
+  Brownian motion) for natural-looking variation.
+- `world/World` generates a fixed grid of chunks (8 × 3 × 8 by default) from
+  **two** noise layers: one drives the surface **height**, a second drives
+  **material/biome** variation (dirt depth, and grassy vs rocky surfaces).
+- `render/WorldRenderer` greedy-meshes every chunk once and draws each non-empty
+  chunk with its own model-matrix push constant, reusing one pipeline + texture
+  array + per-frame camera UBO.
+- Island shaping and chunk streaming are intentionally deferred — see
+  [`FUTURE.md`](FUTURE.md).
+
 ---
 
 ## Roadmap
@@ -184,7 +200,9 @@ own.
 - [x] **Milestone 0** — Project skeleton: window + Vulkan + clear screen.
 - [x] **Milestone 1** — Render one greedy-meshed, textured chunk.
 - [x] **Milestone 2** — First-person camera, walking + collision, free-fly.
-- [ ] **Milestone 3** — Procedural multi-chunk noise terrain.
+- [x] **Milestone 3** — Procedural multi-chunk noise terrain.
+- [ ] **Later** — island shaping, chunk streaming, inventory, crafting, mobs,
+  custom block models, more survival stats (see `FUTURE.md`).
 
 See [`FUTURE.md`](FUTURE.md) for documented extension points for deferred
 features (inventory, crafting, mobs, custom block models, island shaping, …).
