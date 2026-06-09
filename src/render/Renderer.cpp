@@ -1,9 +1,11 @@
 #include "render/Renderer.h"
 
 #include "core/Window.h"
+#include "render/Screenshot.h"
 #include "render/Swapchain.h"
 #include "render/VulkanContext.h"
 
+#include <array>
 #include <limits>
 #include <stdexcept>
 
@@ -26,6 +28,11 @@ Renderer::~Renderer() {
 
 void Renderer::waitIdle() const {
     vkDeviceWaitIdle(ctx_.device());
+}
+
+void Renderer::saveScreenshot(const std::string& path) const {
+    screenshot::saveImage(ctx_, swapchain_.image(lastImageIndex_),
+                          swapchain_.imageFormat(), swapchain_.extent(), path);
 }
 
 void Renderer::createCommandPool() {
@@ -107,8 +114,10 @@ void Renderer::recordCommandBuffer(VkCommandBuffer cmd, uint32_t imageIndex,
         throw std::runtime_error("Failed to begin recording command buffer");
     }
 
-    VkClearValue clearValue{};
-    clearValue.color = {{clearColor_[0], clearColor_[1], clearColor_[2], clearColor_[3]}};
+    // Two attachments to clear: colour (index 0) and depth (index 1).
+    std::array<VkClearValue, 2> clearValues{};
+    clearValues[0].color        = {{clearColor_[0], clearColor_[1], clearColor_[2], clearColor_[3]}};
+    clearValues[1].depthStencil = {1.0f, 0}; // far plane
 
     VkRenderPassBeginInfo rpInfo{};
     rpInfo.sType             = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
@@ -116,15 +125,16 @@ void Renderer::recordCommandBuffer(VkCommandBuffer cmd, uint32_t imageIndex,
     rpInfo.framebuffer       = swapchain_.framebuffer(imageIndex);
     rpInfo.renderArea.offset = {0, 0};
     rpInfo.renderArea.extent = swapchain_.extent();
-    rpInfo.clearValueCount   = 1;
-    rpInfo.pClearValues      = &clearValue;
+    rpInfo.clearValueCount   = static_cast<uint32_t>(clearValues.size());
+    rpInfo.pClearValues      = clearValues.data();
 
     vkCmdBeginRenderPass(cmd, &rpInfo, VK_SUBPASS_CONTENTS_INLINE);
 
     // Hand control to the scene to draw whatever geometry it has. In Milestone 0
-    // this is empty, so the frame is just the cleared background.
+    // this is empty, so the frame is just the cleared background. The scene gets
+    // the frame-in-flight index for selecting per-frame resources.
     if (recordScene) {
-        recordScene(cmd, imageIndex, swapchain_.extent());
+        recordScene(cmd, currentFrame_, swapchain_.extent());
     }
 
     vkCmdEndRenderPass(cmd);
@@ -155,6 +165,7 @@ void Renderer::drawFrame(const RecordFn& recordScene) {
     if (acquire != VK_SUCCESS && acquire != VK_SUBOPTIMAL_KHR) {
         throw std::runtime_error("Failed to acquire swapchain image");
     }
+    lastImageIndex_ = imageIndex; // remember for screenshots
 
     // 3. If a previous frame is still using this image, wait for it.
     if (imagesInFlight_[imageIndex] != VK_NULL_HANDLE) {

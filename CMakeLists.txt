@@ -110,6 +110,79 @@ else()
 endif()
 
 # -----------------------------------------------------------------------------
+#  GLSL -> SPIR-V shader compiler
+#    1. Prefer a compiler already on the system (glslc or glslangValidator —
+#       both ship with the Vulkan SDK).
+#    2. Otherwise build glslang from source so the project is fully
+#       self-contained (no SDK required just to compile shaders).
+# -----------------------------------------------------------------------------
+find_program(GLSLC_EXE       NAMES glslc)
+find_program(GLSLANG_EXE     NAMES glslangValidator)
+
+set(SHADER_COMPILER_DEP "")   # build dependency, if we build the compiler
+if(GLSLC_EXE)
+    set(SHADER_COMPILER "${GLSLC_EXE}")
+    set(SHADER_COMPILER_STYLE "glslc")
+    message(STATUS "Shader compiler: ${GLSLC_EXE} (glslc)")
+elseif(GLSLANG_EXE)
+    set(SHADER_COMPILER "${GLSLANG_EXE}")
+    set(SHADER_COMPILER_STYLE "glslang")
+    message(STATUS "Shader compiler: ${GLSLANG_EXE} (glslangValidator)")
+else()
+    message(STATUS "No system GLSL compiler found; building glslang from source")
+    set(GLSLANG_TESTS            OFF CACHE BOOL "" FORCE)
+    set(GLSLANG_ENABLE_INSTALL   OFF CACHE BOOL "" FORCE)
+    set(ENABLE_GLSLANG_BINARIES  ON  CACHE BOOL "" FORCE) # we need the executable
+    set(ENABLE_SPVREMAPPER       OFF CACHE BOOL "" FORCE)
+    set(ENABLE_HLSL              OFF CACHE BOOL "" FORCE)
+    set(ENABLE_OPT               OFF CACHE BOOL "" FORCE) # avoids needing SPIRV-Tools
+    set(BUILD_TESTING            OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(
+        glslang
+        GIT_REPOSITORY https://github.com/KhronosGroup/glslang.git
+        GIT_TAG        vulkan-sdk-1.3.275.0
+        GIT_SHALLOW    TRUE
+    )
+    FetchContent_MakeAvailable(glslang)
+    if(TARGET glslang-standalone)
+        set(SHADER_COMPILER "$<TARGET_FILE:glslang-standalone>")
+        set(SHADER_COMPILER_DEP glslang-standalone)
+    elseif(TARGET glslangValidator)
+        set(SHADER_COMPILER "$<TARGET_FILE:glslangValidator>")
+        set(SHADER_COMPILER_DEP glslangValidator)
+    else()
+        message(FATAL_ERROR "glslang was built but no standalone compiler target was found")
+    endif()
+    set(SHADER_COMPILER_STYLE "glslang")
+endif()
+
+# Compile a shader from shaders/<name> to <bin>/shaders/<name>.spv at build time.
+set(SHADER_OUTPUT_DIR "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/shaders")
+file(MAKE_DIRECTORY "${SHADER_OUTPUT_DIR}")
+set(SPIRV_OUTPUTS "")
+function(add_shader SHADER)
+    set(src "${CMAKE_CURRENT_SOURCE_DIR}/shaders/${SHADER}")
+    set(out "${SHADER_OUTPUT_DIR}/${SHADER}.spv")
+    if(SHADER_COMPILER_STYLE STREQUAL "glslc")
+        set(cmd "${SHADER_COMPILER}" "${src}" -o "${out}")
+    else() # glslang/glslangValidator: -V emits Vulkan SPIR-V (stage from extension)
+        set(cmd "${SHADER_COMPILER}" -V "${src}" -o "${out}")
+    endif()
+    add_custom_command(
+        OUTPUT  "${out}"
+        COMMAND ${cmd}
+        DEPENDS "${src}" ${SHADER_COMPILER_DEP}
+        COMMENT "Compiling shader ${SHADER}"
+        VERBATIM
+    )
+    set(SPIRV_OUTPUTS ${SPIRV_OUTPUTS} "${out}" PARENT_SCOPE)
+endfunction()
+
+add_shader(chunk.vert)
+add_shader(chunk.frag)
+add_custom_target(shaders DEPENDS ${SPIRV_OUTPUTS})
+
+# -----------------------------------------------------------------------------
 #  The game executable
 # -----------------------------------------------------------------------------
 add_executable(voxelgame
@@ -119,15 +192,39 @@ add_executable(voxelgame
     src/render/VulkanContext.cpp
     src/render/Swapchain.cpp
     src/render/Renderer.cpp
+    src/render/VulkanUtils.cpp
+    src/render/Buffer.cpp
+    src/render/TextureArray.cpp
+    src/render/Pipeline.cpp
+    src/render/ChunkRenderer.cpp
+    src/render/Screenshot.cpp
+    src/world/BlockRegistry.cpp
+    src/world/ChunkMesher.cpp
 )
+add_dependencies(voxelgame shaders)
 
-target_include_directories(voxelgame PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_include_directories(voxelgame PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/stb
+)
 
 target_link_libraries(voxelgame PRIVATE
     glfw
     glm::glm
     Vulkan::Headers
     ${VULKAN_LOADER_LIB}
+)
+
+# Copy runtime assets (textures) next to the executable so VG_ASSET_DIR resolves.
+add_custom_command(TARGET voxelgame POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_CURRENT_SOURCE_DIR}/assets" "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/assets"
+    COMMENT "Copying assets")
+
+# Tell the program where its compiled shaders and assets live.
+target_compile_definitions(voxelgame PRIVATE
+    VG_SHADER_DIR="${SHADER_OUTPUT_DIR}"
+    VG_ASSET_DIR="${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/assets"
 )
 
 # Helpful warnings; GLM wants the radians/depth-zero-to-one conventions defined

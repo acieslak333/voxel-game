@@ -2,6 +2,7 @@
 
 #include "core/Window.h"
 #include "render/VulkanContext.h"
+#include "render/VulkanUtils.h"
 
 #include <algorithm>
 #include <array>
@@ -59,6 +60,11 @@ void Swapchain::create() {
     createInfo.imageExtent      = extent;
     createInfo.imageArrayLayers = 1;
     createInfo.imageUsage       = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    // Also allow copying out of the images (used by the screenshot path), but
+    // only if the surface supports it.
+    if (support.capabilities.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) {
+        createInfo.imageUsage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    }
 
     // If the graphics and present queues differ, the swapchain images must be
     // shared between them (CONCURRENT). Otherwise EXCLUSIVE is faster.
@@ -92,6 +98,20 @@ void Swapchain::create() {
     extent_      = extent;
 
     createImageViews();
+    createDepthResources();
+}
+
+void Swapchain::createDepthResources() {
+    depthFormat_ = vkutil::findDepthFormat(ctx_.physicalDevice());
+
+    vkutil::createImage(ctx_, extent_.width, extent_.height, /*arrayLayers*/ 1,
+                        depthFormat_, VK_IMAGE_TILING_OPTIMAL,
+                        VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+                        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, depthImage_, depthMemory_);
+
+    depthView_ = vkutil::createImageView(ctx_.device(), depthImage_, depthFormat_,
+                                         VK_IMAGE_ASPECT_DEPTH_BIT,
+                                         VK_IMAGE_VIEW_TYPE_2D, /*layerCount*/ 1);
 }
 
 void Swapchain::createImageViews() {
@@ -133,25 +153,45 @@ void Swapchain::createRenderPass() {
     colorRef.attachment = 0;
     colorRef.layout     = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
-    VkSubpassDescription subpass{};
-    subpass.pipelineBindPoint    = VK_PIPELINE_BIND_POINT_GRAPHICS;
-    subpass.colorAttachmentCount = 1;
-    subpass.pColorAttachments    = &colorRef;
+    // Depth attachment: cleared each frame, not stored (we never read it back).
+    VkAttachmentDescription depthAttachment{};
+    depthAttachment.format         = depthFormat_;
+    depthAttachment.samples        = VK_SAMPLE_COUNT_1_BIT;
+    depthAttachment.loadOp         = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    depthAttachment.storeOp        = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    depthAttachment.stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    depthAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    depthAttachment.initialLayout  = VK_IMAGE_LAYOUT_UNDEFINED;
+    depthAttachment.finalLayout    = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
-    // Make the subpass wait for the swapchain image to be available before it
-    // writes colour, and ensure the write is visible to presentation.
+    VkAttachmentReference depthRef{};
+    depthRef.attachment = 1;
+    depthRef.layout     = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+    VkSubpassDescription subpass{};
+    subpass.pipelineBindPoint       = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    subpass.colorAttachmentCount    = 1;
+    subpass.pColorAttachments       = &colorRef;
+    subpass.pDepthStencilAttachment = &depthRef;
+
+    // Wait for the swapchain image to be available before writing colour, and
+    // synchronise depth so the clear/test does not race a previous frame.
     VkSubpassDependency dependency{};
     dependency.srcSubpass    = VK_SUBPASS_EXTERNAL;
     dependency.dstSubpass    = 0;
-    dependency.srcStageMask  = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    dependency.srcStageMask  = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
+                               VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
     dependency.srcAccessMask = 0;
-    dependency.dstStageMask  = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    dependency.dstStageMask  = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
+                               VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+    dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
+                               VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
 
+    std::array<VkAttachmentDescription, 2> attachments = {colorAttachment, depthAttachment};
     VkRenderPassCreateInfo info{};
     info.sType           = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-    info.attachmentCount = 1;
-    info.pAttachments    = &colorAttachment;
+    info.attachmentCount = static_cast<uint32_t>(attachments.size());
+    info.pAttachments    = attachments.data();
     info.subpassCount    = 1;
     info.pSubpasses      = &subpass;
     info.dependencyCount = 1;
@@ -165,12 +205,13 @@ void Swapchain::createRenderPass() {
 void Swapchain::createFramebuffers() {
     framebuffers_.resize(imageViews_.size());
     for (size_t i = 0; i < imageViews_.size(); ++i) {
-        VkImageView attachments[] = { imageViews_[i] };
+        // The depth view is shared across all framebuffers (attachment index 1).
+        VkImageView attachments[] = { imageViews_[i], depthView_ };
 
         VkFramebufferCreateInfo info{};
         info.sType           = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
         info.renderPass      = renderPass_;
-        info.attachmentCount = 1;
+        info.attachmentCount = 2;
         info.pAttachments    = attachments;
         info.width           = extent_.width;
         info.height          = extent_.height;
@@ -184,6 +225,11 @@ void Swapchain::createFramebuffers() {
 
 void Swapchain::cleanupSizeDependent() {
     VkDevice device = ctx_.device();
+
+    if (depthView_)  { vkDestroyImageView(device, depthView_, nullptr); depthView_ = VK_NULL_HANDLE; }
+    if (depthImage_) { vkDestroyImage(device, depthImage_, nullptr);    depthImage_ = VK_NULL_HANDLE; }
+    if (depthMemory_){ vkFreeMemory(device, depthMemory_, nullptr);     depthMemory_ = VK_NULL_HANDLE; }
+
     for (VkFramebuffer fb : framebuffers_) {
         vkDestroyFramebuffer(device, fb, nullptr);
     }

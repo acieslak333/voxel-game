@@ -41,13 +41,15 @@ public:
         return static_cast<uint32_t>(images_.size());
     }
     [[nodiscard]] VkFramebuffer  framebuffer(uint32_t i) const { return framebuffers_[i]; }
+    [[nodiscard]] VkImage        image(uint32_t i)       const { return images_[i]; }
 
 private:
-    void create();              // swapchain + image views + framebuffers
+    void create();              // swapchain + image views + depth + framebuffers
     void createRenderPass();    // once, in the constructor
-    void cleanupSizeDependent(); // framebuffers + image views + swapchain
+    void cleanupSizeDependent(); // framebuffers + depth + image views + swapchain
 
     void createImageViews();
+    void createDepthResources();
     void createFramebuffers();
 
     VkSurfaceFormatKHR chooseSurfaceFormat(const std::vector<VkSurfaceFormatKHR>&) const;
@@ -62,6 +64,13 @@ private:
     std::vector<VkImageView>   imageViews_;
     std::vector<VkFramebuffer> framebuffers_;
     VkRenderPass               renderPass_ = VK_NULL_HANDLE;
+
+    // Shared depth buffer (single attachment reused for every framebuffer; fine
+    // because only one frame writes depth at a time). Recreated on resize.
+    VkImage        depthImage_  = VK_NULL_HANDLE;
+    VkDeviceMemory depthMemory_ = VK_NULL_HANDLE;
+    VkImageView    depthView_   = VK_NULL_HANDLE;
+    VkFormat       depthFormat_ = VK_FORMAT_UNDEFINED;
 
     VkFormat   imageFormat_ = VK_FORMAT_UNDEFINED;
     VkExtent2D extent_{};

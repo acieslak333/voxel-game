@@ -68,11 +68,18 @@ public:
     [[nodiscard]] uint32_t findMemoryType(uint32_t typeFilter,
                                           VkMemoryPropertyFlags properties) const;
 
+    // Allocate + begin a primary command buffer for a one-off operation (buffer
+    // copies, image layout transitions). Pair with endSingleTimeCommands, which
+    // submits it and blocks until it has finished.
+    [[nodiscard]] VkCommandBuffer beginSingleTimeCommands() const;
+    void endSingleTimeCommands(VkCommandBuffer cmd) const;
+
 private:
     void createInstance();
     void setupDebugMessenger();
     void pickPhysicalDevice();
     void createLogicalDevice();
+    void createTransientCommandPool();
 
     QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device) const;
     bool isDeviceSuitable(VkPhysicalDevice device) const;
@@ -89,6 +96,9 @@ private:
 
     VkQueue graphicsQueue_ = VK_NULL_HANDLE;
     VkQueue presentQueue_  = VK_NULL_HANDLE;
+
+    // Small pool for short-lived one-off command buffers (staging copies, etc.).
+    VkCommandPool transientPool_ = VK_NULL_HANDLE;
 
     QueueFamilyIndices queueFamilies_;
 

@@ -110,10 +110,14 @@ VulkanContext::VulkanContext(const Window& window) : window_(window) {
     surface_ = window_.createSurface(instance_);
     pickPhysicalDevice();
     createLogicalDevice();
+    createTransientCommandPool();
 }
 
 VulkanContext::~VulkanContext() {
     // Tear down in reverse creation order.
+    if (transientPool_) {
+        vkDestroyCommandPool(device_, transientPool_, nullptr);
+    }
     if (device_) {
         vkDestroyDevice(device_, nullptr);
     }
@@ -317,6 +321,49 @@ SwapChainSupportDetails VulkanContext::querySwapChainSupport(VkPhysicalDevice de
                                               details.presentModes.data());
 
     return details;
+}
+
+void VulkanContext::createTransientCommandPool() {
+    VkCommandPoolCreateInfo info{};
+    info.sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    info.flags            = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
+    info.queueFamilyIndex = queueFamilies_.graphics.value();
+    if (vkCreateCommandPool(device_, &info, nullptr, &transientPool_) != VK_SUCCESS) {
+        throw std::runtime_error("Failed to create transient command pool");
+    }
+}
+
+VkCommandBuffer VulkanContext::beginSingleTimeCommands() const {
+    VkCommandBufferAllocateInfo alloc{};
+    alloc.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    alloc.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    alloc.commandPool        = transientPool_;
+    alloc.commandBufferCount = 1;
+
+    VkCommandBuffer cmd = VK_NULL_HANDLE;
+    vkAllocateCommandBuffers(device_, &alloc, &cmd);
+
+    VkCommandBufferBeginInfo begin{};
+    begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vkBeginCommandBuffer(cmd, &begin);
+    return cmd;
+}
+
+void VulkanContext::endSingleTimeCommands(VkCommandBuffer cmd) const {
+    vkEndCommandBuffer(cmd);
+
+    VkSubmitInfo submit{};
+    submit.sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit.commandBufferCount = 1;
+    submit.pCommandBuffers    = &cmd;
+
+    // Simplicity over throughput: submit and wait for the GPU to finish. These
+    // are one-off setup operations, not per-frame work.
+    vkQueueSubmit(graphicsQueue_, 1, &submit, VK_NULL_HANDLE);
+    vkQueueWaitIdle(graphicsQueue_);
+
+    vkFreeCommandBuffers(device_, transientPool_, 1, &cmd);
 }
 
 uint32_t VulkanContext::findMemoryType(uint32_t typeFilter,
