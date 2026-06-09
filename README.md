@@ -5,10 +5,12 @@ A first-person voxel survival game built from scratch in modern **C++20** with
 generated island; this repository builds that foundation up in small, verifiable
 milestones.
 
-> **Status:** Milestone 1 complete — a textured, greedy-meshed 16×16×16 chunk
-> rendered in 3D.
+> **Status:** Milestone 2 complete — first-person camera with mouse-look,
+> walking with gravity + AABB collision, jumping, and a free-fly toggle.
 
-![A greedy-meshed, textured chunk](docs/screenshots/milestone1.png)
+| Greedy-meshed chunk (M1) | First-person, walking on terrain (M2) |
+|---|---|
+| ![chunk](docs/screenshots/milestone1.png) | ![first person](docs/screenshots/milestone2.png) |
 
 ---
 
@@ -109,8 +111,22 @@ folders relative to its own location.
 | `--frames N`        | Render `N` frames then exit (headless smoke-testing).    |
 | `--screenshot PATH` | Render a few frames, write `PATH` as a PNG, then exit.   |
 
-Milestone 1 renders a single hardcoded chunk (stone / dirt / grass layers) from
-a fixed 3/4 view. Interactive camera controls arrive in Milestone 2.
+### Controls
+
+| Input            | Action                                            |
+|------------------|---------------------------------------------------|
+| Mouse            | Look around                                        |
+| `W` `A` `S` `D`  | Move                                               |
+| `Space`          | Jump (walking) / ascend (free-fly)                |
+| `Left Ctrl`      | Descend (free-fly)                                |
+| `Left Shift`     | Sprint                                             |
+| `F`              | Toggle walking / free-fly                          |
+| `Esc`            | Quit                                               |
+
+In **walking** mode the player has gravity and collides with solid blocks
+(stand on, walk into, jump onto). **Free-fly** mode disables both for debugging
+and exploration. The world is still a single hardcoded chunk; procedural
+multi-chunk terrain arrives in Milestone 3.
 
 In **Debug** builds the Vulkan validation layers are enabled automatically and
 report warnings/errors to the console.
@@ -133,11 +149,11 @@ xvfb-run -a -s "-screen 0 1280x720x24" ./build/bin/voxelgame --screenshot out.pn
 
 ```
 src/
-  core/      app, window, (input & timing later)
+  core/      app, window, input, timing (delta time in the main loop)
   render/    Vulkan: context, swapchain, renderer, pipeline, buffers,
              texture array, chunk renderer, screenshot
   world/     block, block registry, chunk, greedy mesher
-  player/    camera, controller                   (Milestone 2)
+  player/    camera, player controller (gravity, AABB collision, free-fly)
 shaders/     GLSL (chunk.vert/frag), compiled to SPIR-V at build time
 assets/      textures/  (one solid-colour PNG per block face)
 third_party/ vendored single-header libs (stb_image)
@@ -167,7 +183,7 @@ own.
 
 - [x] **Milestone 0** — Project skeleton: window + Vulkan + clear screen.
 - [x] **Milestone 1** — Render one greedy-meshed, textured chunk.
-- [ ] **Milestone 2** — First-person camera, walking + collision, free-fly.
+- [x] **Milestone 2** — First-person camera, walking + collision, free-fly.
 - [ ] **Milestone 3** — Procedural multi-chunk noise terrain.
 
 See [`FUTURE.md`](FUTURE.md) for documented extension points for deferred

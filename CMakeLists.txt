@@ -189,6 +189,7 @@ add_executable(voxelgame
     src/main.cpp
     src/core/Window.cpp
     src/core/App.cpp
+    src/core/Input.cpp
     src/render/VulkanContext.cpp
     src/render/Swapchain.cpp
     src/render/Renderer.cpp
@@ -200,6 +201,8 @@ add_executable(voxelgame
     src/render/Screenshot.cpp
     src/world/BlockRegistry.cpp
     src/world/ChunkMesher.cpp
+    src/player/Camera.cpp
+    src/player/PlayerController.cpp
 )
 add_dependencies(voxelgame shaders)
 

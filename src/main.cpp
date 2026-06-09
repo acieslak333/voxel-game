@@ -22,7 +22,7 @@ int main(int argc, char** argv) {
         } else if (std::strcmp(argv[i], "--screenshot") == 0 && i + 1 < argc) {
             screenshotPath = argv[++i];
             if (maxFrames < 0) {
-                maxFrames = 2; // render a couple of frames then capture
+                maxFrames = 120; // let physics settle, then capture
             }
         } else {
             std::cerr << "Unknown argument: " << argv[i] << '\n';
