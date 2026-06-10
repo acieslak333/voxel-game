@@ -120,6 +120,9 @@ public:
     // Streaming knobs the renderer/app need (read from the world config).
     [[nodiscard]] bool streaming()    const { return config_.streaming; }
     [[nodiscard]] int  streamWorkers() const { return config_.streamWorkers; }
+    // Per-seed persistence directory (<saveDir>/<seed>), or empty when persistence
+    // is off. The same folder that holds saved chunks; the player save lives here.
+    [[nodiscard]] const std::string& savePath() const { return savePath_; }
     // Async streaming: relight the streamed-in edge on a background thread so the
     // main thread never blocks on the light flood (the residual streaming spike).
     [[nodiscard]] bool streamAsync()  const { return config_.streaming && config_.asyncStreaming; }

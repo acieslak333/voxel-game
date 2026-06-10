@@ -55,6 +55,13 @@ private:
     // No-op in creative. Health regen/fall damage live in PlayerController.
     void updateSurvival(float dt);
 
+    // Player persistence (ISSUES #13K): position/look/health/inventory/game-mode to
+    // <world save dir>/player.dat, next to the saved chunks. No-op when persistence
+    // is off (non-streaming world). loadPlayer() returns false if there's nothing to
+    // restore, so the caller keeps the default spawn + starter kit.
+    void savePlayer() const;
+    bool loadPlayer();
+
     // Simple liquid flow (water & lava): drain a budget of queued liquid cells,
     // spreading them down then sideways (decaying distance in Block::metadata, no
     // recede). Event-driven — editBlocks seeds the queue around any edit. Mutates

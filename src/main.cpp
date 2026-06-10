@@ -1,4 +1,5 @@
 #include "core/App.h"
+#include "player/PlayerSave.h"
 #include "world/BlockRegistry.h"
 #include "world/TerrainGenerator.h"
 #include "world/World.h"
@@ -360,6 +361,22 @@ int runLogicTest(const std::string& assetDir) {
         pc.setInvulnerable(true);
         pc.damage(50.0f);
         check(near(pc.health(), 50.0f), "invulnerable ignores damage");
+
+        // Player save: serialize -> deserialize round-trips all fields.
+        vg::PlayerSave save;
+        save.feet = glm::vec3(12.5f, 70.0f, -8.25f);
+        save.yaw = 45.0f; save.pitch = -12.0f; save.health = 63.0f;
+        save.selected = 3; save.creative = false;
+        save.slots = {{stone, 64}, {pick, 1}, {0, 0}, {dirt, 12}};
+        const std::vector<uint8_t> bytes = save.serialize();
+        vg::PlayerSave back;
+        check(back.deserialize(bytes.data(), bytes.size()), "player save parses");
+        check(back.feet == save.feet && near(back.yaw, 45.0f) && near(back.health, 63.0f) &&
+              back.selected == 3 && back.creative == false && back.slots == save.slots,
+              "player save round-trips all fields");
+        vg::PlayerSave bad;
+        const uint8_t junk[8] = {1, 2, 3, 4, 5, 6, 7, 8};
+        check(!bad.deserialize(junk, sizeof junk), "corrupt player save is rejected");
     } catch (const std::exception& e) {
         std::cerr << "[logic] FAIL: exception: " << e.what() << '\n';
         return EXIT_FAILURE;

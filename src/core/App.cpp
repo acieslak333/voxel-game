@@ -1,6 +1,7 @@
 #include "core/App.h"
 
 #include "core/Ui.h"
+#include "player/PlayerSave.h"
 #include "world/Raycast.h"
 
 #include <glm/gtc/matrix_transform.hpp>
@@ -9,6 +10,9 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <cstdlib>
 #include <iterator>
@@ -106,6 +110,10 @@ App::App()
         give("oak_leaves", 16);
         give("glowstone", 8);
     }
+
+    // Restore a saved player (position/look/health/inventory/mode) if one exists for
+    // this world, overriding the default spawn + starter kit above. No-op otherwise.
+    loadPlayer();
 
     // Push the loaded settings to every subsystem (pixelate, lighting, FOV, …).
     applySettings();
@@ -318,6 +326,63 @@ void App::updateSurvival(float dt) {
         player_.teleport(spawnFeet_);
         player_.setHealth(player_.maxHealth());
     }
+}
+
+void App::savePlayer() const {
+    const std::string& dir = world_.savePath();
+    if (dir.empty()) {
+        return; // persistence off (non-streaming world)
+    }
+    PlayerSave ps;
+    ps.feet     = player_.feetPosition();
+    ps.yaw      = player_.camera().yaw;
+    ps.pitch    = player_.camera().pitch;
+    ps.health   = player_.health();
+    ps.selected = player_.inventory().selected();
+    ps.creative = creativeMode_;
+    ps.slots.reserve(Inventory::kSlots);
+    for (int i = 0; i < Inventory::kSlots; ++i) {
+        const ItemStack& s = player_.inventory().slot(i);
+        ps.slots.emplace_back(s.blockId, s.count);
+    }
+    const std::vector<uint8_t> bytes = ps.serialize();
+    std::ofstream f(dir + "/player.dat", std::ios::binary | std::ios::trunc);
+    if (f) f.write(reinterpret_cast<const char*>(bytes.data()),
+                   static_cast<std::streamsize>(bytes.size()));
+}
+
+bool App::loadPlayer() {
+    const std::string& dir = world_.savePath();
+    if (dir.empty()) return false;
+    std::ifstream f(dir + "/player.dat", std::ios::binary);
+    if (!f) return false;
+    const std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(f)),
+                                     std::istreambuf_iterator<char>());
+    PlayerSave ps;
+    if (!ps.deserialize(bytes.data(), bytes.size())) {
+        return false; // missing / corrupt / wrong version: keep the default spawn
+    }
+
+    Inventory& inv = player_.inventory();
+    const uint16_t blockCount = world_.registry().blockCount();
+    for (int i = 0; i < Inventory::kSlots; ++i) {
+        ItemStack s;
+        if (i < static_cast<int>(ps.slots.size())) {
+            s.blockId = ps.slots[static_cast<size_t>(i)].first;
+            s.count   = ps.slots[static_cast<size_t>(i)].second;
+            if (s.blockId >= blockCount) s.clear(); // a removed block id: drop it
+        }
+        inv.slot(i) = s;
+    }
+
+    player_.teleport(ps.feet);
+    player_.camera().yaw = ps.yaw;
+    player_.camera().pitch = ps.pitch;
+    player_.setHealth(ps.health);
+    inv.setSelected(ps.selected);
+    creativeMode_ = ps.creative;
+    player_.setInvulnerable(creativeMode_);
+    return true;
 }
 
 void App::seedLiquid(int x, int y, int z) {
@@ -650,6 +715,7 @@ void App::run(long maxFrames, const std::string& screenshotPath) {
     renderer_.waitIdle();
 
     settings_.save(settingsPath()); // persist on exit (e.g. via the Exit button)
+    savePlayer();                   // persist position/health/inventory next to chunks
 
     if (!screenshotPath.empty()) {
         renderer_.saveScreenshot(screenshotPath);

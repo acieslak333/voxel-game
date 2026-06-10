@@ -50,6 +50,9 @@ public:
     [[nodiscard]] const Camera& camera() const { return camera_; }
     [[nodiscard]] Mode  mode()    const { return mode_; }
     [[nodiscard]] bool  onGround() const { return onGround_; }
+    // Bottom-centre of the player AABB (the teleport/spawn reference point). Used by
+    // the player save so position survives a quit/reload.
+    [[nodiscard]] glm::vec3 feetPosition() const { return feet_; }
 
     // --- Health / damage (ISSUES #13B; no hunger) --------------------------
     [[nodiscard]] float health()    const { return health_; }
