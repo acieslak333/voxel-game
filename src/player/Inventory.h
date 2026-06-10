@@ -61,6 +61,12 @@ public:
     // the slot was empty (nothing to place).
     uint16_t takeFromSelected();
 
+    // Total number of `blockId` held across every slot (for crafting requirements).
+    [[nodiscard]] int count(uint16_t blockId) const;
+    // Remove `n` of `blockId` across slots (hotbar first). Returns the number that
+    // could NOT be removed (0 = all removed). Used to pay a crafting recipe's inputs.
+    int remove(uint16_t blockId, int n);
+
 private:
     std::array<ItemStack, kSlots> slots_{};
     int selected_ = 0;

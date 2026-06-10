@@ -6,6 +6,7 @@
 #include "core/Palette.h"
 #include "core/Settings.h"
 #include "core/Window.h"
+#include "player/Crafting.h"
 #include "player/PlayerController.h"
 #include "render/Renderer.h"
 #include "render/SkyRenderer.h"
@@ -75,6 +76,9 @@ private:
     // Full inventory screen (E): the backpack grid + hotbar row, with click-to-move
     // between slots via a mouse-held cursor stack.
     void buildInventory(class Ui& ui, float w, float h, const InputState& in);
+    // Terraria-style crafting list beside the inventory: the recipes craftable from
+    // the current inventory, click an output to craft one. (ISSUES #13B)
+    void buildCrafting(class Ui& ui, float x, float y, float w, const InputState& in);
     void buildMenu(class Ui& ui, float px, float py, float pw, float ph); // Esc menu column
     // Second column: live atmosphere tuning (clouds/fog/weather/sky). Ephemeral.
     void buildTuning(class Ui& ui, float px, float py, float pw, float ph);
@@ -124,6 +128,7 @@ private:
     UiRenderer       ui_;        // 2D HUD/menu renderer (after renderer_)
     Input            input_;
     PlayerController  player_;
+    Crafting          crafting_; // data-driven recipe list (assets/recipes.yaml)
 
     // UI state.
     bool             paused_ = false;        // escape menu open

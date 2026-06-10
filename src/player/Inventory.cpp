@@ -34,6 +34,28 @@ int Inventory::add(uint16_t blockId, int count) {
     return remaining; // 0 = everything fit
 }
 
+int Inventory::count(uint16_t blockId) const {
+    if (blockId == 0) return 0;
+    int total = 0;
+    for (const ItemStack& s : slots_) {
+        if (s.blockId == blockId) total += s.count;
+    }
+    return total;
+}
+
+int Inventory::remove(uint16_t blockId, int n) {
+    if (blockId == 0 || n <= 0) return n > 0 ? n : 0;
+    for (int i = 0; i < kSlots && n > 0; ++i) {
+        ItemStack& s = slots_[static_cast<size_t>(i)];
+        if (s.blockId != blockId) continue;
+        const int take = n < s.count ? n : s.count;
+        s.count = static_cast<uint16_t>(s.count - take);
+        n -= take;
+        if (s.count == 0) s.clear();
+    }
+    return n; // 0 = removed everything requested
+}
+
 uint16_t Inventory::takeFromSelected() {
     ItemStack& s = slots_[static_cast<size_t>(selected_)];
     if (s.empty()) {

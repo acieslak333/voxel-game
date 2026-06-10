@@ -73,7 +73,8 @@ App::App()
           std::string(VG_ASSET_DIR) + "/fonts/ari/" + settings_.font, 32.0f,
           worldRenderer_.blockTextureView(), worldRenderer_.blockTextureSampler()),
       input_(window_),
-      player_(glm::vec3(0.0f)) {
+      player_(glm::vec3(0.0f)),
+      crafting_(std::string(VG_ASSET_DIR) + "/recipes.yaml", world_.registry()) {
     // Spawn standing on the surface at the centre of the world.
     const int cx = world_.sizeInBlocks().x / 2;
     const int cz = world_.sizeInBlocks().z / 2;
@@ -1011,6 +1012,9 @@ void App::buildInventory(Ui& ui, float w, float h, const InputState& in) {
         cell(c, gridX + c * (slot + gap), hotY);
     }
 
+    // Crafting list panel, just to the right of the inventory.
+    buildCrafting(ui, px + panelW + 18.0f, py, 250.0f, in);
+
     // The cursor-held stack follows the mouse (icon only, no frame).
     if (!cursorStack_.empty()) {
         ui.isoCube(in.cursor.x, in.cursor.y, 22.0f,
@@ -1020,6 +1024,44 @@ void App::buildInventory(Ui& ui, float w, float h, const InputState& in) {
             ui.labelCentered(in.cursor.x + 16.0f, in.cursor.y + 12.0f,
                              std::to_string(cursorStack_.count), 0.5f, kCream);
         }
+    }
+}
+
+void App::buildCrafting(Ui& ui, float x, float y, float w, const InputState& in) {
+    const BlockRegistry& reg = world_.registry();
+    Inventory& inv = player_.inventory();
+    const std::vector<int> can = crafting_.craftable(inv);
+
+    const float pad = 16.0f, rowH = 46.0f, titleH = 28.0f;
+    const int   shown = std::min(static_cast<int>(can.size()), 8); // cap the visible list
+    const float panelH = titleH + 2.0f * pad +
+                         (shown > 0 ? shown * rowH : rowH);
+    ui.frame(x, y, w, panelH, kPanelFill, kCream, kFrameThick, kFrameRadius);
+    ui.label(x + pad, y + pad - 4.0f, "Crafting", 0.6f, kUiText);
+
+    if (can.empty()) {
+        ui.label(x + pad, y + pad + titleH + 4.0f, "(nothing to craft)", 0.42f, kUiText);
+        return;
+    }
+
+    const float rx = x + pad, rw = w - 2.0f * pad;
+    float ry = y + pad + titleH;
+    for (int i = 0; i < shown; ++i) {
+        const Crafting::Recipe& r = crafting_.recipes()[static_cast<size_t>(can[static_cast<size_t>(i)])];
+        // Row background highlights on hover; clicking anywhere on it crafts one.
+        const bool hov = ui.hovered(rx, ry, rw, rowH - 8.0f);
+        ui.roundRect(rx, ry, rw, rowH - 8.0f, 8.0f, hov ? kCream : kCharcoal);
+        const float iconR = 15.0f;
+        ui.isoCube(rx + iconR + 6.0f, ry + (rowH - 8.0f) * 0.5f, iconR,
+                   reg.faceLayer(r.output, FacePosY), reg.faceLayer(r.output, FacePosX));
+        const glm::vec4 txt = hov ? kCharcoal : kCream;
+        std::string label = r.name;
+        if (r.outCount > 1) label += " x" + std::to_string(r.outCount);
+        ui.label(rx + 2.0f * iconR + 14.0f, ry + 6.0f, label, 0.46f, txt);
+        if (hov && in.pointerPressed) {
+            Crafting::craft(r, inv);
+        }
+        ry += rowH;
     }
 }
 

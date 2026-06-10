@@ -242,6 +242,7 @@ add_executable(voxelgame
     src/player/Camera.cpp
     src/player/PlayerController.cpp
     src/player/Inventory.cpp
+    src/player/Crafting.cpp
 )
 add_dependencies(voxelgame shaders)
 

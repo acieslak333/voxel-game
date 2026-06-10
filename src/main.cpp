@@ -1,5 +1,7 @@
 #include "core/App.h"
+#include "player/Crafting.h"
 #include "player/PlayerSave.h"
+
 #include "world/BlockRegistry.h"
 #include "world/TerrainGenerator.h"
 #include "world/World.h"
@@ -377,6 +379,30 @@ int runLogicTest(const std::string& assetDir) {
         vg::PlayerSave bad;
         const uint8_t junk[8] = {1, 2, 3, 4, 5, 6, 7, 8};
         check(!bad.deserialize(junk, sizeof junk), "corrupt player save is rejected");
+
+        // Crafting: recipes load, gate on inputs, and consume/produce correctly.
+        vg::Crafting crafting(assetDir + "/recipes.yaml", reg);
+        check(!crafting.recipes().empty(), "recipes.yaml loaded some recipes");
+        const uint16_t trunk  = reg.idByName("oak_trunk");
+        const uint16_t planks = reg.idByName("planks");
+        // Find the 1 oak_trunk -> 4 planks recipe.
+        const vg::Crafting::Recipe* plankRecipe = nullptr;
+        for (const auto& r : crafting.recipes()) {
+            if (r.output == planks && r.inputs.size() == 1 && r.inputs[0].first == trunk) {
+                plankRecipe = &r; break;
+            }
+        }
+        check(plankRecipe != nullptr, "found oak_trunk -> planks recipe");
+        if (plankRecipe) {
+            vg::Inventory inv2;
+            check(crafting.craftable(inv2).empty(), "empty inventory crafts nothing");
+            check(!vg::Crafting::canCraft(*plankRecipe, inv2), "can't craft planks with no wood");
+            inv2.add(trunk, 2);
+            check(vg::Crafting::canCraft(*plankRecipe, inv2), "2 trunks -> planks is craftable");
+            check(vg::Crafting::craft(*plankRecipe, inv2), "craft consumes input, yields output");
+            check(inv2.count(trunk) == 1, "one trunk consumed");
+            check(inv2.count(planks) == 4, "four planks produced");
+        }
     } catch (const std::exception& e) {
         std::cerr << "[logic] FAIL: exception: " << e.what() << '\n';
         return EXIT_FAILURE;

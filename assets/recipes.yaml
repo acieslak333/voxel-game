@@ -1,0 +1,38 @@
+# =============================================================================
+#  Crafting recipes  (data-driven; see src/player/Crafting.{h,cpp})
+# =============================================================================
+#  Loaded at runtime by vg::Crafting. Terraria-style: the inventory screen shows
+#  which of these you CAN make from what you're holding (click an output to craft
+#  one), rather than a fixed shaped grid.
+#
+#  Per recipe:
+#    output  required. Block name produced (must exist in blocks.yaml).
+#    count   default 1. How many of `output` one craft yields.
+#    inputs  list of { item: <block name>, count: N } consumed per craft.
+#
+#  A recipe naming an unknown block (output or input) is skipped at load, so a
+#  typo can't crash the game. Block names come from assets/blocks.yaml.
+#  (A future `station:` key will gate recipes by a nearby workbench/furnace.)
+# =============================================================================
+recipes:
+  # Wood processing: a trunk or a log splits into four planks.
+  - output: planks
+    count: 4
+    inputs:
+      - { item: oak_trunk, count: 1 }
+  - output: planks
+    count: 4
+    inputs:
+      - { item: oak_log, count: 1 }
+
+  # Stone working: square off raw stone into cobblestone.
+  - output: cobblestone
+    count: 1
+    inputs:
+      - { item: stone, count: 1 }
+
+  # Bundle four cobblestone back into a smooth stone block.
+  - output: stone
+    count: 1
+    inputs:
+      - { item: cobblestone, count: 4 }
