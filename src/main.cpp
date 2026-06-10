@@ -163,6 +163,148 @@ int runGenMap(const std::string& assetDir, int pixels, int step, const std::stri
     return EXIT_SUCCESS;
 }
 
+// A diverging blue->white->red ramp for a signed value in [-1, 1]: negative reads
+// cool, zero white, positive warm. Used to visualise raw noise layers.
+void divergingRamp(float t, float& r, float& g, float& b) {
+    t = std::clamp(t, -1.0f, 1.0f);
+    if (t >= 0.0f) { // white -> red
+        r = 255.0f; g = 255.0f - 175.0f * t; b = 255.0f - 215.0f * t;
+    } else {         // white -> blue
+        const float s = -t;
+        r = 255.0f - 215.0f * s; g = 255.0f - 150.0f * s; b = 255.0f;
+    }
+}
+
+// Headless raw-noise-field export (no window/Vulkan). Samples ONE of the terrain
+// generator's underlying noise layers over a top-down grid and writes a diverging
+// blue/white/red PNG, so each layer that feeds the terrain can be inspected and
+// tuned in isolation (not just the final surface). The relief field also draws the
+// sea-level (value 0) coastline in black. Same fixed seed + centring as --genmap.
+int runGenNoise(const std::string& assetDir, int pixels, int step,
+                const std::string& outPath, const std::string& layer) {
+    pixels = std::clamp(pixels, 64, 4096);
+    step   = std::max(1, step);
+    const vg::WorldConfig cfg = vg::WorldConfig::load(assetDir + "/world.yaml");
+    const std::uint32_t seed = 1337u;
+    const int worldHeight = cfg.chunksY * 16;
+    vg::BlockRegistry reg(assetDir + "/blocks.yaml");
+    vg::TerrainGenerator gen(seed, reg, assetDir, worldHeight);
+
+    using F = vg::TerrainGenerator::Field;
+    F field; bool isRelief = false;
+    if      (layer == "cont" || layer == "continentalness") field = F::Continentalness;
+    else if (layer == "ero"  || layer == "erosion")         field = F::Erosion;
+    else if (layer == "peak" || layer == "peaks")           field = F::Peaks;
+    else if (layer == "temp" || layer == "temperature")     field = F::Temperature;
+    else if (layer == "hum"  || layer == "humidity")        field = F::Humidity;
+    else if (layer == "river" || layer == "rivers")         field = F::River;
+    else if (layer == "relief" || layer == "height") { field = F::Relief; isRelief = true; }
+    else {
+        std::cerr << "[genmap] unknown --layer '" << layer << "' (use cont|ero|peak|"
+                     "temp|hum|river|relief)\n";
+        return EXIT_FAILURE;
+    }
+    // Relief is in blocks; normalise by a representative span so the ramp uses its
+    // full range. Noise layers are already ~[-1, 1].
+    const float reliefSpan = static_cast<float>(std::max(16, worldHeight / 2));
+
+    std::vector<unsigned char> img(static_cast<size_t>(pixels) * pixels * 3);
+    const int half = pixels / 2;
+    for (int py = 0; py < pixels; ++py) {
+        for (int px = 0; px < pixels; ++px) {
+            const int wx = (px - half) * step, wz = (py - half) * step;
+            float v = gen.fieldValue(field, wx, wz);
+            float r, g, b;
+            if (isRelief) {
+                divergingRamp(v / reliefSpan, r, g, b);
+                if (std::fabs(v) < 0.75f) { r = g = b = 0.0f; } // sea-level coastline
+            } else {
+                divergingRamp(v, r, g, b);
+            }
+            const size_t o = (static_cast<size_t>(py) * pixels + px) * 3;
+            img[o + 0] = static_cast<unsigned char>(std::clamp(r, 0.0f, 255.0f));
+            img[o + 1] = static_cast<unsigned char>(std::clamp(g, 0.0f, 255.0f));
+            img[o + 2] = static_cast<unsigned char>(std::clamp(b, 0.0f, 255.0f));
+        }
+    }
+    if (!stbi_write_png(outPath.c_str(), pixels, pixels, 3, img.data(), pixels * 3)) {
+        std::cerr << "[genmap] failed to write " << outPath << '\n';
+        return EXIT_FAILURE;
+    }
+    std::cout << "[genmap] wrote " << outPath << " (noise:" << layer << ", " << pixels
+              << "x" << pixels << ", " << step << " blocks/px, seed " << seed << ")\n";
+    return EXIT_SUCCESS;
+}
+
+// Headless vertical cross-section export (no window/Vulkan). Slices the world along
+// the world-X axis through Z=0 (the island centre) and draws a side-on profile:
+// surface height, water column, and the soil/stone/snow layering the generator
+// places — so the vertical shape (oceans, coasts, hills, snow caps) can be read at a
+// glance. Caves/ores live in World's per-voxel pass and are intentionally omitted
+// here (this uses only the streaming-safe TerrainGenerator surface model). The image
+// is `pixels` wide (world X) by a vertical band sized to the world height.
+int runGenCross(const std::string& assetDir, int pixels, int step,
+                const std::string& outPath) {
+    pixels = std::clamp(pixels, 64, 4096);
+    step   = std::max(1, step);
+    const vg::WorldConfig cfg = vg::WorldConfig::load(assetDir + "/world.yaml");
+    const std::uint32_t seed = 1337u;
+    const int worldHeight = cfg.chunksY * 16;
+    vg::BlockRegistry reg(assetDir + "/blocks.yaml");
+    vg::TerrainGenerator gen(seed, reg, assetDir, worldHeight);
+    auto bid = [&](const char* n) -> int {
+        try { return static_cast<int>(reg.idByName(n)); } catch (...) { return -1; }
+    };
+    const int snowId = bid("snow"), sandId = bid("sand"), stoneId = bid("stone");
+
+    const int H = worldHeight; // one image row per world-Y level
+    std::vector<unsigned char> img(static_cast<size_t>(pixels) * H * 3);
+    const int half = pixels / 2;
+    auto put = [&](int px, int row, float r, float g, float b) {
+        const size_t o = (static_cast<size_t>(row) * pixels + px) * 3;
+        img[o + 0] = static_cast<unsigned char>(std::clamp(r, 0.0f, 255.0f));
+        img[o + 1] = static_cast<unsigned char>(std::clamp(g, 0.0f, 255.0f));
+        img[o + 2] = static_cast<unsigned char>(std::clamp(b, 0.0f, 255.0f));
+    };
+    for (int px = 0; px < pixels; ++px) {
+        const int wx = (px - half) * step;
+        const vg::ColumnInfo ci = gen.columnInfo(wx, 0);
+        const int h = ci.height, water = ci.waterLevel;
+        for (int y = 0; y < H; ++y) {
+            const int row = H - 1 - y; // flip so the sky is at the top
+            float r, g, b;
+            if (y <= h) {
+                if (y == h) {                                   // surface block
+                    if      (ci.topId == snowId)  { r = 236; g = 241; b = 248; }
+                    else if (ci.topId == sandId)  { r = 224; g = 205; b = 150; }
+                    else if (ci.topId == stoneId) { r = 130; g = 127; b = 122; }
+                    else                          { r = 86;  g = 140; b = 70;  }
+                } else if (y >= h - 4) {                          // filler band (dirt/sand)
+                    if (ci.fillerId == sandId) { r = 214; g = 196; b = 146; }
+                    else                       { r = 120; g = 86;  b = 56;  } // dirt
+                } else {                                          // stone interior
+                    const float shade = 0.78f + 0.22f * static_cast<float>(y) / static_cast<float>(std::max(1, h));
+                    r = 122 * shade; g = 119 * shade; b = 114 * shade;
+                }
+            } else if (y <= water) {                              // water column
+                const float t = std::min(1.0f, static_cast<float>(water - y) / 32.0f);
+                r = 56.0f - 36.0f * t; g = 122.0f - 70.0f * t; b = 196.0f - 80.0f * t;
+            } else {                                              // sky
+                const float t = static_cast<float>(y) / static_cast<float>(H);
+                r = 150 + 50 * t; g = 180 + 40 * t; b = 220 + 30 * t;
+            }
+            put(px, row, r, g, b);
+        }
+    }
+    if (!stbi_write_png(outPath.c_str(), pixels, H, 3, img.data(), pixels * 3)) {
+        std::cerr << "[genmap] failed to write " << outPath << '\n';
+        return EXIT_FAILURE;
+    }
+    std::cout << "[genmap] wrote " << outPath << " (cross-section, " << pixels << "x"
+              << H << ", " << step << " blocks/px, seed " << seed << ")\n";
+    return EXIT_SUCCESS;
+}
+
 } // namespace
 
 // Entry point. Everything interesting lives in vg::App; main() parses a few
@@ -176,6 +318,13 @@ int runGenMap(const std::string& assetDir, int pixels, int step, const std::stri
 //                     (a bird's-eye view of the procedural terrain).
 //   --selftest        Run the headless world-generation determinism/golden test
 //                     and exit (no window). Exit code 0 = pass.
+//   --genmap          Headless map export (no window). Sub-modes via --mode:
+//                       top   (default) surface map coloured by block + hillshade
+//                       noise raw noise layer (--layer cont|ero|peak|temp|hum|
+//                             river|relief) as a diverging blue/white/red field
+//                       cross vertical cross-section through Z=0 (terrain profile,
+//                             water, soil/stone/snow layers)
+//                     Sizing: --mapsize N (px), --mapstep B (blocks/px), --out PATH.
 int main(int argc, char** argv) {
     long maxFrames = -1; // run until the window is closed
     bool framesSet = false;
@@ -184,6 +333,8 @@ int main(int argc, char** argv) {
     bool genMap = false;
     long mapPixels = 768, mapStep = 6;
     std::string mapOut = "genmap.png";
+    std::string mapMode = "top";     // top | noise | cross
+    std::string mapLayer = "cont";   // which noise layer for --mode noise
 
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--frames") == 0 && i + 1 < argc) {
@@ -204,6 +355,10 @@ int main(int argc, char** argv) {
             mapStep = std::strtol(argv[++i], nullptr, 10);
         } else if (std::strcmp(argv[i], "--out") == 0 && i + 1 < argc) {
             mapOut = argv[++i];
+        } else if (std::strcmp(argv[i], "--mode") == 0 && i + 1 < argc) {
+            mapMode = argv[++i]; // top | noise | cross (with --genmap)
+        } else if (std::strcmp(argv[i], "--layer") == 0 && i + 1 < argc) {
+            mapLayer = argv[++i]; // noise layer for --mode noise
         } else {
             std::cerr << "Unknown argument: " << argv[i] << '\n';
             return EXIT_FAILURE;
@@ -211,8 +366,14 @@ int main(int argc, char** argv) {
     }
 
     if (genMap) {
-        return runGenMap(VG_ASSET_DIR, static_cast<int>(mapPixels),
-                         static_cast<int>(mapStep), mapOut);
+        const int px = static_cast<int>(mapPixels), st = static_cast<int>(mapStep);
+        if (mapMode == "noise") return runGenNoise(VG_ASSET_DIR, px, st, mapOut, mapLayer);
+        if (mapMode == "cross") return runGenCross(VG_ASSET_DIR, px, st, mapOut);
+        if (mapMode != "top") {
+            std::cerr << "Unknown --mode '" << mapMode << "' (use top|noise|cross)\n";
+            return EXIT_FAILURE;
+        }
+        return runGenMap(VG_ASSET_DIR, px, st, mapOut);
     }
 
     // When capturing a screenshot without an explicit frame count, pick a

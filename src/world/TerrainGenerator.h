@@ -84,6 +84,17 @@ public:
     [[nodiscard]] ColumnInfo columnInfo(int wx, int wz) const;
 
     [[nodiscard]] int seaLevel() const { return seaLevel_; }
+    [[nodiscard]] int worldHeight() const { return worldHeight_; }
+
+    // --- Debug / tuning introspection (headless genmap only; NOT used by the
+    //     generation path, so adding/calling this never changes world output). ---
+    //  Exposes each raw noise layer (and a couple of derived fields) so the map
+    //  tool can visualise every layer that feeds the terrain, not just the result.
+    //  Noise fields return ~[-1, 1]; Relief/Height return blocks (vs sea / absolute).
+    enum class Field {
+        Continentalness, Erosion, Peaks, Temperature, Humidity, River, Relief, Height
+    };
+    [[nodiscard]] float fieldValue(Field f, int wx, int wz) const;
 
     // The densest biome tree probability — lets callers cheaply reject most columns
     // (hash gate) before paying for a full columnInfo() in the tree-scatter loop.

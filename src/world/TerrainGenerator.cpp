@@ -322,6 +322,21 @@ int TerrainGenerator::height(int wx, int wz) const {
     return lk.in ? std::min(sh, lk.bed) : sh;
 }
 
+float TerrainGenerator::fieldValue(Field f, int wx, int wz) const {
+    const float x = static_cast<float>(wx), z = static_cast<float>(wz);
+    switch (f) {
+        case Field::Continentalness: return contNoise_.fbm(x * contFreq_, z * contFreq_, contOct_);
+        case Field::Erosion:         return eroNoise_.fbm(x * eroFreq_, z * eroFreq_, eroOct_);
+        case Field::Peaks:           return peakNoise_.fbm(x * peakFreq_, z * peakFreq_, peakOct_);
+        case Field::Temperature:     return tempNoise_.fbm(x * tempFreq_, z * tempFreq_, climOct_);
+        case Field::Humidity:        return humNoise_.fbm(x * humFreq_, z * humFreq_, climOct_);
+        case Field::River:           return riverNoise_.fbm(x * riverFreq_, z * riverFreq_, 2);
+        case Field::Relief:          return static_cast<float>(shapeHeight(wx, wz) - seaLevel_);
+        case Field::Height:          return static_cast<float>(height(wx, wz));
+    }
+    return 0.0f;
+}
+
 const BiomeDef& TerrainGenerator::selectBiome(float temp, float hum, int relHeight) const {
     for (const BiomeDef& b : biomes_) {
         if (temp >= b.tempMin && temp <= b.tempMax && hum >= b.humMin && hum <= b.humMax &&
