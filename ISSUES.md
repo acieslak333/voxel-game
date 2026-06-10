@@ -584,12 +584,33 @@ Core Optimizations:
     is annoying, make the selftest config-independent (bake the noise defaults) later.
 
     **STILL WANTED (next):**
-    - **Richer genmap modes** — isometric view, vertical cross-sections (terrain profile
-      + caves + layers), and raw-noise-field extraction (visualise each noise layer, not
-      just the result).
-    - **Composable `NoiseStack`** — every noise field becomes a data-driven *weighted
-      blend* of multiple layers (perlin/ridged/billow, 2D + 3D), editable in the tool
-      ("merge multiple noises with weights, applied to any noise"). The foundation that
-      makes the tool genuinely powerful.
+    - **Richer genmap modes** — **[DONE: cross-section + raw-noise extraction; iso still open]**
+      `--genmap --mode noise --layer <cont|ero|peak|temp|hum|river|relief>` renders each
+      raw noise layer as a diverging blue/white/red field (relief draws the sea-level
+      coast); `--genmap --mode cross` draws a vertical cross-section through Z=0 (terrain
+      profile, water column, soil/stone/snow layers — caves/ores are World per-voxel and
+      omitted from the generator-only slice). Wired into `tools/genmap_tool.py` via a
+      view-mode dropdown. Backed by a debug-only `TerrainGenerator::fieldValue()` that is
+      NOT on the generation path, so world output is unchanged. Isometric view: still open.
+    - **Composable `NoiseStack`** — **[DONE]** Any of the six noise fields
+      (continentalness/erosion/peaks/temperature/humidity/rivers) can be authored as a
+      data-driven *weighted blend* of perlin/ridged/billow layers via a `layers:` list in
+      biomes.yaml (`vg::NoiseStack`, src/world/NoiseStack.{h,cpp}; 2D + 3D). Each layer has
+      its own frequency/octaves/lacunarity/gain/weight/offset; the blend renormalises to
+      ~[-1,1] so it drops in for a single fbm. **Opt-in**: with no `layers:` block the
+      legacy single-noise path runs and worlds are byte-identical (the `--selftest`
+      determinism check passes; the golden hash is unchanged). TerrainGenerator routes
+      shape/climate/river sampling through sampleX() helpers that pick the stack when
+      present. Documented in biomes.yaml (commented example) + docs/WORLDGEN.md; preview
+      any field with `--genmap --mode noise --layer <field>`.
+      NOTE: the committed `kGolden` in main.cpp was recorded on a different compiler
+      (MSVC); on GCC here the fixed-config worldgen hashes to `0xf74953807c107d61`. That
+      mismatch predates this work (cross-compiler float nondeterminism, see #11's
+      "make the selftest config-independent" future item) — `kGolden` was left untouched
+      so it still matches on the original toolchain; the portable determinism check (regen
+      bit-identical) passes, and the local hash stayed constant across all of this work,
+      proving default generation is unchanged.
+      Also fixed an unrelated build break: `Inventory.h` used `size_t` without
+      `<cstddef>` (GCC doesn't pull it in transitively), so the project didn't compile.
     - **Dramatic mountains** — almost certainly needs the 256-tall world (height_chunks
       16 + scale sea_level/splines/snow_line) for the vertical room.
