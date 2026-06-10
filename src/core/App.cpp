@@ -95,6 +95,8 @@ App::App()
         auto give = [&](const char* name, int n) {
             try { inv.add(reg.idByName(name), n); } catch (const std::out_of_range&) {}
         };
+        give("pickaxe", 1); // survival starts with the two tools
+        give("sword", 1);
         give("dirt", 64);
         give("cobblestone", 64);
         give("planks", 32);
@@ -167,10 +169,14 @@ void App::stockCreative() {
     for (int i = 0; i < Inventory::kSlots; ++i) {
         inv.slot(i).clear();
     }
-    const int blocks = static_cast<int>(world_.registry().blockCount());
+    const BlockRegistry& reg = world_.registry();
+    const int blocks = static_cast<int>(reg.blockCount());
     int s = 0;
-    for (int id = 1; id < blocks && s < Inventory::kSlots; ++id, ++s) {
-        inv.slot(s) = ItemStack{static_cast<uint16_t>(id), Inventory::kMaxStack};
+    for (int id = 1; id < blocks && s < Inventory::kSlots; ++id) {
+        if (!reg.placeable(static_cast<uint16_t>(id))) {
+            continue; // tools/items aren't part of the creative block palette
+        }
+        inv.slot(s++) = ItemStack{static_cast<uint16_t>(id), Inventory::kMaxStack};
     }
 }
 
@@ -184,7 +190,7 @@ void App::toggleGameMode() {
     }
 }
 
-void App::editBlocks(const InputState& in) {
+void App::editBlocks(const InputState& in, float dt) {
     Inventory& inv = player_.inventory();
     // Select the active hotbar slot with the number keys (1..9) or the mouse wheel.
     if (in.selectSlot >= 1 && in.selectSlot <= Inventory::kHotbarSlots) {
@@ -192,19 +198,6 @@ void App::editBlocks(const InputState& in) {
     }
     if (in.hotbarScroll != 0) {
         inv.scrollSelected(in.hotbarScroll);
-    }
-    if (!in.breakBlock && !in.placeBlock) {
-        return;
-    }
-
-    // For a place, the held item must be non-empty — bail before any GPU work if the
-    // selected hotbar slot has nothing in it.
-    uint16_t placeId = 0;
-    if (in.placeBlock) {
-        placeId = inv.selectedStack().blockId;
-        if (placeId == 0) {
-            return; // nothing selected to place
-        }
     }
 
     // Cast from the eye along the look direction to find the targeted block.
@@ -214,10 +207,49 @@ void App::editBlocks(const InputState& in) {
         cam.position, cam.front(), kReach,
         [this](int x, int y, int z) { return world_.isTargetable(x, y, z); },
         [this](int x, int y, int z) { return world_.modelInsetAt(x, y, z); });
-    if (!hit.hit) {
-        return;
-    }
 
+    // ---- Mining: hold the left button to break, paced by the block's hardness and
+    //      the held tool's speed (creative breaks instantly). Aiming away or at a new
+    //      block restarts the timer, so you must dwell on one block to break it. -----
+    if (in.breakHeld && hit.hit) {
+        if (!mineActive_ || hit.block != mineBlock_) {
+            mineBlock_   = hit.block;
+            mineActive_  = true;
+            mineProgress_ = 0.0f;
+            const uint16_t tid  = world_.blockAt(hit.block.x, hit.block.y, hit.block.z).id;
+            const uint16_t held = inv.selectedStack().blockId;
+            mineNeeded_ = creativeMode_ ? 0.0f : world_.registry().breakSeconds(tid, held);
+        }
+        if (mineNeeded_ >= 0.0f) { // not unbreakable
+            mineProgress_ += dt;
+            if (mineProgress_ >= mineNeeded_) {
+                breakBlockAt(mineBlock_);
+                mineActive_ = false;
+                mineProgress_ = 0.0f;
+            }
+        }
+    } else {
+        mineActive_ = false;
+        mineProgress_ = 0.0f;
+    }
+    mineProgress01_ = (mineActive_ && mineNeeded_ > 0.0f)
+                          ? std::clamp(mineProgress_ / mineNeeded_, 0.0f, 1.0f)
+                          : 0.0f;
+
+    // ---- Placing: right-click (edge) drops the held block onto the hit face,
+    //      unless the slot holds a tool/non-placeable item or it would clip you. ----
+    if (in.placeBlock && hit.hit) {
+        const uint16_t placeId = inv.selectedStack().blockId;
+        if (placeId != 0 && world_.registry().placeable(placeId)) {
+            const glm::ivec3 t = hit.block + hit.normal;
+            if (!world_.isSolid(t.x, t.y, t.z) && !player_.occupies(t.x, t.y, t.z)) {
+                placeBlockAt(t, placeId);
+            }
+        }
+    }
+}
+
+void App::breakBlockAt(const glm::ivec3& b) {
     // A block edit mutates the World; first let any in-flight background relight
     // finish (it reads/writes the same chunk + light data) and enqueue its remeshes,
     // then make sure no streaming worker is mid-read before setBlock() rewrites it.
@@ -226,39 +258,27 @@ void App::editBlocks(const InputState& in) {
     }
     worldRenderer_.streamBarrier();
 
-    std::vector<glm::ivec3> dirty;
-    if (in.breakBlock) {
-        // Destroy: replace the hit block with air, and collect the broken block into
-        // the inventory (overflow is dropped — item entities come later).
-        const uint16_t broken = world_.blockAt(hit.block.x, hit.block.y, hit.block.z).id;
-        dirty = world_.setBlock(hit.block.x, hit.block.y, hit.block.z, Block{});
-        if (broken != 0 && !creativeMode_) {
-            inv.add(broken, 1); // survival: the broken block drops into the inventory
-        }
-    } else {
-        // Build: fill the empty cell on the face we hit, unless it would clip the
-        // player (you can't box yourself in). Consume one of the held item.
-        const glm::ivec3 t = hit.block + hit.normal;
-        if (world_.isSolid(t.x, t.y, t.z) || player_.occupies(t.x, t.y, t.z)) {
-            return;
-        }
-        dirty = world_.setBlock(t.x, t.y, t.z, Block{placeId, 0});
-        if (!creativeMode_) {
-            inv.takeFromSelected(); // survival: placing uses one up (creative is infinite)
-        }
+    const uint16_t broken = world_.blockAt(b.x, b.y, b.z).id;
+    const std::vector<glm::ivec3> dirty = world_.setBlock(b.x, b.y, b.z, Block{});
+    if (broken != 0 && !creativeMode_) {
+        player_.inventory().add(broken, 1); // survival: drops into the inventory
     }
-
-    // Rebuild only the chunk(s) the edit touched, draining the GPU once.
     worldRenderer_.remeshChunks(dirty);
+    seedLiquid(b.x, b.y, b.z); // liquid may flow into the new gap
+}
 
-    // Liquid may now flow into/out of the edited cell (dug a hole next to water,
-    // placed a liquid, ...). Seed the flow queue around it.
-    if (in.breakBlock) {
-        seedLiquid(hit.block.x, hit.block.y, hit.block.z);
-    } else {
-        const glm::ivec3 t = hit.block + hit.normal;
-        seedLiquid(t.x, t.y, t.z);
+void App::placeBlockAt(const glm::ivec3& t, uint16_t id) {
+    if (relightFuture_.valid()) {
+        worldRenderer_.streamRemesh(relightFuture_.get());
     }
+    worldRenderer_.streamBarrier();
+
+    const std::vector<glm::ivec3> dirty = world_.setBlock(t.x, t.y, t.z, Block{id, 0});
+    if (!creativeMode_) {
+        player_.inventory().takeFromSelected(); // placing uses one up (creative is infinite)
+    }
+    worldRenderer_.remeshChunks(dirty);
+    seedLiquid(t.x, t.y, t.z);
 }
 
 void App::seedLiquid(int x, int y, int z) {
@@ -445,7 +465,7 @@ void App::run(long maxFrames, const std::string& screenshotPath) {
         // own the cursor then).
         if (!paused_ && !inventoryOpen_) {
             player_.update(dt, in);
-            editBlocks(in);
+            editBlocks(in, dt);
             // Liquid flow: drain a budget of the flow queue a few times a second.
             liquidTimer_ += dt;
             if (liquidTimer_ >= 0.20f) {
@@ -667,6 +687,15 @@ void App::buildCrosshair(Ui& ui, float w, float h) {
     };
     dot(rc + o, kCharcoal); // outline
     dot(rc, kCream);        // core
+
+    // Mining feedback: a horizontal break meter just under the crosshair that fills
+    // left-to-right as the held block breaks (a cheap stand-in until the crack-stage
+    // overlay lands with the texture work). Hidden when not mining.
+    if (mineProgress01_ > 0.0f) {
+        const float bw = 40.0f, bh = 5.0f, by = cy + 12.0f, bx = cx - bw * 0.5f;
+        ui.roundRect(bx - 1.0f, by - 1.0f, bw + 2.0f, bh + 2.0f, 2.0f, kCharcoal);
+        ui.roundRect(bx, by, bw * mineProgress01_, bh, 2.0f, kCream);
+    }
 }
 
 void App::buildBlockIndicator(Ui& ui, const glm::mat4& view, const glm::mat4& proj,

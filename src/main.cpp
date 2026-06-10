@@ -305,6 +305,51 @@ int runGenCross(const std::string& assetDir, int pixels, int step,
     return EXIT_SUCCESS;
 }
 
+// Headless game-logic tests (no window/Vulkan). A growing set of assertions over the
+// pure data/logic systems (mining time & tools today; crafting, save round-trips,
+// etc. as they land) so the parts that DON'T need a GPU stay verifiable in CI.
+// Exit 0 = all pass. Run with `voxelgame --logictest`.
+int runLogicTest(const std::string& assetDir) {
+    int failures = 0;
+    auto check = [&](bool ok, const std::string& what) {
+        std::cout << (ok ? "[logic] PASS  " : "[logic] FAIL  ") << what << '\n';
+        if (!ok) ++failures;
+    };
+    auto near = [](float a, float b) { return std::fabs(a - b) < 1e-4f; };
+
+    try {
+        vg::BlockRegistry reg(assetDir + "/blocks.yaml");
+        const uint16_t air   = reg.idByName("air");
+        const uint16_t stone = reg.idByName("stone");
+        const uint16_t dirt  = reg.idByName("dirt");
+        const uint16_t bush  = reg.idByName("bush");
+        const uint16_t pick  = reg.idByName("pickaxe");
+        const uint16_t sword = reg.idByName("sword");
+
+        // Mining time = hardness / (matching-tool speed, else 1).
+        check(near(reg.breakSeconds(stone, air), 1.5f),   "stone by hand = 1.5s");
+        check(near(reg.breakSeconds(stone, pick), 0.3f),  "stone with pickaxe = 0.3s (5x)");
+        check(near(reg.breakSeconds(stone, sword), 1.5f), "sword does NOT speed stone");
+        check(near(reg.breakSeconds(dirt, pick), 0.6f),   "pickaxe doesn't speed dirt (no preferred tool)");
+        check(near(reg.breakSeconds(bush, air), 0.0f),    "bush breaks instantly");
+
+        // Tool/placement classification.
+        check(reg.tool(pick) == vg::ToolKind::Pickaxe, "pickaxe is a Pickaxe tool");
+        check(reg.tool(sword) == vg::ToolKind::Sword,  "sword is a Sword tool");
+        check(reg.tool(stone) == vg::ToolKind::None,   "stone is not a tool");
+        check(reg.placeable(stone),                    "stone is placeable");
+        check(!reg.placeable(pick),                    "pickaxe is NOT placeable");
+        check(!reg.placeable(sword),                   "sword is NOT placeable");
+    } catch (const std::exception& e) {
+        std::cerr << "[logic] FAIL: exception: " << e.what() << '\n';
+        return EXIT_FAILURE;
+    }
+
+    std::cout << "[logic] " << (failures == 0 ? "ALL PASS" : "FAILED")
+              << " (" << failures << " failure(s))\n";
+    return failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+}
+
 } // namespace
 
 // Entry point. Everything interesting lives in vg::App; main() parses a few
@@ -347,6 +392,9 @@ int main(int argc, char** argv) {
         } else if (std::strcmp(argv[i], "--selftest") == 0) {
             // Headless worldgen determinism/golden test — no window/Vulkan.
             return runWorldGenSelfTest(VG_ASSET_DIR);
+        } else if (std::strcmp(argv[i], "--logictest") == 0) {
+            // Headless game-logic tests (mining/tools/…) — no window/Vulkan.
+            return runLogicTest(VG_ASSET_DIR);
         } else if (std::strcmp(argv[i], "--genmap") == 0) {
             genMap = true; // headless top-down map (run after all flags are parsed)
         } else if (std::strcmp(argv[i], "--mapsize") == 0 && i + 1 < argc) {

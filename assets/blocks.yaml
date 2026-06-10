@@ -11,6 +11,16 @@
 #    solid    default false. Participates in collision.
 #    opaque   default false. Hides the faces of neighbours touching it (meshing).
 #    light    default 0. Light level (0..15) this block emits (e.g. glowstone).
+#    hardness default 0. Seconds to break BY HAND (mining speed 1). 0 = instant
+#             (foliage), bigger = tougher; <0 = unbreakable. A held tool whose
+#             `tool:` matches this block's `preferred_tool:` mines it `tool_speed`x
+#             faster (see BlockRegistry::breakSeconds; verified by --logictest).
+#    preferred_tool  pickaxe|sword. Which tool speeds up mining THIS block.
+#    --- item/tool keys (a tool is held & selected like a block, but not placed) ---
+#    tool       pickaxe|sword. Marks this entry as a tool item (=> not placeable).
+#    tool_speed default 1. Mining-speed multiplier this tool gives its preferred blocks.
+#    attack_damage default 1. Damage dealt in combat (swords; future mobs).
+#    placeable  default true for blocks, false for tools. Can it be placed in world?
 #    textures map of face -> texture filename (under assets/textures/). Keys:
 #               all                  every face
 #               top / bottom / side  +Y / -Y / the four horizontal faces
@@ -25,6 +35,7 @@
   opaque: false
 
 - name: grass
+  hardness: 0.6
   solid: true
   opaque: true
   textures:
@@ -33,36 +44,44 @@
     bottom: dirt.png
 
 - name: dirt
+  hardness: 0.6
   solid: true
   opaque: true
   textures:
     all: dirt.png
 
 - name: stone
+  hardness: 1.5
+  preferred_tool: pickaxe
   solid: true
   opaque: true
   textures:
     all: stone.png
 
 - name: sand
+  hardness: 0.5
   solid: true
   opaque: true
   textures:
     all: sand.png
 
 - name: gravel
+  hardness: 0.6
   solid: true
   opaque: true
   textures:
     all: gravel.png
 
 - name: cobblestone
+  hardness: 2.0
+  preferred_tool: pickaxe
   solid: true
   opaque: true
   textures:
     all: cobblestone.png
 
 - name: planks
+  hardness: 2.0
   solid: true
   opaque: true
   textures:
@@ -71,6 +90,7 @@
 # Oriented logs (axis from Block::metadata) are future work; for now both caps
 # use the ring texture and the four sides use bark.
 - name: oak_log
+  hardness: 2.0
   solid: true
   opaque: true
   textures:
@@ -81,6 +101,8 @@
 # Emits light: `light` (0..15) seeds the world's block-light flood fill, so this
 # glows in caves and at night independently of the sky.
 - name: glowstone
+  hardness: 0.3
+  preferred_tool: pickaxe
   solid: true
   opaque: true
   light: 14
@@ -94,6 +116,7 @@
 # Stacked vertically they form a continuous pole. `width` (in 1/16 px) tunes the
 # thickness: 6 = slim, 8 = chunky, 16 = a full cube.
 - name: oak_trunk
+  hardness: 1.5
   solid: true
   opaque: false
   render: model
@@ -109,6 +132,7 @@
 # through. Non-solid (walk through) and non-opaque (light filters through, and the
 # cube faces self-cull against adjacent leaves so a merged crown stays hollow).
 - name: oak_leaves
+  hardness: 0.1
   solid: false
   opaque: false
   render: leafcube
@@ -117,6 +141,7 @@
 
 # Ground bush: same cross primitive, its own brighter-green cutout texture.
 - name: bush
+  hardness: 0.0
   solid: false
   opaque: false
   render: cross
@@ -145,31 +170,43 @@
 # Stone shot through with coloured mineral flecks. Plain opaque cubes; the
 # generator scatters them in veins through the stone (assets/world.yaml `ores`).
 - name: coal_ore
+  hardness: 3.0
+  preferred_tool: pickaxe
   solid: true
   opaque: true
   textures:
     all: coal_ore.png
 - name: iron_ore
+  hardness: 3.0
+  preferred_tool: pickaxe
   solid: true
   opaque: true
   textures:
     all: iron_ore.png
 - name: gold_ore
+  hardness: 3.0
+  preferred_tool: pickaxe
   solid: true
   opaque: true
   textures:
     all: gold_ore.png
 - name: ruby_ore
+  hardness: 4.0
+  preferred_tool: pickaxe
   solid: true
   opaque: true
   textures:
     all: ruby_ore.png
 - name: emerald_ore
+  hardness: 4.0
+  preferred_tool: pickaxe
   solid: true
   opaque: true
   textures:
     all: emerald_ore.png
 - name: mythril_ore
+  hardness: 5.0
+  preferred_tool: pickaxe
   solid: true
   opaque: true
   textures:
@@ -179,7 +216,26 @@
 # Snow: the cold-biome / above-snow-line surface coat (see assets/biomes.yaml).
 # Appended at the end so existing block ids (and saved chunks) don't shift.
 - name: snow
+  hardness: 0.1
   solid: true
   opaque: true
   textures:
     all: snow.png
+
+# --- Tools (ISSUES #13B) ------------------------------------------------------
+# Items, not blocks: held & selected in a hotbar slot like a block, but `placeable`
+# is false so right-click never places them, and they're skipped by the creative
+# stock. A tool whose `tool:` matches a block's `preferred_tool:` mines it
+# `tool_speed`x faster (BlockRegistry::breakSeconds). No durability (they never wear
+# out — a deliberate design choice). Appended last so existing ids don't shift.
+- name: pickaxe
+  tool: pickaxe
+  tool_speed: 5.0
+  textures:
+    all: pickaxe.png
+- name: sword
+  tool: sword
+  tool_speed: 1.0
+  attack_damage: 4.0
+  textures:
+    all: sword.png

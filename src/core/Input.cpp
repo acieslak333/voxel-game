@@ -52,6 +52,7 @@ InputState Input::poll() {
     // one block (no auto-repeat while held). The left button also drives the UI.
     const bool breakBtn = glfwGetMouseButton(w, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
     in.breakBlock = breakBtn && !prevBreakBtn_;
+    in.breakHeld  = breakBtn; // hold-to-break mining accumulates while held
     in.pointerDown = breakBtn;
     in.pointerPressed = in.breakBlock;
     prevBreakBtn_ = breakBtn;

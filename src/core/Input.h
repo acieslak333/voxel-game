@@ -18,6 +18,7 @@ struct InputState {
     glm::vec2 look{0.0f};       // mouse delta this frame, in pixels
 
     bool breakBlock = false;    // left mouse: destroy the looked-at block (edge)
+    bool breakHeld  = false;    // left mouse held (hold-to-break mining; level)
     bool placeBlock = false;    // right mouse: place against it (edge)
     int  selectSlot = 0;        // number key 1..9 held this frame (0 = none)
     int  hotbarScroll = 0;      // mouse wheel: hotbar slots to advance (+ = next,

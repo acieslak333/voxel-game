@@ -42,9 +42,14 @@ public:
     void enableFlyOverview();
 
 private:
-    // Break / place the block under the crosshair, then remesh only the chunk(s)
-    // the edit touched (see World::setBlock / WorldRenderer::remeshChunk).
-    void editBlocks(const InputState& in);
+    // Mine (hold-to-break, by hardness/tool) and place the block under the
+    // crosshair, then remesh only the chunk(s) the edit touched (see
+    // World::setBlock / WorldRenderer::remeshChunk). dt drives the mining timer.
+    void editBlocks(const InputState& in, float dt);
+    // Destroy the block at world coords (drops it to the inventory in survival) /
+    // place `id` there; both sync with streaming, remesh and reseed liquid flow.
+    void breakBlockAt(const glm::ivec3& b);
+    void placeBlockAt(const glm::ivec3& t, uint16_t id);
 
     // Simple liquid flow (water & lava): drain a budget of queued liquid cells,
     // spreading them down then sideways (decaying distance in Block::metadata, no
@@ -113,6 +118,15 @@ private:
     bool             creativeMode_ = true;   // creative: every block, infinite, no depletion (G toggles)
     ItemStack        cursorStack_;           // item held by the mouse in the inventory screen
     bool             debugOverlay_ = false;  // F1 info overlay visible
+
+    // Hold-to-break mining state. While the left button is held on one block, time
+    // accumulates until it reaches the block's break time (hardness / tool speed);
+    // changing target or releasing resets it. mineProgress01_ feeds the HUD.
+    glm::ivec3 mineBlock_{0, 0, 0};
+    bool       mineActive_   = false;
+    float      mineProgress_ = 0.0f; // seconds accumulated on the current block
+    float      mineNeeded_   = 0.0f; // seconds required to break it (0 = instant)
+    float      mineProgress01_ = 0.0f; // 0..1 for the crosshair break meter
     float            smoothedDt_ = 1.0f / 60.0f; // EMA of frame time, for the overlay's FPS
 
     // Atmosphere tuning panel (ephemeral 2nd menu column; not persisted).

@@ -10,6 +10,10 @@
 
 namespace vg {
 
+// What kind of tool an item IS (when held) or a block PREFERS (to be mined fast).
+// Survival starts with just two tools (see ISSUES #13B): a pickaxe and a sword.
+enum class ToolKind { None, Pickaxe, Sword };
+
 // -----------------------------------------------------------------------------
 //  BlockProperties
 // -----------------------------------------------------------------------------
@@ -42,7 +46,24 @@ struct BlockProperties {
     // full cell so stacked Model blocks form a continuous post.
     float modelInset = 0.0f;
 
-    // TODO(future): hardness; tool requirements; drop table; etc.
+    // --- Survival: mining, tools, placement (ISSUES #13B) --------------------
+    // Base seconds to break this block by hand (mining speed 1). 0 = instant
+    // (foliage), a larger value = tougher. <0 = unbreakable (e.g. bedrock).
+    float hardness = 0.0f;
+    // Which tool mines this block FASTER (else hand speed). e.g. stone -> Pickaxe.
+    ToolKind preferredTool = ToolKind::None;
+    // If this item IS a tool, which kind (None = an ordinary block). A tool item is
+    // held in a hotbar slot like a block but isn't placed in the world.
+    ToolKind tool = ToolKind::None;
+    // Mining-speed multiplier this tool applies to blocks whose preferredTool matches
+    // (e.g. a pickaxe with toolSpeed 5 breaks stone 5x faster than by hand).
+    float toolSpeed = 1.0f;
+    // Combat damage this item deals when used as a weapon (swords; future mobs).
+    float attackDamage = 1.0f;
+    // Can the player place this in the world? False for tools / pure items.
+    bool placeable = true;
+
+    // TODO(future): drop table; stack size per item; etc.
 };
 
 // -----------------------------------------------------------------------------
@@ -72,6 +93,16 @@ public:
     [[nodiscard]] uint32_t faceLayer(uint16_t id, int face) const {
         return get(id).faceLayers[static_cast<size_t>(face)];
     }
+    [[nodiscard]] float hardness(uint16_t id) const { return get(id).hardness; }
+    [[nodiscard]] bool placeable(uint16_t id) const { return get(id).placeable; }
+    [[nodiscard]] ToolKind tool(uint16_t id) const { return get(id).tool; }
+
+    // Seconds to break `target` while holding item `held` (0 = nothing/by hand).
+    // Returns 0 for an instant break and a negative value for an unbreakable block.
+    // Pure function of the registry data — the single source of truth for mining
+    // time, exercised headlessly by --logictest. A held tool only speeds blocks
+    // whose preferredTool matches its kind; otherwise hand speed applies.
+    [[nodiscard]] float breakSeconds(uint16_t target, uint16_t held) const;
 
     // Resolve a block name (e.g. "stone") to its id. Throws std::out_of_range
     // if no block with that name was defined.

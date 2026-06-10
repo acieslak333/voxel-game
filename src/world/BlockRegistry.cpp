@@ -54,6 +54,15 @@ void applyTextures(const YAML::Node& tex, BlockProperties& props, InternFn inter
     if (tex["posz"]) setFace(FacePosZ, tex["posz"].as<std::string>());
 }
 
+// Parse a tool-kind name; unknown / absent -> None.
+ToolKind parseTool(const YAML::Node& node, const char* key) {
+    if (!node[key]) return ToolKind::None;
+    const std::string s = node[key].as<std::string>();
+    if (s == "pickaxe") return ToolKind::Pickaxe;
+    if (s == "sword")   return ToolKind::Sword;
+    return ToolKind::None;
+}
+
 } // namespace
 
 BlockRegistry::BlockRegistry(const std::string& blocksFile) {
@@ -87,6 +96,15 @@ BlockRegistry::BlockRegistry(const std::string& blocksFile) {
         props.opaque = valueOr(entry, "opaque", false);
         props.emission = static_cast<uint8_t>(
             std::min(15, std::max(0, valueOr(entry, "light", 0))));
+
+        // Survival: mining time, tool role, combat, placeability (all optional).
+        props.hardness      = valueOr(entry, "hardness", 0.0f);
+        props.preferredTool = parseTool(entry, "preferred_tool");
+        props.tool          = parseTool(entry, "tool");
+        props.toolSpeed     = valueOr(entry, "tool_speed", 1.0f);
+        props.attackDamage  = valueOr(entry, "attack_damage", 1.0f);
+        // Tools/items default to non-placeable; ordinary blocks place by default.
+        props.placeable     = valueOr(entry, "placeable", props.tool == ToolKind::None);
 
         // Render type (default cube). Non-cube blocks emit their own geometry in
         // the mesher's second pass instead of greedy cubes (see RenderType).
@@ -136,6 +154,20 @@ const BlockProperties& BlockRegistry::get(uint16_t id) const {
         throw std::out_of_range("BlockRegistry::get: unknown block id");
     }
     return blocks_[id];
+}
+
+float BlockRegistry::breakSeconds(uint16_t target, uint16_t held) const {
+    const BlockProperties& t = get(target);
+    if (t.hardness < 0.0f) return -1.0f; // unbreakable
+    if (t.hardness == 0.0f) return 0.0f; // instant (foliage etc.)
+    float speed = 1.0f;                  // by hand
+    if (held != 0 && held < blocks_.size()) {
+        const BlockProperties& h = blocks_[held];
+        if (h.tool != ToolKind::None && h.tool == t.preferredTool) {
+            speed = h.toolSpeed > 0.0f ? h.toolSpeed : 1.0f;
+        }
+    }
+    return t.hardness / speed;
 }
 
 uint16_t BlockRegistry::idByName(const std::string& name) const {
