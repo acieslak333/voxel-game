@@ -239,3 +239,14 @@
   attack_damage: 4.0
   textures:
     all: sword.png
+
+# --- Containers (ISSUES #13B) -------------------------------------------------
+# Chest: a placeable storage block with its own 27-slot grid. Right-click opens it;
+# its contents persist to <save>/chests.dat keyed by world position. Appended last
+# so existing ids/saved chunks don't shift.
+- name: chest
+  hardness: 2.5
+  solid: true
+  opaque: true
+  textures:
+    all: chest.png

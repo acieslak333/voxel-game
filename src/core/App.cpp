@@ -110,11 +110,15 @@ App::App()
         give("oak_trunk", 16);
         give("oak_leaves", 16);
         give("glowstone", 8);
+        give("chest", 3);
     }
+
+    try { chestId_ = world_.registry().idByName("chest"); } catch (...) { chestId_ = 0; }
 
     // Restore a saved player (position/look/health/inventory/mode) if one exists for
     // this world, overriding the default spawn + starter kit above. No-op otherwise.
     loadPlayer();
+    loadChests(); // restore persisted chest contents for this world
 
     // Push the loaded settings to every subsystem (pixelate, lighting, FOV, …).
     applySettings();
@@ -251,9 +255,14 @@ void App::editBlocks(const InputState& in, float dt) {
                           ? std::clamp(mineProgress_ / mineNeeded_, 0.0f, 1.0f)
                           : 0.0f;
 
-    // ---- Placing: right-click (edge) drops the held block onto the hit face,
-    //      unless the slot holds a tool/non-placeable item or it would clip you. ----
+    // ---- Right-click: open a chest you're looking at; otherwise place the held
+    //      block onto the hit face (unless it's a tool/non-placeable or clips you). --
     if (in.placeBlock && hit.hit) {
+        const uint16_t hitId = world_.blockAt(hit.block.x, hit.block.y, hit.block.z).id;
+        if (chestId_ != 0 && hitId == chestId_) {
+            openChestAt(hit.block);
+            return;
+        }
         const uint16_t placeId = inv.selectedStack().blockId;
         if (placeId != 0 && world_.registry().placeable(placeId)) {
             const glm::ivec3 t = hit.block + hit.normal;
@@ -274,6 +283,18 @@ void App::breakBlockAt(const glm::ivec3& b) {
     worldRenderer_.streamBarrier();
 
     const uint16_t broken = world_.blockAt(b.x, b.y, b.z).id;
+
+    // Breaking a chest spills its contents into the player and forgets the store
+    // entry; close its screen if it happened to be open.
+    if (broken == chestId_ && chests_.has(b)) {
+        ChestStore::Chest& chest = chests_.at(b);
+        for (ItemStack& s : chest) {
+            if (!s.empty()) { player_.inventory().add(s.blockId, s.count); s.clear(); }
+        }
+        chests_.erase(b);
+        if (chestOpen_ && openChest_ == b) toggleChest();
+    }
+
     const std::vector<glm::ivec3> dirty = world_.setBlock(b.x, b.y, b.z, Block{});
     if (broken != 0 && !creativeMode_) {
         player_.inventory().add(broken, 1); // survival: drops into the inventory
@@ -545,19 +566,22 @@ void App::run(long maxFrames, const std::string& screenshotPath) {
         const InputState in = input_.poll();
 
         if (in.toggleMenu) {
-            // Esc closes the inventory if it's open, otherwise toggles the menu.
-            if (inventoryOpen_) {
+            // Esc closes an open chest / the inventory first, else toggles the menu.
+            if (chestOpen_) {
+                toggleChest();
+            } else if (inventoryOpen_) {
                 toggleInventory();
             } else {
                 togglePause();
             }
         }
-        // E opens/closes the inventory (not while the pause menu owns the screen).
+        // E opens/closes the inventory (closes a chest if one is open instead).
         if (in.toggleInventory && !paused_) {
-            toggleInventory();
+            if (chestOpen_) toggleChest();
+            else toggleInventory();
         }
         // G switches creative <-> survival (during gameplay only).
-        if (in.toggleGameMode && !paused_ && !inventoryOpen_) {
+        if (in.toggleGameMode && !paused_ && !inventoryOpen_ && !chestOpen_) {
             toggleGameMode();
         }
         if (in.toggleDebug) {
@@ -566,9 +590,9 @@ void App::run(long maxFrames, const std::string& screenshotPath) {
         // Exponentially smoothed frame time so the overlay's FPS readout is
         // steady instead of flickering with every frame.
         smoothedDt_ += (dt - smoothedDt_) * 0.05f;
-        // Gameplay only runs while neither the menu nor the inventory is open (they
-        // own the cursor then).
-        if (!paused_ && !inventoryOpen_) {
+        // Gameplay only runs while no overlay (menu / inventory / chest) owns the
+        // cursor.
+        if (!paused_ && !inventoryOpen_ && !chestOpen_) {
             player_.update(dt, in);
             editBlocks(in, dt);
             updateSurvival(dt);
@@ -717,6 +741,7 @@ void App::run(long maxFrames, const std::string& screenshotPath) {
 
     settings_.save(settingsPath()); // persist on exit (e.g. via the Exit button)
     savePlayer();                   // persist position/health/inventory next to chunks
+    saveChests();                   // persist chest contents next to chunks
 
     if (!screenshotPath.empty()) {
         renderer_.saveScreenshot(screenshotPath);
@@ -752,8 +777,8 @@ void App::buildUi(const InputState& in) {
     const float W = static_cast<float>(ext.width);
     const float H = static_cast<float>(ext.height);
 
-    // The inventory screen draws its own hotbar row, so hide the HUD bar then.
-    if (!inventoryOpen_) {
+    // The inventory/chest screens draw their own hotbar row, so hide the HUD bar then.
+    if (!inventoryOpen_ && !chestOpen_) {
         buildHotbar(ui, W, H);
     }
     if (debugOverlay_) {
@@ -768,6 +793,8 @@ void App::buildUi(const InputState& in) {
         const float py = std::round((H - ph) * 0.5f);
         buildMenu(ui, startX, py, pw, ph);
         buildTuning(ui, startX + pw + gap, py, tw, ph);
+    } else if (chestOpen_) {
+        buildChest(ui, W, H, in);
     } else if (inventoryOpen_) {
         buildInventory(ui, W, H, in);
     } else {
@@ -980,22 +1007,7 @@ void App::buildInventory(Ui& ui, float w, float h, const InputState& in) {
         const bool sel = index < Inventory::kHotbarSlots && index == inv.selected();
         drawSlot(ui, reg, sx, sy, slot, radius, inv.slot(index), sel || hovered);
         if (hovered && in.pointerPressed) {
-            ItemStack& s = inv.slot(index);
-            if (cursorStack_.empty()) {
-                cursorStack_ = s;
-                s.clear();
-            } else if (s.empty()) {
-                s = cursorStack_;
-                cursorStack_.clear();
-            } else if (s.blockId == cursorStack_.blockId) {
-                const int space = Inventory::kMaxStack - s.count;
-                const int put   = std::min(space, static_cast<int>(cursorStack_.count));
-                s.count = static_cast<uint16_t>(s.count + put);
-                cursorStack_.count = static_cast<uint16_t>(cursorStack_.count - put);
-                if (cursorStack_.count == 0) cursorStack_.clear();
-            } else {
-                std::swap(s, cursorStack_);
-            }
+            clickSlot(inv.slot(index));
         }
     };
 
@@ -1063,6 +1075,122 @@ void App::buildCrafting(Ui& ui, float x, float y, float w, const InputState& in)
         }
         ry += rowH;
     }
+}
+
+void App::clickSlot(ItemStack& s) {
+    if (cursorStack_.empty()) {
+        cursorStack_ = s;
+        s.clear();
+    } else if (s.empty()) {
+        s = cursorStack_;
+        cursorStack_.clear();
+    } else if (s.blockId == cursorStack_.blockId) {
+        const int space = Inventory::kMaxStack - s.count;
+        const int put   = std::min(space, static_cast<int>(cursorStack_.count));
+        s.count = static_cast<uint16_t>(s.count + put);
+        cursorStack_.count = static_cast<uint16_t>(cursorStack_.count - put);
+        if (cursorStack_.count == 0) cursorStack_.clear();
+    } else {
+        std::swap(s, cursorStack_);
+    }
+}
+
+void App::openChestAt(const glm::ivec3& pos) {
+    openChest_ = pos;
+    chests_.at(pos); // ensure an entry exists
+    chestOpen_ = true;
+    window_.setCursorDisabled(false); // free the cursor to click slots
+    input_.resetMouseDelta();
+}
+
+void App::toggleChest() {
+    chestOpen_ = false;
+    window_.setCursorDisabled(true);
+    input_.resetMouseDelta();
+    if (!cursorStack_.empty()) {
+        // Don't lose a held stack on close: tuck it back into the player inventory.
+        player_.inventory().add(cursorStack_.blockId, cursorStack_.count);
+        cursorStack_.clear();
+    }
+}
+
+void App::buildChest(Ui& ui, float w, float h, const InputState& in) {
+    const BlockRegistry& reg = world_.registry();
+    Inventory& inv = player_.inventory();
+    ChestStore::Chest& chest = chests_.at(openChest_);
+    ui.panel(0.0f, 0.0f, w, h, kUiDim);
+
+    const float slot = 54.0f, gap = 8.0f, radius = 16.0f;
+    const int   cols = Inventory::kStorageCols;        // 9
+    const int   chestRows = ChestStore::kSlots / cols; // 3
+    const int   invRows = Inventory::kStorageRows;     // 3
+    const float gridW = cols * slot + (cols - 1) * gap;
+    const float pad = 22.0f, titleH = 30.0f, secGap = 22.0f, hotGap = 18.0f;
+    const float panelW = gridW + 2.0f * pad;
+    const float panelH = titleH + chestRows * slot + (chestRows - 1) * gap + secGap +
+                         invRows * slot + (invRows - 1) * gap + hotGap + slot + 2.0f * pad;
+    const float px = std::round((w - panelW) * 0.5f);
+    const float py = std::round((h - panelH) * 0.5f);
+    ui.frame(px, py, panelW, panelH, kPanelFill, kCream, kFrameThick, kFrameRadius);
+    ui.label(px + pad, py + pad - 4.0f, "Chest", 0.6f, kUiText);
+
+    const float gx = px + pad;
+    float gy = py + pad + titleH;
+    auto cell = [&](ItemStack& s, bool selected, float sx, float sy) {
+        const bool hov = ui.hovered(sx, sy, slot, slot);
+        drawSlot(ui, reg, sx, sy, slot, radius, s, selected || hov);
+        if (hov && in.pointerPressed) clickSlot(s);
+    };
+
+    // Chest contents (top three rows).
+    for (int r = 0; r < chestRows; ++r) {
+        for (int c = 0; c < cols; ++c) {
+            cell(chest[static_cast<size_t>(r * cols + c)], false,
+                 gx + c * (slot + gap), gy + r * (slot + gap));
+        }
+    }
+    gy += chestRows * (slot + gap) + secGap;
+
+    // Player backpack (slots 9..35), then the hotbar row.
+    for (int r = 0; r < invRows; ++r) {
+        for (int c = 0; c < cols; ++c) {
+            cell(inv.slot(Inventory::kHotbarSlots + r * cols + c), false,
+                 gx + c * (slot + gap), gy + r * (slot + gap));
+        }
+    }
+    const float hotY = gy + invRows * (slot + gap) + hotGap;
+    for (int c = 0; c < Inventory::kHotbarSlots; ++c) {
+        cell(inv.slot(c), c == inv.selected(), gx + c * (slot + gap), hotY);
+    }
+
+    if (!cursorStack_.empty()) {
+        ui.isoCube(in.cursor.x, in.cursor.y, 22.0f,
+                   reg.faceLayer(cursorStack_.blockId, FacePosY),
+                   reg.faceLayer(cursorStack_.blockId, FacePosX));
+        if (cursorStack_.count > 1) {
+            ui.labelCentered(in.cursor.x + 16.0f, in.cursor.y + 12.0f,
+                             std::to_string(cursorStack_.count), 0.5f, kCream);
+        }
+    }
+}
+
+void App::saveChests() const {
+    const std::string& dir = world_.savePath();
+    if (dir.empty()) return;
+    const std::vector<uint8_t> bytes = chests_.serialize();
+    std::ofstream f(dir + "/chests.dat", std::ios::binary | std::ios::trunc);
+    if (f) f.write(reinterpret_cast<const char*>(bytes.data()),
+                   static_cast<std::streamsize>(bytes.size()));
+}
+
+void App::loadChests() {
+    const std::string& dir = world_.savePath();
+    if (dir.empty()) return;
+    std::ifstream f(dir + "/chests.dat", std::ios::binary);
+    if (!f) return;
+    const std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(f)),
+                                     std::istreambuf_iterator<char>());
+    chests_.deserialize(bytes.data(), bytes.size());
 }
 
 // F1 info overlay: a column of small stat lines in the top-left. Read-only —

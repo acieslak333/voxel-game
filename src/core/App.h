@@ -6,6 +6,7 @@
 #include "core/Palette.h"
 #include "core/Settings.h"
 #include "core/Window.h"
+#include "player/ChestStore.h"
 #include "player/Crafting.h"
 #include "player/PlayerController.h"
 #include "render/Renderer.h"
@@ -62,6 +63,9 @@ private:
     // restore, so the caller keeps the default spawn + starter kit.
     void savePlayer() const;
     bool loadPlayer();
+    // Chest contents persistence (<save dir>/chests.dat). No-op when persistence off.
+    void saveChests() const;
+    void loadChests();
 
     // Simple liquid flow (water & lava): drain a budget of queued liquid cells,
     // spreading them down then sideways (decaying distance in Block::metadata, no
@@ -79,6 +83,14 @@ private:
     // Terraria-style crafting list beside the inventory: the recipes craftable from
     // the current inventory, click an output to craft one. (ISSUES #13B)
     void buildCrafting(class Ui& ui, float x, float y, float w, const InputState& in);
+    // Open-chest screen: the chest's 27-slot grid above the player's inventory,
+    // click-to-move between them (and the player hotbar). (ISSUES #13B)
+    void buildChest(class Ui& ui, float w, float h, const InputState& in);
+    // Move items between a clicked slot and the mouse-held cursor stack (pick up /
+    // drop / merge / swap) — shared by the inventory and chest screens.
+    void clickSlot(ItemStack& s);
+    void openChestAt(const glm::ivec3& pos); // open the chest block at pos
+    void toggleChest();                      // close the open chest (return cursor)
     void buildMenu(class Ui& ui, float px, float py, float pw, float ph); // Esc menu column
     // Second column: live atmosphere tuning (clouds/fog/weather/sky). Ephemeral.
     void buildTuning(class Ui& ui, float px, float py, float pw, float ph);
@@ -129,10 +141,13 @@ private:
     Input            input_;
     PlayerController  player_;
     Crafting          crafting_; // data-driven recipe list (assets/recipes.yaml)
+    ChestStore        chests_;   // per-position chest contents (persisted to disk)
 
     // UI state.
     bool             paused_ = false;        // escape menu open
     bool             inventoryOpen_ = false; // inventory screen open (E)
+    bool             chestOpen_ = false;     // a chest's screen is open
+    glm::ivec3       openChest_{0, 0, 0};    // which chest block is open
     bool             creativeMode_ = true;   // creative: every block, infinite, no depletion (G toggles)
     ItemStack        cursorStack_;           // item held by the mouse in the inventory screen
     bool             debugOverlay_ = false;  // F1 info overlay visible
@@ -147,6 +162,7 @@ private:
     float      mineProgress01_ = 0.0f; // 0..1 for the crosshair break meter
 
     glm::vec3  spawnFeet_{0.0f}; // respawn point (world spawn; player save comes later)
+    uint16_t   chestId_ = 0;     // resolved id of the chest block (0 if undefined)
     float            smoothedDt_ = 1.0f / 60.0f; // EMA of frame time, for the overlay's FPS
 
     // Atmosphere tuning panel (ephemeral 2nd menu column; not persisted).

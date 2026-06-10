@@ -1,4 +1,5 @@
 #include "core/App.h"
+#include "player/ChestStore.h"
 #include "player/Crafting.h"
 #include "player/PlayerSave.h"
 
@@ -403,6 +404,26 @@ int runLogicTest(const std::string& assetDir) {
             check(inv2.count(trunk) == 1, "one trunk consumed");
             check(inv2.count(planks) == 4, "four planks produced");
         }
+
+        // Chest store: holds per-position contents and round-trips through disk bytes.
+        vg::ChestStore store;
+        const glm::ivec3 pa{10, 64, -20}, pb{-5, 70, 3};
+        store.at(pa)[0] = vg::ItemStack{stone, 40};
+        store.at(pa)[5] = vg::ItemStack{planks, 12};
+        store.at(pb)[26] = vg::ItemStack{pick, 1};
+        check(store.has(pa) && store.has(pb), "chests recorded at two positions");
+        const std::vector<uint8_t> cbytes = store.serialize();
+        vg::ChestStore loaded;
+        check(loaded.deserialize(cbytes.data(), cbytes.size()), "chest store parses");
+        check(loaded.has(pa) && loaded.at(pa)[0].blockId == stone &&
+              loaded.at(pa)[0].count == 40 && loaded.at(pa)[5].blockId == planks,
+              "chest A contents round-trip");
+        check(loaded.at(pb)[26].blockId == pick, "chest B contents round-trip");
+        store.erase(pa);
+        check(!store.has(pa), "erased chest is gone");
+        vg::ChestStore cbad;
+        const uint8_t cjunk[6] = {9, 9, 9, 9, 9, 9};
+        check(!cbad.deserialize(cjunk, sizeof cjunk), "corrupt chest store is rejected");
     } catch (const std::exception& e) {
         std::cerr << "[logic] FAIL: exception: " << e.what() << '\n';
         return EXIT_FAILURE;
