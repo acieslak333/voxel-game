@@ -234,6 +234,7 @@ add_executable(voxelgame
     src/world/BlockRegistry.cpp
     src/world/ChunkMesher.cpp
     src/world/Noise.cpp
+    src/world/NoiseStack.cpp
     src/world/Raycast.cpp
     src/world/TerrainGenerator.cpp
     src/world/World.cpp

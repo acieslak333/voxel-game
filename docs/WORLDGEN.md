@@ -60,6 +60,36 @@ regardless of biome.
 
 Missing keys fall back to sensible baked-in defaults (the game runs without the file).
 
+### Composable noise stacks (`vg::NoiseStack`)
+Any of the six noise fields (continentalness / erosion / peaks / temperature /
+humidity / rivers) can replace its single fbm with a **weighted blend of layers**
+by adding a `layers:` list under it:
+
+```yaml
+continentalness:
+  layers:
+    - {type: perlin, frequency: 0.0034, octaves: 4, weight: 1.0}
+    - {type: ridged, frequency: 0.012,  octaves: 3, weight: 0.5, offset: [1000, -2000]}
+    - {type: billow, frequency: 0.006,  octaves: 2, weight: 0.3, offset: [-3000, 500]}
+```
+
+Each layer is an fbm of one **shape** — `perlin` (rolling field), `ridged` (sharp
+mountain ridgelines along the zero-crossings) or `billow` (rounded blobs) — combined
+by `weight` (negative subtracts) and renormalised to ~[-1, 1]. `offset: [x, z]` shifts
+a layer in world blocks so layers decorrelate. **Opt-in:** with no `layers:` block the
+legacy single-noise path runs and worlds are byte-identical (the `--selftest` golden is
+unchanged). Preview a field with `voxelgame --genmap --mode noise --layer cont`.
+
+## Inspecting generation (`--genmap`)
+Headless, no window/GPU, fixed seed (1337) so runs are comparable:
+- `--genmap` (or `--mode top`) — top-down surface map (block colour + hillshade).
+- `--genmap --mode noise --layer <cont|ero|peak|temp|hum|river|relief>` — one raw
+  noise layer as a diverging blue/white/red field (relief draws the sea-level coast).
+- `--genmap --mode cross` — vertical cross-section through Z=0 (terrain profile,
+  water column, soil/stone/snow layers).
+
+Size with `--mapsize N` (px), `--mapstep B` (blocks/px), `--out PATH`.
+
 ## World height
 `assets/world.yaml` `height_chunks` sets the vertical extent (× 16 blocks). It's
 currently **8 (128 tall)** with sea level 64 in the middle. For taller, more

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "world/Noise.h"
+#include "world/NoiseStack.h"
 
 #include <cstdint>
 #include <string>
@@ -122,6 +123,21 @@ private:
     float contFreq_ = 0.0016f, eroFreq_ = 0.0032f, peakFreq_ = 0.0065f;
     float tempFreq_ = 0.0009f, humFreq_ = 0.0012f;
     int   contOct_ = 4, eroOct_ = 3, peakOct_ = 4, climOct_ = 2;
+
+    // Optional data-driven NoiseStack overrides (assets/biomes.yaml `<field>.layers:`).
+    // When a field declares `layers:`, its single-fbm sample is replaced by the
+    // weighted blend. When absent the stack stays empty and the legacy scalar path
+    // above runs unchanged — so adding this feature does NOT alter existing worlds
+    // (the --selftest golden is stable until a `layers:` block is authored).
+    NoiseStack contStack_, eroStack_, peakStack_, tempStack_, humStack_, riverStack_;
+    // Sample a noise field: the stack blend if one was authored, else the scalar fbm.
+    // All take raw world coords (the per-layer frequency is applied inside the stack).
+    [[nodiscard]] float sampleCont(float x, float z) const;
+    [[nodiscard]] float sampleEro(float x, float z) const;
+    [[nodiscard]] float samplePeak(float x, float z) const;
+    [[nodiscard]] float sampleTemp(float x, float z) const;
+    [[nodiscard]] float sampleHum(float x, float z) const;
+    [[nodiscard]] float sampleRiver(float x, float z) const;
 
     // Rivers: a winding channel carved toward sea level where the river noise is
     // near zero, only in lowlands (so mountains don't get deep canals).

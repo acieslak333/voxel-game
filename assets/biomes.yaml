@@ -32,6 +32,24 @@ erosion: {frequency: 0.0032, octaves: 3}           # flat plains <-> jagged moun
 peaks: {frequency: 0.0065, octaves: 4}             # the mountain ridgelines
 temperature: {frequency: 0.0009}                   # hot <-> cold biome axis
 humidity: {frequency: 0.0012}                      # dry <-> wet biome axis
+#
+# COMPOSABLE NOISE STACKS (optional, opt-in). Any of the six noise fields above
+# (continentalness / erosion / peaks / temperature / humidity / rivers) can replace
+# its single noise with a WEIGHTED BLEND of layers by adding a `layers:` list. Each
+# layer is an fbm of one shape — perlin (rolling field), ridged (sharp mountain
+# ridgelines) or billow (rounded blobs) — combined by `weight` (may be negative to
+# subtract) and normalised back to ~[-1, 1]. `offset: [x, z]` shifts a layer in
+# world blocks so layers don't correlate. Read by vg::NoiseStack via TerrainGenerator;
+# preview a field with `voxelgame --genmap --mode noise --layer cont` (or ero/peak/...).
+# When `layers:` is ABSENT the legacy single-noise path runs (worlds are unchanged).
+# Example — continentalness as a perlin base + ridged detail + billow blobs:
+#   continentalness:
+#     frequency: 0.0034            # kept for the legacy path / tools; ignored when layers: present
+#     octaves: 4
+#     layers:
+#       - {type: perlin, frequency: 0.0034, octaves: 4, weight: 1.0}
+#       - {type: ridged, frequency: 0.012,  octaves: 3, weight: 0.5, offset: [1000, -2000]}
+#       - {type: billow, frequency: 0.006,  octaves: 2, weight: 0.3, offset: [-3000, 500]}
 
 # --- Rivers -----------------------------------------------------------------
 # Winding channels carved toward sea level where the river noise is near zero.

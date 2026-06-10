@@ -40,6 +40,42 @@ float hash01(int x, int z, uint32_t salt) {
     return static_cast<float>(h & 0x00FFFFFFu) / static_cast<float>(0x01000000);
 }
 
+// Parse an optional `layers:` sequence under a field node into a NoiseStack. Each
+// list entry is a layer: {type, frequency, octaves, lacunarity, gain, weight,
+// offset:[x,z]}. Returns an empty stack (and leaves it unused) if there is no
+// `layers:` node, so a plain `{frequency, octaves}` field keeps the legacy path.
+// baseSeed salts each layer's own noise so the layers are independent.
+NoiseStack loadStack(const YAML::Node& fieldNode, uint32_t baseSeed) {
+    NoiseStack stack;
+    if (!fieldNode || !fieldNode["layers"] || !fieldNode["layers"].IsSequence()) {
+        return stack; // empty: caller falls back to the scalar fbm
+    }
+    uint32_t i = 0;
+    for (const YAML::Node& ln : fieldNode["layers"]) {
+        NoiseStack::Layer L;
+        if (ln["type"]) {
+            const std::string t = ln["type"].as<std::string>();
+            if (t == "ridged")      L.type = NoiseStack::Type::Ridged;
+            else if (t == "billow") L.type = NoiseStack::Type::Billow;
+            else                    L.type = NoiseStack::Type::Perlin;
+        }
+        if (ln["frequency"])  L.frequency  = ln["frequency"].as<float>();
+        if (ln["octaves"])    L.octaves    = ln["octaves"].as<int>();
+        if (ln["lacunarity"]) L.lacunarity = ln["lacunarity"].as<float>();
+        if (ln["gain"])       L.gain       = ln["gain"].as<float>();
+        if (ln["weight"])     L.weight     = ln["weight"].as<float>();
+        if (ln["offset"] && ln["offset"].IsSequence() && ln["offset"].size() == 2) {
+            L.offX = ln["offset"][0].as<float>();
+            L.offZ = ln["offset"][1].as<float>();
+        }
+        // Salt each layer so its noise is decorrelated from the others and from the
+        // field's legacy scalar noise (which uses a different seed derivation).
+        stack.addLayer(L, baseSeed * 2246822519u + i * 0x9e3779b9u + 0x5bd1e995u);
+        ++i;
+    }
+    return stack;
+}
+
 // Resolve a block name to an id, falling back to `fallback` (then stone) if the
 // name is missing — so an authored biome can't crash generation.
 uint16_t resolveBlock(const BlockRegistry& reg, const std::string& name,
@@ -189,6 +225,15 @@ void TerrainGenerator::loadConfig(const std::string& assetDir, const BlockRegist
     loadSpline("continental_spline", contSpline_);
     loadSpline("erosion_spline", eroSpline_);
 
+    // Optional data-driven noise stacks: a `<field>.layers:` sequence replaces the
+    // single-fbm sample with a weighted blend. Absent -> empty stack -> legacy path.
+    contStack_  = loadStack(root["continentalness"], seed_ ^ 0x9e3779b9u);
+    eroStack_   = loadStack(root["erosion"],         seed_ * 2654435761u + 0x1234u);
+    peakStack_  = loadStack(root["peaks"],           seed_ * 40503u + 0x77u);
+    tempStack_  = loadStack(root["temperature"],     seed_ ^ 0xC0FFEEu);
+    humStack_   = loadStack(root["humidity"],        seed_ * 668265263u + 0x55u);
+    riverStack_ = loadStack(root["rivers"],          seed_ * 2246822519u + 0x99u);
+
     const YAML::Node bs = root["biomes"];
     if (bs && bs.IsSequence() && bs.size() > 0) {
         std::vector<BiomeDef> loaded;
@@ -233,9 +278,9 @@ void TerrainGenerator::loadConfig(const std::string& assetDir, const BlockRegist
 
 int TerrainGenerator::shapeHeight(int wx, int wz) const {
     const float x = static_cast<float>(wx), z = static_cast<float>(wz);
-    const float c = contNoise_.fbm(x * contFreq_, z * contFreq_, contOct_);
-    const float e = eroNoise_.fbm(x * eroFreq_, z * eroFreq_, eroOct_);
-    const float p = peakNoise_.fbm(x * peakFreq_, z * peakFreq_, peakOct_);
+    const float c = sampleCont(x, z);
+    const float e = sampleEro(x, z);
+    const float p = samplePeak(x, z);
 
     // Ridged peaks in [0,1]: 1 along the noise's zero-crossings (sharp ridgelines),
     // falling to 0 in the cells between, so mountains read as ranges not blobs.
@@ -270,7 +315,7 @@ int TerrainGenerator::shapeHeight(int wx, int wz) const {
     // sea level — but only in lowlands, so mountains keep their relief instead of
     // growing deep canals. The channel fills with water via the sea-level fill.
     if (h - seaLevel_ < riverMaxRel_) {
-        const float r = riverNoise_.fbm(x * riverFreq_, z * riverFreq_, 2);
+        const float r = sampleRiver(x, z);
         const float t = std::clamp(1.0f - std::fabs(r) / riverWidth_, 0.0f, 1.0f);
         if (t > 0.0f) {
             const int bed = seaLevel_ - 1 - static_cast<int>(t * t * riverDepth_);
@@ -322,15 +367,43 @@ int TerrainGenerator::height(int wx, int wz) const {
     return lk.in ? std::min(sh, lk.bed) : sh;
 }
 
+// Field samplers: use the authored NoiseStack blend when present, else the legacy
+// single-fbm scalar path (byte-identical to the original code, so worlds without a
+// `layers:` block are unchanged). All take raw world coords.
+float TerrainGenerator::sampleCont(float x, float z) const {
+    return contStack_.empty() ? contNoise_.fbm(x * contFreq_, z * contFreq_, contOct_)
+                              : contStack_.value(x, z);
+}
+float TerrainGenerator::sampleEro(float x, float z) const {
+    return eroStack_.empty() ? eroNoise_.fbm(x * eroFreq_, z * eroFreq_, eroOct_)
+                             : eroStack_.value(x, z);
+}
+float TerrainGenerator::samplePeak(float x, float z) const {
+    return peakStack_.empty() ? peakNoise_.fbm(x * peakFreq_, z * peakFreq_, peakOct_)
+                              : peakStack_.value(x, z);
+}
+float TerrainGenerator::sampleTemp(float x, float z) const {
+    return tempStack_.empty() ? tempNoise_.fbm(x * tempFreq_, z * tempFreq_, climOct_)
+                              : tempStack_.value(x, z);
+}
+float TerrainGenerator::sampleHum(float x, float z) const {
+    return humStack_.empty() ? humNoise_.fbm(x * humFreq_, z * humFreq_, climOct_)
+                             : humStack_.value(x, z);
+}
+float TerrainGenerator::sampleRiver(float x, float z) const {
+    return riverStack_.empty() ? riverNoise_.fbm(x * riverFreq_, z * riverFreq_, 2)
+                               : riverStack_.value(x, z);
+}
+
 float TerrainGenerator::fieldValue(Field f, int wx, int wz) const {
     const float x = static_cast<float>(wx), z = static_cast<float>(wz);
     switch (f) {
-        case Field::Continentalness: return contNoise_.fbm(x * contFreq_, z * contFreq_, contOct_);
-        case Field::Erosion:         return eroNoise_.fbm(x * eroFreq_, z * eroFreq_, eroOct_);
-        case Field::Peaks:           return peakNoise_.fbm(x * peakFreq_, z * peakFreq_, peakOct_);
-        case Field::Temperature:     return tempNoise_.fbm(x * tempFreq_, z * tempFreq_, climOct_);
-        case Field::Humidity:        return humNoise_.fbm(x * humFreq_, z * humFreq_, climOct_);
-        case Field::River:           return riverNoise_.fbm(x * riverFreq_, z * riverFreq_, 2);
+        case Field::Continentalness: return sampleCont(x, z);
+        case Field::Erosion:         return sampleEro(x, z);
+        case Field::Peaks:           return samplePeak(x, z);
+        case Field::Temperature:     return sampleTemp(x, z);
+        case Field::Humidity:        return sampleHum(x, z);
+        case Field::River:           return sampleRiver(x, z);
         case Field::Relief:          return static_cast<float>(shapeHeight(wx, wz) - seaLevel_);
         case Field::Height:          return static_cast<float>(height(wx, wz));
     }
@@ -359,8 +432,8 @@ ColumnInfo TerrainGenerator::columnInfo(int wx, int wz) const {
     const int rel = ci.height - seaLevel_;
 
     // Climate. Temperature cools with altitude so highlands trend snowy.
-    float temp = tempNoise_.fbm(x * tempFreq_, z * tempFreq_, climOct_);
-    const float hum = humNoise_.fbm(x * humFreq_, z * humFreq_, climOct_);
+    float temp = sampleTemp(x, z);
+    const float hum = sampleHum(x, z);
     if (rel > 0) {
         temp -= static_cast<float>(rel) * 0.010f;
     }
