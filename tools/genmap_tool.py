@@ -100,10 +100,30 @@ def save_and_deploy(doc):
         yaml.dump(doc, f)
 
 
-def run_genmap(pixels, step):
-    subprocess.run([exe_path(), "--genmap", "--mapsize", str(pixels),
-                    "--mapstep", str(step), "--out", MAP_OUT],
-                   cwd=ROOT, check=True, capture_output=True)
+# View modes the genmap backend supports. "top" is the surface map; "noise:<layer>"
+# renders one raw noise layer; "cross" is a vertical cross-section. The tool just
+# forwards these to `voxelgame --genmap --mode ... [--layer ...]`.
+VIEW_MODES = [
+    ("Top-down surface", "top"),
+    ("Noise: continentalness", "noise:cont"),
+    ("Noise: erosion", "noise:ero"),
+    ("Noise: peaks", "noise:peak"),
+    ("Noise: temperature", "noise:temp"),
+    ("Noise: humidity", "noise:hum"),
+    ("Noise: rivers", "noise:river"),
+    ("Noise: relief (height)", "noise:relief"),
+    ("Cross-section (Z=0)", "cross"),
+]
+
+
+def run_genmap(pixels, step, view="top"):
+    args = [exe_path(), "--genmap", "--mapsize", str(pixels),
+            "--mapstep", str(step), "--out", MAP_OUT]
+    if view.startswith("noise:"):
+        args += ["--mode", "noise", "--layer", view.split(":", 1)[1]]
+    elif view == "cross":
+        args += ["--mode", "cross"]
+    subprocess.run(args, cwd=ROOT, check=True, capture_output=True)
 
 
 app = Flask(__name__)
@@ -124,14 +144,16 @@ def index():
             f'data-path="{path}" oninput="onSlide(this)">'
             f'<span class="v" id="v_{path}">{val:g}</span></div>')
     controls = "\n".join(rows)
-    return Response(PAGE.replace("__CONTROLS__", controls), mimetype="text/html")
+    opts = "\n".join(f'<option value="{val}">{label}</option>' for label, val in VIEW_MODES)
+    page = PAGE.replace("__CONTROLS__", controls).replace("__VIEWS__", opts)
+    return Response(page, mimetype="text/html")
 
 
 @app.route("/regen", methods=["POST"])
 def regen():
     doc = load_doc()
     for path, raw in request.form.items():
-        if path in ("__pixels__", "__step__"):
+        if path in ("__pixels__", "__step__", "__view__"):
             continue
         try:
             val = float(raw)
@@ -143,7 +165,8 @@ def regen():
     save_and_deploy(doc)
     try:
         run_genmap(int(request.form.get("__pixels__", 640)),
-                   int(request.form.get("__step__", 8)))
+                   int(request.form.get("__step__", 8)),
+                   request.form.get("__view__", "top"))
     except subprocess.CalledProcessError as e:
         return Response(e.stderr.decode(errors="ignore") or "genmap failed", status=500)
     return "ok"
@@ -170,6 +193,7 @@ PAGE = """<!doctype html><html><head><meta charset="utf-8"><title>worldgen tool<
  <h2>worldgen tool</h2>
  <div class="hint">Drag a slider → biomes.yaml is patched and the game's --genmap re-runs.
  Blue = ocean (darker = deeper), green/tan/white = land/beach/snow, hillshade = relief.</div>
+ <div class="row"><label>view</label><select id="view" style="flex:1">__VIEWS__</select></div>
  <div class="row"><label>size</label><input id="px" type="number" value="640" min="128" max="2048" step="64"></div>
  <div class="row"><label>blk/px</label><input id="st" type="number" value="8" min="1" max="32"></div>
  __CONTROLS__
@@ -185,12 +209,14 @@ function regen(){
   document.querySelectorAll('input[type=range]').forEach(s=>fd.append(s.dataset.path,s.value));
   fd.append('__pixels__',document.getElementById('px').value);
   fd.append('__step__',document.getElementById('st').value);
+  fd.append('__view__',document.getElementById('view').value);
   document.getElementById('status').textContent='generating…';
   fetch('/regen',{method:'POST',body:fd}).then(r=>r.text().then(t=>{
     if(r.ok){document.getElementById('map').src='/map.png?'+Date.now();
              document.getElementById('status').textContent='ok';}
     else document.getElementById('status').textContent='error: '+t;}));}
 document.getElementById('px').onchange=regen; document.getElementById('st').onchange=regen;
+document.getElementById('view').onchange=regen;
 regen();
 </script></body></html>"""
 
