@@ -76,7 +76,22 @@ FetchContent_Declare(
     GIT_SHALLOW    TRUE
 )
 
-FetchContent_MakeAvailable(glfw glm vulkan_headers)
+# --- yaml-cpp : parse the block-definition data files ------------------------
+#  Built from source so the project stays self-contained (no system package
+#  required). Block types live in assets/blocks.yaml and are loaded at runtime
+#  by BlockRegistry.
+FetchContent_Declare(
+    yaml-cpp
+    GIT_REPOSITORY https://github.com/jbeder/yaml-cpp.git
+    GIT_TAG        0.8.0
+    GIT_SHALLOW    TRUE
+)
+set(YAML_CPP_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
+set(YAML_CPP_BUILD_TOOLS    OFF CACHE BOOL "" FORCE)
+set(YAML_CPP_BUILD_CONTRIB  OFF CACHE BOOL "" FORCE)
+set(YAML_CPP_INSTALL        OFF CACHE BOOL "" FORCE)
+
+FetchContent_MakeAvailable(glfw glm vulkan_headers yaml-cpp)
 
 # -----------------------------------------------------------------------------
 #  Locate the Vulkan *loader* library (libvulkan / vulkan-1).
@@ -180,6 +195,12 @@ endfunction()
 
 add_shader(chunk.vert)
 add_shader(chunk.frag)
+add_shader(ui.vert)
+add_shader(ui.frag)
+add_shader(sky.vert)
+add_shader(sky.frag)
+add_shader(composite.vert)
+add_shader(composite.frag)
 add_custom_target(shaders DEPENDS ${SPIRV_OUTPUTS})
 
 # -----------------------------------------------------------------------------
@@ -190,6 +211,10 @@ add_executable(voxelgame
     src/core/Window.cpp
     src/core/App.cpp
     src/core/Input.cpp
+    src/core/Palette.cpp
+    src/core/DayNight.cpp
+    src/core/Settings.cpp
+    src/core/Ui.cpp
     src/render/VulkanContext.cpp
     src/render/Swapchain.cpp
     src/render/Renderer.cpp
@@ -198,13 +223,24 @@ add_executable(voxelgame
     src/render/TextureArray.cpp
     src/render/Pipeline.cpp
     src/render/WorldRenderer.cpp
+    src/render/OffscreenTarget.cpp
+    src/render/CompositeRenderer.cpp
+    src/render/SkyRenderer.cpp
+    src/clouds/CloudNoise.cpp
+    src/clouds/WeatherMap.cpp
+    src/clouds/CloudSystem.cpp
+    src/render/UiRenderer.cpp
     src/render/Screenshot.cpp
     src/world/BlockRegistry.cpp
     src/world/ChunkMesher.cpp
     src/world/Noise.cpp
+    src/world/Raycast.cpp
+    src/world/TerrainGenerator.cpp
     src/world/World.cpp
+    src/world/WorldConfig.cpp
     src/player/Camera.cpp
     src/player/PlayerController.cpp
+    src/player/Inventory.cpp
 )
 add_dependencies(voxelgame shaders)
 
@@ -218,6 +254,7 @@ target_link_libraries(voxelgame PRIVATE
     glm::glm
     Vulkan::Headers
     ${VULKAN_LOADER_LIB}
+    yaml-cpp::yaml-cpp
 )
 
 # Copy runtime assets (textures) next to the executable so VG_ASSET_DIR resolves.

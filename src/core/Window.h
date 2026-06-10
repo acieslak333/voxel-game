@@ -29,6 +29,7 @@ public:
     Window& operator=(const Window&) = delete;
 
     [[nodiscard]] bool shouldClose() const;
+    void requestClose() const { glfwSetWindowShouldClose(window_, GLFW_TRUE); }
     void pollEvents() const;
 
     // Create a Vulkan surface for this window. Throws on failure.
@@ -54,11 +55,18 @@ public:
 
     [[nodiscard]] GLFWwindow* handle() const { return window_; }
 
+    // Mouse-wheel scrolled since the last call, in notches (+ = wheel up), then
+    // reset to zero. Polled once per frame by Input; GLFW only delivers scroll
+    // via a callback, so the window accumulates it between polls.
+    [[nodiscard]] double takeScrollDelta();
+
 private:
     static void framebufferResizeCallback(GLFWwindow* window, int width, int height);
+    static void scrollCallback(GLFWwindow* window, double xoffset, double yoffset);
 
     GLFWwindow* window_ = nullptr;
     bool framebufferResized_ = false;
+    double scrollAccum_ = 0.0; // wheel notches since the last takeScrollDelta()
 };
 
 } // namespace vg

@@ -1,10 +1,13 @@
 #include "render/Renderer.h"
 
 #include "core/Window.h"
+#include "render/CompositeRenderer.h"
+#include "render/OffscreenTarget.h"
 #include "render/Screenshot.h"
 #include "render/Swapchain.h"
 #include "render/VulkanContext.h"
 
+#include <algorithm>
 #include <array>
 #include <limits>
 #include <stdexcept>
@@ -16,14 +19,119 @@ Renderer::Renderer(VulkanContext& ctx, Swapchain& swapchain, Window& window)
     createCommandPool();
     createCommandBuffers();
     createSyncObjects();
+    createOffscreen();
+    createUiRenderPass();
+    createUiFramebuffers();
+    // The composite pass samples the offscreen and runs inside the UI render pass,
+    // so it is built after both exist; setSource() points it at the current target.
+    composite_ = std::make_unique<CompositeRenderer>(ctx_, uiRenderPass_);
+    composite_->setSource(offscreen_->colorView(), offscreen_->depthView());
+}
+
+VkRenderPass Renderer::sceneRenderPass() const {
+    return offscreen_->renderPass();
+}
+
+void Renderer::createOffscreen() {
+    const VkExtent2D full = swapchain_.extent();
+    const VkExtent2D low{std::max(1u, full.width / pixelScale_),
+                         std::max(1u, full.height / pixelScale_)};
+    offscreen_ = std::make_unique<OffscreenTarget>(ctx_, low, swapchain_.imageFormat());
+    if (composite_) {
+        composite_->setSource(offscreen_->colorView(), offscreen_->depthView()); // re-point
+    }
+}
+
+void Renderer::setPixelScale(uint32_t scale) {
+    scale = std::clamp(scale, 1u, kMaxPixelScale);
+    if (scale == pixelScale_) {
+        return;
+    }
+    pixelScale_ = scale;
+    // Resizing the offscreen target means freeing GPU images the frames in flight
+    // may still reference, so drain the GPU first.
+    vkDeviceWaitIdle(ctx_.device());
+    createOffscreen();
 }
 
 Renderer::~Renderer() {
+    destroyUiFramebuffers();
+    if (uiRenderPass_) {
+        vkDestroyRenderPass(ctx_.device(), uiRenderPass_, nullptr);
+    }
     destroySyncObjects();
     if (commandPool_) {
         // Destroying the pool frees all command buffers allocated from it.
         vkDestroyCommandPool(ctx_.device(), commandPool_, nullptr);
     }
+}
+
+void Renderer::createUiRenderPass() {
+    // Swapchain pass: the composite draw overwrites the whole image (so it does not
+    // need to LOAD anything), then the 2D UI blends on top, and it is handed to the
+    // presentation engine. No depth: everything here is flat 2D.
+    VkAttachmentDescription color{};
+    color.format         = swapchain_.imageFormat();
+    color.samples        = VK_SAMPLE_COUNT_1_BIT;
+    color.loadOp         = VK_ATTACHMENT_LOAD_OP_DONT_CARE; // composite fills it
+    color.storeOp        = VK_ATTACHMENT_STORE_OP_STORE;
+    color.stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    color.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    color.initialLayout  = VK_IMAGE_LAYOUT_UNDEFINED;
+    color.finalLayout    = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+
+    VkAttachmentReference colorRef{0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
+    VkSubpassDescription subpass{};
+    subpass.pipelineBindPoint    = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    subpass.colorAttachmentCount = 1;
+    subpass.pColorAttachments    = &colorRef;
+
+    // Wait for the acquired image to be available before writing colour into it.
+    VkSubpassDependency dep{};
+    dep.srcSubpass    = VK_SUBPASS_EXTERNAL;
+    dep.dstSubpass    = 0;
+    dep.srcStageMask  = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    dep.srcAccessMask = 0;
+    dep.dstStageMask  = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    dep.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+
+    VkRenderPassCreateInfo info{};
+    info.sType           = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+    info.attachmentCount = 1;
+    info.pAttachments    = &color;
+    info.subpassCount    = 1;
+    info.pSubpasses      = &subpass;
+    info.dependencyCount = 1;
+    info.pDependencies   = &dep;
+    if (vkCreateRenderPass(ctx_.device(), &info, nullptr, &uiRenderPass_) != VK_SUCCESS) {
+        throw std::runtime_error("Failed to create UI render pass");
+    }
+}
+
+void Renderer::createUiFramebuffers() {
+    const VkExtent2D extent = swapchain_.extent();
+    uiFramebuffers_.resize(swapchain_.imageCount());
+    for (uint32_t i = 0; i < swapchain_.imageCount(); ++i) {
+        VkImageView view = swapchain_.imageView(i);
+        VkFramebufferCreateInfo info{};
+        info.sType           = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+        info.renderPass      = uiRenderPass_;
+        info.attachmentCount = 1;
+        info.pAttachments    = &view;
+        info.width           = extent.width;
+        info.height          = extent.height;
+        info.layers          = 1;
+        if (vkCreateFramebuffer(ctx_.device(), &info, nullptr, &uiFramebuffers_[i]) != VK_SUCCESS) {
+            throw std::runtime_error("Failed to create UI framebuffer");
+        }
+    }
+}
+
+void Renderer::destroyUiFramebuffers() {
+    for (VkFramebuffer fb : uiFramebuffers_) {
+        vkDestroyFramebuffer(ctx_.device(), fb, nullptr);
+    }
+    uiFramebuffers_.clear();
 }
 
 void Renderer::waitIdle() const {
@@ -107,36 +215,63 @@ void Renderer::destroySyncObjects() {
 }
 
 void Renderer::recordCommandBuffer(VkCommandBuffer cmd, uint32_t imageIndex,
-                                   const RecordFn& recordScene) {
+                                   const RecordFn& recordPre, const RecordFn& recordScene,
+                                   const RecordFn& recordUi) {
     VkCommandBufferBeginInfo beginInfo{};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     if (vkBeginCommandBuffer(cmd, &beginInfo) != VK_SUCCESS) {
         throw std::runtime_error("Failed to begin recording command buffer");
     }
 
-    // Two attachments to clear: colour (index 0) and depth (index 1).
+    // --- Pre-pass: transfers that must run outside any render pass (e.g. the
+    // streaming chunk-mesh uploads), recorded into this frame's command buffer so
+    // they're ordered before the draws by a barrier, with no separate submit. ----
+    if (recordPre) {
+        recordPre(cmd, currentFrame_, offscreen_->extent());
+    }
+
+    // --- Pass 1: render the scene into the low-res offscreen target ----------
     std::array<VkClearValue, 2> clearValues{};
     clearValues[0].color        = {{clearColor_[0], clearColor_[1], clearColor_[2], clearColor_[3]}};
     clearValues[1].depthStencil = {1.0f, 0}; // far plane
 
+    const VkExtent2D lowExtent = offscreen_->extent();
     VkRenderPassBeginInfo rpInfo{};
     rpInfo.sType             = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-    rpInfo.renderPass        = swapchain_.renderPass();
-    rpInfo.framebuffer       = swapchain_.framebuffer(imageIndex);
+    rpInfo.renderPass        = offscreen_->renderPass();
+    rpInfo.framebuffer       = offscreen_->framebuffer();
     rpInfo.renderArea.offset = {0, 0};
-    rpInfo.renderArea.extent = swapchain_.extent();
+    rpInfo.renderArea.extent = lowExtent;
     rpInfo.clearValueCount   = static_cast<uint32_t>(clearValues.size());
     rpInfo.pClearValues      = clearValues.data();
 
     vkCmdBeginRenderPass(cmd, &rpInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-    // Hand control to the scene to draw whatever geometry it has. In Milestone 0
-    // this is empty, so the frame is just the cleared background. The scene gets
-    // the frame-in-flight index for selecting per-frame resources.
+    // The scene draws at the offscreen (low) resolution; its aspect ratio matches
+    // the window because the offscreen is the window scaled down by a constant.
     if (recordScene) {
-        recordScene(cmd, currentFrame_, swapchain_.extent());
+        recordScene(cmd, currentFrame_, lowExtent);
     }
 
+    vkCmdEndRenderPass(cmd);
+
+    // --- Pass 2: composite (upscale + whole-frame dither) then the UI on top ---
+    // The composite fullscreen draw samples the offscreen (NEAREST = pixelation)
+    // and posterise-dithers the whole frame, so sky and world share one stipple.
+    // The UI then blends over it, leaving the image in PRESENT_SRC.
+    const VkExtent2D swapExtent = swapchain_.extent();
+    VkRenderPassBeginInfo uiInfo{};
+    uiInfo.sType             = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    uiInfo.renderPass        = uiRenderPass_;
+    uiInfo.framebuffer       = uiFramebuffers_[imageIndex];
+    uiInfo.renderArea.offset = {0, 0};
+    uiInfo.renderArea.extent = swapExtent;
+    uiInfo.clearValueCount   = 0; // loadOp is DONT_CARE; the composite fills it
+    vkCmdBeginRenderPass(cmd, &uiInfo, VK_SUBPASS_CONTENTS_INLINE);
+    composite_->record(cmd, swapExtent, lowExtent, fog_);
+    if (recordUi) {
+        recordUi(cmd, currentFrame_, swapExtent);
+    }
     vkCmdEndRenderPass(cmd);
 
     if (vkEndCommandBuffer(cmd) != VK_SUCCESS) {
@@ -144,7 +279,8 @@ void Renderer::recordCommandBuffer(VkCommandBuffer cmd, uint32_t imageIndex,
     }
 }
 
-void Renderer::drawFrame(const RecordFn& recordScene) {
+void Renderer::drawFrame(const RecordFn& recordPre, const RecordFn& recordScene,
+                         const RecordFn& recordUi) {
     VkDevice device = ctx_.device();
 
     // 1. Wait for this frame slot's previous submission to finish.
@@ -160,6 +296,9 @@ void Renderer::drawFrame(const RecordFn& recordScene) {
     if (acquire == VK_ERROR_OUT_OF_DATE_KHR) {
         // The swapchain no longer matches the surface; rebuild and try next frame.
         swapchain_.recreate();
+        createOffscreen(); // resize the low-res target to match
+        destroyUiFramebuffers();
+        createUiFramebuffers();
         return;
     }
     if (acquire != VK_SUCCESS && acquire != VK_SUBOPTIMAL_KHR) {
@@ -177,9 +316,11 @@ void Renderer::drawFrame(const RecordFn& recordScene) {
     // 4. Record this frame's command buffer.
     VkCommandBuffer cmd = commandBuffers_[currentFrame_];
     vkResetCommandBuffer(cmd, 0);
-    recordCommandBuffer(cmd, imageIndex, recordScene);
+    recordCommandBuffer(cmd, imageIndex, recordPre, recordScene, recordUi);
 
     // 5. Submit: wait on image-available, signal render-finished + the fence.
+    //    The swapchain image is first written by the composite's colour output, so
+    //    the acquire semaphore gates the colour-attachment stage.
     VkSemaphore          waitSems[]   = { imageAvailable_[currentFrame_] };
     VkPipelineStageFlags waitStages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
     VkSemaphore          signalSems[] = { renderFinished_[imageIndex] };
@@ -214,6 +355,9 @@ void Renderer::drawFrame(const RecordFn& recordScene) {
         window_.framebufferResized()) {
         window_.clearFramebufferResized();
         swapchain_.recreate();
+        createOffscreen(); // resize the low-res target to match
+        destroyUiFramebuffers();
+        createUiFramebuffers();
     } else if (result != VK_SUCCESS) {
         throw std::runtime_error("Failed to present swapchain image");
     }

@@ -1,0 +1,108 @@
+# =============================================================================
+#  Clouds — blocky volumetric cloudscape with evolving weather
+# =============================================================================
+#  Read by vg::CloudSystem at startup. A weather model drives a single volumetric
+#  raymarched layer in the sky pass (shaders/sky.frag), voxelised so the clouds
+#  read as chunky blocks matching the rest of the world.
+#  Lighting consumes the day-night cycle (sun/moon direction, atmospheric
+#  light colours from assets/sky.yaml) — golden at dusk, white at noon,
+#  moonlit at night. All keys are optional; missing keys use these defaults.
+#  See docs/CONFIGURATION.md for the comment convention.
+# =============================================================================
+
+# Master switch for the cloud layer.
+enabled: true
+
+# --- Volumetric layer geometry (world units / blocks) --------------------------
+# The raymarched slab. Effect: thicker slab = taller cloudscapes, slower march.
+# A tall slab so towering cumulonimbus have room to build above flat stratus,
+# giving a big spread of cloud heights across the sky. NOTE (issue #10 C): the
+# *live* band is now driven per day by the weather state (clear/fair/broken/
+# overcast/stormy/foggy each set their own height range in CloudSystem); these
+# values seed frame 0 before the state machine takes over.
+layerBottom: 140
+layerTop: 330
+# Clouds further than this fade into the sky colour (aerial perspective); the
+# march stops entirely at maxDistance.
+aerialDistance: 1000
+maxDistance: 9000
+
+# --- Wind (world units per real second) ---------------------------------------
+# Scrolls the noise domain and the weather map; clouds visibly drift and roll in
+# over the horizon.
+wind: [6.0, 0.0, 2.0]
+
+# Snap density samples to an N-block grid so the clouds read as chunky voxels
+# matching the world (0 = smooth volumetric look). Bigger = blockier clouds.
+# NOTE: clouds drift in cell-sized steps, so a smaller cell = smoother travel.
+voxelize: 6
+
+# --- Shape ----------------------------------------------------------------------
+# baseTileSize: world size of one tile of the Perlin-Worley base noise (bigger =
+# larger cloud masses). detailTileSize: size of the erosion Worley tile.
+baseTileSize: 380
+detailTileSize: 70
+# How strongly the detail noise eats away the base shape (0 = blobby, 1 = lacy).
+erosion: 0.40
+# Overall optical density multiplier. Higher = thicker, darker-cored clouds.
+densityScale: 1.9
+
+# --- Light transport -------------------------------------------------------------
+# extinction: Beer-Lambert absorption per unit density. hgG: Henyey-Greenstein
+# anisotropy (silver lining sharpness). ambientScale: how much sky light fills
+# the shadow side (sampled from the sky model: blue by day, pink at dusk).
+# powder: dark-edge ("powder") effect strength. sunIntensity: direct-light gain.
+extinction: 1.6
+hgG: 0.55
+ambientScale: 0.65
+powder: 1.0
+sunIntensity: 2.2
+# Sun elevation gained at the top of the layer (twilight: high clouds stay lit
+# and turn pink after the ground darkens). msOctaves/msFalloff: cheap multiple-
+# scattering octaves so warm light bleeds into the cloud body at sunset.
+altitudeLift: 0.08
+msOctaves: 3
+msFalloff: 0.5
+# Belt-of-Venus: anti-solar twilight tint (linear RGB) and its strength.
+antiSolarTint: [0.85, 0.45, 0.55]
+antiSolarStrength: 0.35
+
+# --- March quality ----------------------------------------------------------------
+# The scene renders into the pixelated low-res target, so these are cheap.
+primarySteps: 48
+lightSteps: 5
+lightStepLength: 14
+
+# --- Weather ----------------------------------------------------------------------
+# Spatial variation: one weather tile spans `weatherTileSize` world units;
+# coverage/type vary by +-variation/2 around the evolving base values. A small
+# tile with big variation amplitudes means the visible sky swings between open
+# gaps and dense banks, and between flat stratus and towering cumulonimbus — so
+# cloud size and height vary wildly across the view.
+weatherTileSize: 850
+coverageVariation: 0.60
+typeVariation: 0.85
+# Diurnal cumulus: coverage/type build from calm* toward fair* between
+# BuildStart..BuildFull hours and fade across FadeStart..FadeEnd. NOTE (issue
+# #10 C): calm*/fair* endpoints are now supplied per day by the weather state
+# (these are the frame-0 seed / legacy fallback); the Build/Fade *hours* still
+# drive the daily build-up timing.
+calmCoverage: 0.5
+fairCoverage: 0.72
+calmType: 0.20
+fairType: 0.55
+diurnalBuildStart: 9
+diurnalBuildFull: 15
+diurnalFadeStart: 17
+diurnalFadeEnd: 20
+# Seconds for weather to glide toward new targets (no popping).
+weatherLerpSec: 8
+# Day-to-day coverage drift amplitude, keyed to DayNight::totalDays().
+multiDayVariation: 0.25
+
+# Debug overrides (-1 = off). Force a uniform sky to inspect one cloud type
+# (type axis: 0 cirrus -> 0.25 stratus -> 0.6 cumulus -> 1 cumulonimbus):
+#   cirrus 0.05/cov 0.40 | stratus 0.25/0.85 | altocumulus 0.45/0.55
+#   cumulus 0.62/0.55 | cumulonimbus 0.95/0.62
+forceCoverage: -1
+forceType: -1

@@ -12,8 +12,19 @@ cmake-build-*/
 # Editor / IDE
 .vscode/
 .idea/
+.vs/
 *.swp
 *~
+
+# Python bytecode (scripts/, tools/)
+__pycache__/
+*.pyc
+
+# Runtime world saves (per-seed chunk data, generated at play time)
+/saves/
+
+# Debug capture output
+/out_uipass.png
 
 # OS cruft
 .DS_Store

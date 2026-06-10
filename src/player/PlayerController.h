@@ -1,6 +1,7 @@
 #pragma once
 
 #include "player/Camera.h"
+#include "player/Inventory.h"
 
 #include <glm/glm.hpp>
 
@@ -28,10 +29,14 @@ public:
 
     // Returns true if the block at integer coords (x,y,z) is solid.
     using SolidFn = std::function<bool(int x, int y, int z)>;
+    // For a solid block, its collision-box X/Z inset (0 = full cell; >0 = a centred
+    // column, e.g. the thin tree trunk). Y always spans the full cell. Optional.
+    using InsetFn = std::function<float(int x, int y, int z)>;
 
     explicit PlayerController(glm::vec3 feetPosition);
 
     void setSolidFn(SolidFn fn) { isSolid_ = std::move(fn); }
+    void setCollisionInsetFn(InsetFn fn) { collisionInset_ = std::move(fn); }
 
     // Advance one frame given elapsed time and this frame's input.
     void update(float dt, const InputState& input);
@@ -47,13 +52,27 @@ public:
     [[nodiscard]] float health()  const { return health_; }
     [[nodiscard]] bool  onGround() const { return onGround_; }
 
+    // The player's item storage (hotbar + backpack). Mining adds to it; placing
+    // consumes from its selected hotbar slot. See player/Inventory.h.
+    [[nodiscard]] Inventory&       inventory()       { return inventory_; }
+    [[nodiscard]] const Inventory& inventory() const { return inventory_; }
+
+    // Tunables exposed to the options menu.
+    void setMouseSensitivity(float s) { sensitivity_ = s; }
+    void setFlySpeed(float s)          { flySpeed_ = s; }
+    [[nodiscard]] float mouseSensitivity() const { return sensitivity_; }
+    [[nodiscard]] float flySpeed()         const { return flySpeed_; }
+
+    // Does the player's AABB overlap the block cell (bx,by,bz)? Used to refuse
+    // placing a block inside the player.
+    [[nodiscard]] bool occupies(int bx, int by, int bz) const;
+
     // TODO(future): additional survival stats (hunger, thirst, stamina) and a
     // damage API would live next to health_ here.
 
 private:
-    // Is the player's AABB (bottom-centre at `feet`) intersecting a solid block?
-    [[nodiscard]] bool collides(const glm::vec3& feet) const;
-    // Try to move along one axis (0=x,1=y,2=z); stop at the first solid block.
+    // Move along one axis (0=x,1=y,2=z) by `delta`, swept against solid blocks:
+    // advances exactly to the contact plane instead of stopping a block short.
     void moveAxis(glm::vec3& feet, float delta, int axis);
 
     void syncCameraToBody();
@@ -64,8 +83,13 @@ private:
     Mode      mode_     = Mode::Walking;
     bool      onGround_ = false;
     float     health_   = 100.0f;
+    Inventory inventory_;
+
+    float     sensitivity_ = 0.08f; // mouse look (matches the old kSensitivity)
+    float     flySpeed_    = 12.0f; // free-fly base speed (kFlySpeed)
 
     SolidFn isSolid_;
+    InsetFn collisionInset_; // optional: thin-block X/Z inset (tree trunk)
 };
 
 } // namespace vg

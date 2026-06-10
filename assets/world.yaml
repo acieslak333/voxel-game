@@ -1,0 +1,197 @@
+# =============================================================================
+#  World generation configuration
+# =============================================================================
+#  READ BY:   vg::WorldConfig::load (src/world/WorldConfig.{h,cpp}) at startup.
+#  USED BY:   vg::World (src/world/World.cpp) — the procedural terrain generator
+#             (column heights, material layering) and the world's chunk grid.
+#
+#  WHY THIS FILE EXISTS
+#  --------------------
+#  Project convention (docs/CONFIGURATION.md): tunable values are documented data,
+#  not magic numbers in code. These were previously constexprs in World.cpp and
+#  App.h. Edit them here and relaunch — no recompile. Any field omitted falls back
+#  to the matching default in WorldConfig.h, so a missing file still makes a world.
+#
+#  Heads-up: changing world size or any terrain value reshapes the world from
+#  scratch on the next launch (there is no save format yet).
+# =============================================================================
+
+# Procedural seed. The same seed always regenerates the identical world; change
+# it for a different world from the same settings. Ignored when random_seed is true.
+seed: 2137
+
+# Draw a fresh random seed every launch (a new world each time). The chosen seed is
+# printed at startup ("[world] seed N") so you can pin it back here (with
+# random_seed: false) if you find one you like. Edited chunks save under
+# saves/<seed>/, so each random world gets its own save folder.
+random_seed: true
+
+# Dynamic chunk streaming (docs/STREAMING.md). false = the fixed island world,
+# generated once around the origin (original behaviour). true = the loaded window
+# follows the player for an endless world (island shaping is disabled, terrain is
+# rolling hills everywhere). EXPERIMENTAL — moving the window relights/remeshes the
+# leading edge on the main thread, so expect a brief hitch each time you cross a
+# chunk boundary (worker threads fix this in a later stage). Lower view_radius to
+# soften the hitch while testing.
+streaming: true
+
+# Background threads that mesh streamed-in chunks (streaming only). 0 = mesh on the
+# main thread, spread over a few frames (no worker threads). >0 offloads greedy
+# meshing to that many workers, so crossing a chunk boundary no longer stutters —
+# the main thread only uploads finished meshes. Set 0 if threading ever misbehaves.
+stream_workers: 8
+
+# Relight streamed-in chunks on a background thread (streaming only). The light
+# flood at each chunk boundary is the last big cost still on the main thread; this
+# moves it off-thread so crossing a boundary no longer stutters. Generation + the
+# window move stay on the main thread (so there are no window races); the worker
+# only touches the just-generated edge. EXPERIMENTAL — set false to relight on the
+# main thread (the proven path) if you ever see a crash or a lighting glitch.
+async_streaming: true
+
+# Streaming window radius, in chunks, kept loaded around the player horizontally
+# (each chunk is Chunk::kSize = 16 blocks per axis). The world is a (2*view_radius+1)
+# square that follows the player.
+#   e.g. view_radius 9 -> 19x19 chunks = 304 blocks wide. Larger = sees farther but
+#   costs more memory, a longer startup, and a bigger hitch each time you cross a
+#   chunk boundary (more columns to generate/relight/remesh on the leading edge).
+#   Lowered 11 -> 9 for performance with the taller 128-block biome terrain; raise
+#   it back if you want more view distance and can take the startup/hitch cost.
+view_radius: 9
+
+# Vertical extent of the world, in chunks (no vertical streaming). The biome
+# terrain pipeline (assets/biomes.yaml) needs headroom for oceans + mountains:
+# 8 * 16 = 128 blocks, sea level 64 in the middle. Bump to 16 (256) for taller,
+# more dramatic mountains (also scale biomes.yaml sea_level + splines); costs ~2x
+# the vertical memory and light/gen work, so consider lowering view_radius then.
+height_chunks: 8
+
+# -----------------------------------------------------------------------------
+#  terrain: the noise + material rules that shape the surface. Two noise fields
+#  drive it: a HEIGHT field (the surface shape) and a MATERIAL field (rocky vs
+#  grassy, dirt thickness). Both are fbm (fractal/Perlin) sampled in world space.
+# -----------------------------------------------------------------------------
+terrain:
+  # --- Surface height field ---------------------------------------------------
+  # Spatial frequency of the height noise. LOWER = broader, smoother hills;
+  # HIGHER = more frequent, choppier terrain. Sampled as fbm(wx*freq, wz*freq).
+  height_frequency: 0.05
+  # Number of fbm octaves for the height field. More octaves add finer detail on
+  # top of the broad shape (and cost a little more per column).
+  octaves: 4
+  # Lowest possible surface height, in blocks (the valley floor).
+  base_height: 18
+  # How much the surface rises above base_height at the peaks. The surface height
+  # of any column lands in [base_height, base_height + height_amplitude].
+  #   NOTE: keep base_height + height_amplitude < chunks.y * 16, or peaks clamp.
+  height_amplitude: 32
+
+  # --- Material field (rocky surfaces & dirt depth) ---------------------------
+  # Spatial frequency of the material noise (independent of the height field).
+  # Controls how large the rocky/grassy patches and dirt-depth variation are.
+  material_frequency: 0.04
+  # fbm octaves for the material field.
+  material_octaves: 3
+
+  # --- Surface material rules -------------------------------------------------
+  # Thickness of the dirt layer directly under a grass surface, in blocks. The
+  # actual depth varies with the material noise between min and max (inclusive);
+  # everything below the dirt is stone.
+  dirt_depth_min: 3
+  dirt_depth_max: 5
+  # A surface within this many blocks of the maximum possible height is bare
+  # stone (mountain tops), regardless of the material noise.
+  rocky_height_margin: 3
+  # Where the material noise (range ~[-1, 1]) exceeds this, the surface is bare
+  # stone instead of grass — scatters rocky outcrops. Higher => rarer outcrops.
+  rocky_material_threshold: 0.45
+  # Low-lying ground (surface height <= base_height + this) becomes sand, so the
+  # valley floors read as beaches. The shallow layer beneath also turns to sand.
+  beach_height_margin: 2
+  # Domain warp, in blocks: before sampling the height noise, the sample point is
+  # nudged by a second low-frequency noise. 0 = plain axis-y noise; larger values
+  # give organic, swirly hills and ridgelines that don't look grid-aligned.
+  terrain_warp: 14
+
+# -----------------------------------------------------------------------------
+#  island: a TEMPORARY radial mask that makes the world one island ringed by flat
+#  sandy sea-floor (real water comes later). Terrain height above sea level is
+#  multiplied by this mask. Distance is normalized: 0 at the world centre, ~1 at
+#  the edge mid-points. (This whole section gets revisited when chunk streaming
+#  replaces the fixed grid.)
+# -----------------------------------------------------------------------------
+island:
+  # Inside this normalized radius the land keeps its full height (the highlands).
+  falloff_start: 0.55
+  # By this radius the land has sunk all the way to sea level (open shore/sea).
+  # The band between start and end is the sloping coast — widen it for gentler
+  # beaches, narrow it for cliffier shores.
+  falloff_end: 0.95
+  # How much the coastline wiggles (fraction of the radius). 0 = a clean circle;
+  # higher carves bays, capes, and the odd offshore sandbar.
+  coast_warp: 0.20
+
+# -----------------------------------------------------------------------------
+#  features: whimsical things scattered across the surface during generation.
+#  Each value is a per-column probability (0..1). All are single-column so they
+#  generate deterministically and never straddle chunk seams.
+# -----------------------------------------------------------------------------
+features:
+  # Lantern-trees: an oak-log stalk topped with a glowstone cap — little natural
+  # lampposts that pool warm light across the island after dusk. Grass only.
+  lantern_density: 0.0000
+  # Cairns: a short stack of cobblestone, like a hiker's trail marker. Any land.
+  cairn_density: 0.0
+  # Geodes: a single glowstone buried a few blocks down in the stone — a hidden
+  # glow you only discover by digging (or stumbling into a cave near one).
+  geode_density: 0.01
+  # Oak trees: a slender (4-px-wide) trunk topped with a crossed-quad leaf canopy.
+  # Per-column probability that a tree is *rooted* here; the canopy spreads over
+  # the neighbouring columns. Grass only. The generator stamps each tree from every
+  # column it overlaps (a pure function of world coords), so canopies cross chunk
+  # seams cleanly. 0 = no trees.
+  tree_density: 0.005
+  # Ground bushes: a single crossed-quad shrub on a grass surface. Single-column.
+  bush_density: 0.1
+
+# -----------------------------------------------------------------------------
+#  caves: tunnels carved through the stone. They are hollowed where two 3D-noise
+#  fields are BOTH near zero — the intersection of two surfaces is a winding line,
+#  so caves snake instead of forming round blobs. Only stone is carved (dirt and
+#  the surface stay intact), so caves open onto hillsides as natural entrances.
+# -----------------------------------------------------------------------------
+caves:
+  # Spatial frequency of the cave noise. Higher = tighter, twistier, more frequent
+  # tunnels; lower = broader, rarer caverns.
+  frequency: 0.035
+  # Half-width of the |noise| band that counts as hollow. Bigger = wider tunnels
+  # and more of them (too big merges everything into open voids); 0 = no caves.
+  threshold: 0.085
+  # Never carve at or below this world Y, so the world keeps a solid floor.
+  floor: 2
+  # Large caverns: a low-frequency 3D blob carved only below cavern_max_y (deep),
+  # giving big open rooms that the tunnels connect into. Lower threshold = bigger,
+  # more frequent caverns; raise it for rarer ones. Tunnels also taper near the
+  # surface so the strongest ones open as cave mouths on hillsides.
+  cavern_threshold: 0.52
+  cavern_max_y: 40
+
+# -----------------------------------------------------------------------------
+#  ores: each ore replaces stone in small clusters (one roll shared across a
+#  2x2x2 block cell, so ores come in little veins) anywhere below its max world Y.
+#  Rarer ores have lower density and sit deeper. They are checked rarest-first, so
+#  a deep block that could be several ores becomes the rarer one.
+#    density  per-cell probability (0..1) — higher = more common
+#    max_y    only generated at or below this world height
+# -----------------------------------------------------------------------------
+ores:
+  coal:    { density: 0.020,  max_y: 56 }
+  iron:    { density: 0.013,  max_y: 44 }
+  gold:    { density: 0.006,  max_y: 28 }
+  ruby:    { density: 0.0035, max_y: 18 }
+  emerald: { density: 0.0030, max_y: 16 }
+  mythril: { density: 0.0016, max_y: 9 }
+
+# NOTE: light falloff (how fast sky/block light dies per spread step) is a
+# player-facing option — it lives in assets/settings.yaml ("skyFalloff" /
+# "blockFalloff") and is adjustable in the Esc menu, not here.

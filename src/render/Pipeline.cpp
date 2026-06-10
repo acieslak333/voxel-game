@@ -26,8 +26,9 @@ std::vector<char> readFile(const std::string& path) {
 } // namespace
 
 Pipeline::Pipeline(VulkanContext& ctx, VkRenderPass renderPass,
-                   const std::string& vertSpvPath, const std::string& fragSpvPath)
-    : ctx_(&ctx) {
+                   const std::string& vertSpvPath, const std::string& fragSpvPath,
+                   bool translucent)
+    : ctx_(&ctx), translucent_(translucent) {
     createDescriptorSetLayout();
     createPipeline(renderPass, vertSpvPath, fragSpvPath);
 }
@@ -43,12 +44,13 @@ Pipeline::~Pipeline() {
 }
 
 void Pipeline::createDescriptorSetLayout() {
-    // binding 0: camera uniform buffer (view + projection), read in the vertex shader.
+    // binding 0: camera/sun uniform buffer. The vertex shader reads the matrices;
+    // the fragment shader reads the sun direction/colour for day-night lighting.
     VkDescriptorSetLayoutBinding uboBinding{};
     uboBinding.binding         = 0;
     uboBinding.descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     uboBinding.descriptorCount = 1;
-    uboBinding.stageFlags      = VK_SHADER_STAGE_VERTEX_BIT;
+    uboBinding.stageFlags      = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
 
     // binding 1: the block texture array, sampled in the fragment shader.
     VkDescriptorSetLayoutBinding samplerBinding{};
@@ -128,7 +130,10 @@ void Pipeline::createPipeline(VkRenderPass renderPass, const std::string& vertSp
     raster.sType            = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
     raster.polygonMode      = VK_POLYGON_MODE_FILL;
     raster.lineWidth        = 1.0f;
-    raster.cullMode         = VK_CULL_MODE_BACK_BIT;
+    // Water is single-sided in the greedy mesh but should read from underneath
+    // too (swimming, or a glass-like surface), so the translucent pass draws both
+    // faces; opaque terrain keeps back-face culling.
+    raster.cullMode         = translucent_ ? VK_CULL_MODE_NONE : VK_CULL_MODE_BACK_BIT;
     raster.frontFace        = VK_FRONT_FACE_COUNTER_CLOCKWISE;
     raster.depthClampEnable = VK_FALSE;
 
@@ -139,13 +144,23 @@ void Pipeline::createPipeline(VkRenderPass renderPass, const std::string& vertSp
     VkPipelineDepthStencilStateCreateInfo depthStencil{};
     depthStencil.sType            = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
     depthStencil.depthTestEnable  = VK_TRUE;
-    depthStencil.depthWriteEnable = VK_TRUE;
+    // Translucent water tests depth (it's hidden behind opaque terrain) but does
+    // NOT write it, so overlapping liquid surfaces don't occlude each other and
+    // the seabed drawn behind still shows through.
+    depthStencil.depthWriteEnable = translucent_ ? VK_FALSE : VK_TRUE;
     depthStencil.depthCompareOp   = VK_COMPARE_OP_LESS;
 
     VkPipelineColorBlendAttachmentState blendAttachment{};
     blendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
                                      VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-    blendAttachment.blendEnable = VK_FALSE; // opaque geometry
+    // Standard src-alpha over-blend for the water pass; opaque pass overwrites.
+    blendAttachment.blendEnable         = translucent_ ? VK_TRUE : VK_FALSE;
+    blendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+    blendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+    blendAttachment.colorBlendOp        = VK_BLEND_OP_ADD;
+    blendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+    blendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+    blendAttachment.alphaBlendOp        = VK_BLEND_OP_ADD;
 
     VkPipelineColorBlendStateCreateInfo colorBlend{};
     colorBlend.sType           = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;

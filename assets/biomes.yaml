@@ -1,0 +1,165 @@
+# =============================================================================
+#  World generation: terrain shape + biomes  (data-driven; see docs/WORLDGEN.md)
+# =============================================================================
+#  READ BY:  vg::TerrainGenerator (src/world/TerrainGenerator.{h,cpp}).
+#  This is THE file a future generation-tuning tool edits. Everything here is a
+#  pure function of world coordinates, so changes are deterministic and stream-safe
+#  (after an edit, the --selftest golden hash changes — that's expected).
+#
+#  MODEL (Minecraft-1.18 style): terrain SHAPE is separate from CLIMATE.
+#   * Shape — three noises (continentalness, erosion, peaks) mapped through the
+#     splines below give the surface height: deep ocean -> coast -> plains ->
+#     mountains. Biome never controls height, so biome borders never cliff.
+#   * Climate — temperature + humidity noises pick a biome for the SURFACE only
+#     (which blocks, snow, trees). Temperature also cools with altitude.
+#
+#  Heights are in BLOCKS RELATIVE TO SEA LEVEL (negative = underwater).
+# =============================================================================
+
+# Sea surface height (absolute block Y). Air at/below this over the terrain floods
+# with water; terrain whose surface is at/below it gets an ocean/lake floor.
+#   Tuned for a 128-block-tall world (world.yaml height_chunks: 8) with sea at the
+#   middle. To go taller (e.g. height_chunks: 16 = 256), raise sea_level (~128) and
+#   roughly scale the spline y-values + snow_line with it.
+sea_level: 64
+# Blocks above sea level where any surface gets a snow cap (mountain snow line).
+snow_line: 44
+
+# --- Shape noises -----------------------------------------------------------
+# frequency = how large the features are (smaller = broader); octaves = detail.
+continentalness: {frequency: 0.0034, octaves: 4}   # land vs ocean (island-scale landmasses)
+erosion: {frequency: 0.0032, octaves: 3}           # flat plains <-> jagged mountains
+peaks: {frequency: 0.0065, octaves: 4}             # the mountain ridgelines
+temperature: {frequency: 0.0009}                   # hot <-> cold biome axis
+humidity: {frequency: 0.0012}                      # dry <-> wet biome axis
+
+# --- Rivers -----------------------------------------------------------------
+# Winding channels carved toward sea level where the river noise is near zero.
+# Only carved in LOWLANDS (land below sea + max_elevation), so mountains keep
+# their relief instead of growing deep canals; the channel fills via the sea fill.
+rivers:
+  frequency: 0.0021     # smaller = longer, broader river basins
+  width: 0.07           # |noise| band counted as channel (bigger = wider rivers)
+  depth: 5              # blocks the channel bed cuts below sea level at its centre
+  max_elevation: 9      # no rivers where the land sits more than this above sea
+
+# --- Lakes (perched) --------------------------------------------------------
+# A coarse grid of candidate lakes; each carves a bowl filled to its own level
+# (the land height at its centre), so lakes can sit ABOVE sea level. Kept to
+# flattish lowland/upland bands and small radii so the bowls stay contained.
+lakes:
+  spacing: 190          # average blocks between candidate lakes
+  chance: 0.45          # probability a candidate cell actually has a lake
+  radius_min: 11
+  radius_max: 24
+  depth: 7              # bowl depth below the water surface at the centre
+  min_elevation: 3      # only perch lakes on land at least this far above sea
+  max_elevation: 30     # ...and at most this far (no lakes on high peaks)
+
+# --- Island (single landmass) -----------------------------------------------
+# When enabled, ONE big island sits at `center`, its land sinking to deep ocean
+# beyond `radius` with a noise-warped (irregular) coastline — the rest of the
+# infinite world is open sea. Disable for a continentalness-driven archipelago.
+island:
+  enabled: true
+  center: [0, 0]        # world coords of the island centre (genmap is centred here)
+  radius: 1100          # blocks from centre where land has fully sunk to ocean
+  inner: 0.5            # inner fraction kept at full land height (the island's body)
+  coast_warp: 340       # blocks of coastline noise (0 = a clean circle)
+  land_base: 9          # base interior land height above sea level
+  interior_var: 8       # continentalness -> interior hills/valleys amplitude
+  ocean_floor: -46      # deep sea-floor elevation far from the island
+
+# --- Shape splines ----------------------------------------------------------
+# continental_spline: continentalness noise (-1..1) -> base elevation (blocks vs
+# sea). This is what carves ocean basins and raises the land.
+# Tuned for ISLANDS: most of the continentalness range is below sea level (ocean),
+# with land only emerging where the noise is high (c > ~0.25). Raise the crossing
+# point (the [x, 0] knee) for more ocean / smaller islands; lower it for more land.
+continental_spline:
+- [-1.00, -46]
+- [-0.40, -26]
+- [-0.10, -12]
+- [0.12, -5]
+- [0.26, 2]
+- [0.45, 12]
+- [0.70, 22]
+- [1.00, 32]
+# erosion_spline: erosion noise (-1..1) -> mountain amplitude (blocks). The ridged
+# `peaks` noise (0..1) scales this, so low-erosion areas grow tall ranges and
+# high-erosion areas stay flat.
+erosion_spline:
+- [-1.00, 44]
+- [-0.50, 32]
+- [-0.10, 16]
+- [0.20, 6]
+- [0.50, 2]
+- [1.00, 0]
+
+# --- Biomes -----------------------------------------------------------------
+# Tested top-to-bottom; the FIRST biome whose temp + humidity + elevation ranges
+# all contain the column wins. Put elevation-specific biomes (beach, mountain)
+# and climate extremes before the temperate catch-all (plains, last).
+#   temp/humidity : [min, max] over the noise range (~ -1..1)
+#   elevation     : [min, max] blocks relative to sea level
+#   top / filler  : surface block / the few blocks beneath it (names from blocks.yaml)
+#   snow          : surface is snow (cold biomes); peaks also snow via snow_line
+#   trees / bushes: per-column spawn probability
+biomes:
+- name: beach
+  temp: [-2, 2]
+  humidity: [-2, 2]
+  elevation: [-4, 2]
+  top: sand
+  filler: sand
+  trees: 0.0
+  bushes: 0.0
+- name: mountain
+  temp: [-2, 2]
+  humidity: [-2, 2]
+  elevation: [34, 10000]
+  top: stone
+  filler: stone
+  trees: 0.003
+  bushes: 0.0
+- name: desert
+  temp: [0.35, 2]
+  humidity: [-2, -0.15]
+  elevation: [2, 10000]
+  top: sand
+  filler: sand
+  trees: 0.0
+  bushes: 0.012
+- name: savanna
+  temp: [0.2, 2]
+  humidity: [-0.15, 0.3]
+  elevation: [2, 10000]
+  top: grass
+  filler: dirt
+  trees: 0.006
+  bushes: 0.05
+- name: snowy
+  temp: [-2, -0.35]
+  humidity: [-2, 2]
+  elevation: [2, 10000]
+  top: grass
+  filler: dirt
+  snow: true
+  trees: 0.012
+  bushes: 0.02
+- name: forest
+  temp: [-0.35, 0.6]
+  humidity: [0.2, 2]
+  elevation: [2, 10000]
+  top: grass
+  filler: dirt
+  trees: 0.055
+  bushes: 0.05
+- name: plains
+  temp: [-2, 2]
+  humidity: [-2, 2]
+  elevation: [-10000, 10000]
+  top: grass
+  filler: dirt
+  trees: 0.018
+  bushes: 0.05

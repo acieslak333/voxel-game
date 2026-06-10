@@ -21,11 +21,16 @@ class VulkanContext;
 // -----------------------------------------------------------------------------
 class Pipeline {
 public:
-    // Size of the push constant block: a single 4x4 model matrix.
-    static constexpr uint32_t kPushConstantSize = 16 * sizeof(float);
+    // Size of the push constant block: a 4x4 model matrix + a vec4 of params
+    // (params.x = output alpha for the translucent pass).
+    static constexpr uint32_t kPushConstantSize = (16 + 4) * sizeof(float);
 
+    // translucent: build the water variant — alpha blending on, depth WRITE off
+    // (depth test stays on), back-face culling off — so liquid surfaces blend
+    // over the opaque terrain already drawn behind them and read from both sides.
     Pipeline(VulkanContext& ctx, VkRenderPass renderPass,
-             const std::string& vertSpvPath, const std::string& fragSpvPath);
+             const std::string& vertSpvPath, const std::string& fragSpvPath,
+             bool translucent = false);
     ~Pipeline();
 
     Pipeline(const Pipeline&) = delete;
@@ -42,6 +47,7 @@ private:
     VkShaderModule loadShaderModule(const std::string& path) const;
 
     VulkanContext* ctx_ = nullptr;
+    bool           translucent_ = false;
 
     VkDescriptorSetLayout descriptorSetLayout_ = VK_NULL_HANDLE;
     VkPipelineLayout      pipelineLayout_      = VK_NULL_HANDLE;

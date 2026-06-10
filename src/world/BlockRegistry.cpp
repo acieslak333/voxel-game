@@ -1,46 +1,133 @@
 #include "world/BlockRegistry.h"
 
+#include <yaml-cpp/yaml.h>
+
+#include <algorithm>
 #include <stdexcept>
+#include <string>
 
 namespace vg {
 
-BlockRegistry::BlockRegistry() {
-    // -------------------------------------------------------------------------
-    //  Register the built-in blocks. To add a new block type: pick an id in
-    //  Block.h, then add a registerBlock(...) call here naming its textures.
-    //  internTexture() deduplicates, so reusing a texture (e.g. dirt for the
-    //  underside of grass) costs no extra array layer.
-    // -------------------------------------------------------------------------
+namespace {
 
-    // Air: id 0. Not solid, not opaque, no textures.
-    registerBlock(BlockId::Air, {.name = "air", .solid = false, .opaque = false});
+// Read an optional scalar with a default if the key is absent.
+template <typename T>
+T valueOr(const YAML::Node& node, const char* key, T fallback) {
+    return node[key] ? node[key].as<T>() : fallback;
+}
 
-    {
-        const uint32_t grassTop  = internTexture("grass_top.png");
-        const uint32_t grassSide = internTexture("grass_side.png");
-        const uint32_t dirt      = internTexture("dirt.png");
-        BlockProperties grass{.name = "grass", .solid = true, .opaque = true};
-        grass.faceLayers[FaceNegX] = grassSide;
-        grass.faceLayers[FacePosX] = grassSide;
-        grass.faceLayers[FaceNegZ] = grassSide;
-        grass.faceLayers[FacePosZ] = grassSide;
-        grass.faceLayers[FacePosY] = grassTop; // grassy top
-        grass.faceLayers[FaceNegY] = dirt;     // dirt underside
-        registerBlock(BlockId::Grass, grass);
+// Apply the textures map of one block to its per-face layers, interning each
+// filename. Supported keys (later keys override earlier ones):
+//   all     -> every face
+//   top     -> +Y     bottom -> -Y     side -> the four horizontal faces
+//   <face>  -> an explicit single face: negx/posx/negy/posy/negz/posz
+// Returns through `intern` so the registry can dedup across blocks.
+template <typename InternFn>
+void applyTextures(const YAML::Node& tex, BlockProperties& props, InternFn intern) {
+    if (!tex || !tex.IsMap()) {
+        return; // no textures (e.g. air)
+    }
+    auto setFace = [&](Face f, const std::string& file) {
+        props.faceLayers[static_cast<size_t>(f)] = intern(file);
+    };
+
+    if (tex["all"]) {
+        const uint32_t layer = intern(tex["all"].as<std::string>());
+        props.faceLayers.fill(layer);
+    }
+    if (tex["side"]) {
+        const uint32_t layer = intern(tex["side"].as<std::string>());
+        props.faceLayers[FaceNegX] = layer;
+        props.faceLayers[FacePosX] = layer;
+        props.faceLayers[FaceNegZ] = layer;
+        props.faceLayers[FacePosZ] = layer;
+    }
+    if (tex["top"])    setFace(FacePosY, tex["top"].as<std::string>());
+    if (tex["bottom"]) setFace(FaceNegY, tex["bottom"].as<std::string>());
+
+    // Explicit single-face overrides for anything irregular.
+    if (tex["negx"]) setFace(FaceNegX, tex["negx"].as<std::string>());
+    if (tex["posx"]) setFace(FacePosX, tex["posx"].as<std::string>());
+    if (tex["negy"]) setFace(FaceNegY, tex["negy"].as<std::string>());
+    if (tex["posy"]) setFace(FacePosY, tex["posy"].as<std::string>());
+    if (tex["negz"]) setFace(FaceNegZ, tex["negz"].as<std::string>());
+    if (tex["posz"]) setFace(FacePosZ, tex["posz"].as<std::string>());
+}
+
+} // namespace
+
+BlockRegistry::BlockRegistry(const std::string& blocksFile) {
+    // -------------------------------------------------------------------------
+    //  Load the block definitions. The file is a YAML sequence of blocks; each
+    //  block's id is its position in the sequence (so id 0 == the first entry,
+    //  which must be "air"). To add a block: append an entry to the file naming
+    //  its textures -- no recompile needed. internTexture() deduplicates, so a
+    //  texture shared by several blocks costs a single texture-array layer.
+    // -------------------------------------------------------------------------
+    YAML::Node root;
+    try {
+        root = YAML::LoadFile(blocksFile);
+    } catch (const YAML::Exception& e) {
+        throw std::runtime_error("BlockRegistry: failed to load '" + blocksFile +
+                                 "': " + e.what());
+    }
+    if (!root.IsSequence() || root.size() == 0) {
+        throw std::runtime_error("BlockRegistry: '" + blocksFile +
+                                 "' must be a non-empty sequence of blocks");
     }
 
-    {
-        const uint32_t dirt = internTexture("dirt.png");
-        BlockProperties props{.name = "dirt", .solid = true, .opaque = true};
-        props.faceLayers.fill(dirt);
-        registerBlock(BlockId::Dirt, props);
+    for (const YAML::Node& entry : root) {
+        if (!entry["name"]) {
+            throw std::runtime_error("BlockRegistry: a block in '" + blocksFile +
+                                     "' is missing its 'name'");
+        }
+        BlockProperties props;
+        props.name   = entry["name"].as<std::string>();
+        props.solid  = valueOr(entry, "solid", false);
+        props.opaque = valueOr(entry, "opaque", false);
+        props.emission = static_cast<uint8_t>(
+            std::min(15, std::max(0, valueOr(entry, "light", 0))));
+
+        // Render type (default cube). Non-cube blocks emit their own geometry in
+        // the mesher's second pass instead of greedy cubes (see RenderType).
+        const std::string render = valueOr(entry, "render", std::string("cube"));
+        if (render == "cross") {
+            props.renderType = RenderType::Cross;
+        } else if (render == "leafcube") {
+            props.renderType = RenderType::LeafCube;
+        } else if (render == "model") {
+            props.renderType = RenderType::Model;
+            // model.width is the rendered column width in 1/16-of-a-block pixels
+            // (so 4 => a quarter-block-wide trunk). Convert to a per-side inset.
+            int width = 16;
+            if (entry["model"] && entry["model"]["width"]) {
+                width = entry["model"]["width"].as<int>();
+            }
+            width = std::min(16, std::max(1, width));
+            props.modelInset = static_cast<float>(16 - width) / 32.0f;
+        } else if (render != "cube") {
+            throw std::runtime_error("BlockRegistry: block '" + props.name +
+                                     "' has unknown render type '" + render +
+                                     "' (expected cube/cross/leafcube/model)");
+        }
+
+        applyTextures(entry["textures"], props,
+                      [this](const std::string& f) { return internTexture(f); });
+
+        const auto id = static_cast<uint16_t>(blocks_.size());
+        if (nameToId_.count(props.name)) {
+            throw std::runtime_error("BlockRegistry: duplicate block name '" +
+                                     props.name + "' in '" + blocksFile + "'");
+        }
+        nameToId_.emplace(props.name, id);
+        blocks_.push_back(std::move(props));
     }
 
-    {
-        const uint32_t stone = internTexture("stone.png");
-        BlockProperties props{.name = "stone", .solid = true, .opaque = true};
-        props.faceLayers.fill(stone);
-        registerBlock(BlockId::Stone, props);
+    // Id 0 is the default-constructed Block and is treated as empty space by the
+    // chunk storage and mesher, so the first block must be a non-solid "air".
+    if (blocks_[0].name != "air" || blocks_[0].solid || blocks_[0].opaque) {
+        throw std::runtime_error("BlockRegistry: the first block in '" + blocksFile +
+                                 "' must be a non-solid, non-opaque block named 'air'");
     }
 }
 
@@ -51,12 +138,12 @@ const BlockProperties& BlockRegistry::get(uint16_t id) const {
     return blocks_[id];
 }
 
-void BlockRegistry::registerBlock(BlockId id, BlockProperties props) {
-    const auto index = static_cast<size_t>(id);
-    if (index >= blocks_.size()) {
-        blocks_.resize(index + 1);
+uint16_t BlockRegistry::idByName(const std::string& name) const {
+    const auto it = nameToId_.find(name);
+    if (it == nameToId_.end()) {
+        throw std::out_of_range("BlockRegistry::idByName: unknown block '" + name + "'");
     }
-    blocks_[index] = std::move(props);
+    return it->second;
 }
 
 uint32_t BlockRegistry::internTexture(const std::string& filename) {

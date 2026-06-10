@@ -1,0 +1,167 @@
+# =============================================================================
+#  Sky & day-night cycle
+# =============================================================================
+#  Read by vg::DayNight at startup. Drives the sky pass (gradient + sun + moon
+#  discs) and the time-varying terrain light (direction, colour, ambient floor).
+#  Colours are either a name from assets/colors.yaml or a "#RRGGBB" hex literal.
+#
+#  The *day length* and *time running* knobs are player options and live in
+#  assets/settings.yaml (set via the Esc menu); this file holds the look.
+# =============================================================================
+
+# Hour (0-24) the world starts at when the game launches.
+# Used by: DayNight constructor. Effect: 8 = morning sun low in the east.
+startHour: 9
+
+# Per-day weather variation (0 = every day identical). Each whole in-game day
+# draws a stable, deterministic "mood" — overall colour temperature (warm/cool),
+# haze (clear/milky), and brightness — that gently nudges the sunset, sunlight,
+# moonlight, zenith/horizon and turbidity, so no two days look quite the same.
+# Used by: DayNight::state(). Effect: ~0.5 = subtle drift; 1.0 = pronounced
+# (markedly warmer/hazier/cooler days); the mood changes at midnight (in the dark)
+# and is reproducible for a given day number.
+dayVariation: 0.5
+
+# --- Analytic atmosphere (the daytime sky) ------------------------------------
+# Daytime colour is computed per pixel in shaders/sky.frag by single-scattering
+# (Rayleigh + Mie), so it depends on the angle to the sun: blue zenith, paling
+# horizon, a warm sunset glow that hugs the sun's azimuth, and a sun disc that
+# reddens as its light crosses more air. Terrain sunlight is filtered by the
+# same transmittance (DayNight::state()), so the ground reddens in sync.
+# Set false to fall back to the authored day gradient below.
+useAnalyticSky: true
+# Rayleigh scattering coefficients (r, g, b). Blue-heavy = blue sky; scaling all
+# three up makes the atmosphere thicker (paler horizon, redder sunsets).
+betaR: [0.0093, 0.0216, 0.0530]
+# Mie (haze) scattering: colour-neutral. Bigger = milkier sky, brighter halo
+# around the sun. `turbidity` is a convenience multiplier on betaM (1 = clear).
+betaM: 0.005
+turbidity: 1.0
+# Mie anisotropy 0..0.99: how tightly the haze glow hugs the sun's direction.
+mieG: 0.92
+# Sun radiance scale (HDR) and the exposure applied before the sky's ACES
+# tonemap. Raise sunIntensity for a brighter, more saturated sky; lower
+# exposure if the sky clips to white.
+sunIntensity: 7.0
+exposure: 0.22
+# How strongly the sun's path through the air filters the light feeding the sky
+# (1 = physical single pass). Kept mild — the colourful dusk comes from the
+# authored `sunsetHorizon` band painted near the sun, not from filter hue.
+sunsetStrength: 2.0
+
+# --- Sky gradient colours ----------------------------------------------------
+# `dayZenith` is the *reference* colour for the in-game Sky option (picking the
+# matching palette colour = neutral analytic sky; other picks re-tint it). With
+# useAnalyticSky: false it is the authored day zenith again, and dayHorizon /
+# sunsetHorizon drive the legacy gradient. Night colours are always used.
+dayZenith:    "#3E72BE"
+dayHorizon:   "#C9587E"   # legacy path only
+nightZenith:  "#070A1A"   # near-black blue overhead at midnight
+nightHorizon: "#070A1A"   # slightly lighter band at the night horizon
+sunsetHorizon: "#DC9824"  # dusk band colour painted around the low sun (and the
+                          # legacy gradient's horizon tint)
+
+# --- Multi-band sunset (issue #10 phase A) ------------------------------------
+# Dusk is painted as three elevation zones blended in sky.frag: a hot gold strip
+# at the horizon (sunsetHorizon above), an orange band over it (sunsetMid), and a
+# pink/violet afterglow high in the sky (sunsetHigh) that spreads wider than the
+# sun's azimuth (the Belt-of-Venus look). Reference: sunset/sunset*.jpg.
+sunsetMid:  "#E8761F"   # orange mid-altitude band
+sunsetHigh: "#C65A86"   # pink/violet high-sky afterglow
+
+# Per-day sunset mood: dawn and dusk each deterministically draw their own preset
+# (high/mid/horizon colours), and the whole palette is then hue-rotated per
+# twilight (see sunsetHueVary), so no two sunrises/sunsets repeat. Horizons vary
+# wildly (warm AND cool) so the dominant low glow differs day to day.
+sunsetPresets:
+  - {name: gold,    high: "#B97BB0", mid: "#E8761F", horizon: "#FFB037"}
+  - {name: blood,   high: "#3A1840", mid: "#B01818", horizon: "#FF3A1E"}
+  - {name: magenta, high: "#5B2E8E", mid: "#D0327E", horizon: "#FF5AA0"}
+  - {name: pastel,  high: "#9FA9D6", mid: "#E89AA8", horizon: "#FBD89A"}
+  - {name: teal,    high: "#34607E", mid: "#4E8E86", horizon: "#9AC8B8"}
+  - {name: ember,   high: "#4E3A6B", mid: "#C2431D", horizon: "#F0A23A"}
+  - {name: violet,  high: "#2E1E6B", mid: "#7A3AA0", horizon: "#B070C0"}
+  - {name: sage,    high: "#3A4E5A", mid: "#8A8E6E", horizon: "#D2C892"}
+
+# Go-wild sunset controls (issue: extra-varied sunrises/sunsets).
+# sunsetDrama: how strongly the painted bands override the analytic sky — higher
+# = the day's chosen colours dominate the dusk (1 = subtle, ~1.6 = bold).
+sunsetDrama: 1.35
+# sunsetHueVary: per-twilight hue rotation of the whole palette. 0 = presets as
+# authored; 1 = up to +-180 deg every dawn/dusk (plus a saturation boost), so the
+# sky cycles through every hue across days. The big variety lever — kept moderate
+# (~0.4) so dusks stay varied day to day without straying into garish/alien hues.
+sunsetHueVary: 0.4
+
+# Ozone (Chappuis-band) absorption: green/red are absorbed along the long
+# twilight view path, leaving the deep blues/purples of real post-sunset skies.
+# rgb = per-channel absorption coefficient; ozoneStrength scales it and grows
+# with the day's haze.
+ozone: [0.0026, 0.0050, 0.0008]
+ozoneStrength: 4.5
+
+# Cloud underside dusk glow: a warm colour added to *lit* cloud bases while the
+# sun is low, independent of the (near-white) sun disc colour — so broken clouds
+# blush pink/red at the bottom like the reference photos. Strength 0 = off.
+cloudDuskTint: "#FF6A3C"
+cloudDuskStrength: 0.6
+
+# --- Sun & moon discs ----------------------------------------------------------
+# Angular size in degrees (the real sun is ~0.5; bigger reads better in-game).
+# Used by: sky.frag disc tests. Effect: larger = bigger disc in the sky.
+sunColor:   "#DBB54C"
+sunSizeDeg: 2.4
+# Additive glow around the sun (0 = none). Effect: haze/bloom around the disc.
+sunGlow:    0.22
+moonColor:  "#D8E0F0"
+moonSizeDeg: 2.4
+
+# --- Terrain lighting ----------------------------------------------------------
+# The sun/moon acts as a *directional* light on block faces: brightness =
+# ambient + (1-ambient) * max(dot(faceNormal, lightDir), 0), so faces turned
+# toward the sun are bright and shading sweeps around as the day passes.
+# Used by: chunk.frag via the camera UBO.
+# Effect: higher ambient = flatter, softer shading; lower = starker shadows.
+dayAmbient:   0.45
+nightAmbient: 0.30
+# Colour of sunlight on terrain: `sunlightDay` is the sun's colour *above* the
+# atmosphere — the analytic model multiplies it by the sunset transmittance, so
+# it warms at dusk automatically. `sunlightSunset` is used by the legacy path
+# only. `moonlight` tints terrain at night on both paths.
+sunlightDay:    "#FFF6DC"
+sunlightSunset: "#E8A050"
+moonlight:      "#8FA3C8"
+# Sky-light intensity at night (0-1): how bright moonlit open ground is compared
+# to full daylight. Effect: lower = darker, more dangerous nights.
+moonIntensity: 0.05
+
+# --- Night sky (procedural stars + Milky Way) ----------------------------------
+# A multi-layer cell-hash starfield evaluated per pixel in shaders/sky.frag, only
+# at night, faded through twilight, dimmed toward the horizon and near a bright
+# moon, washed out by hazy/overcast weather, and occluded by clouds.
+# Used by: DayNight::state() -> the sky UBO -> sky.frag.
+#
+# Observer latitude in degrees: tilts the celestial pole the sky wheels about.
+# 0 = pole on the horizon (equatorial), 90 = pole at the zenith. Effect: which
+# way and how steeply the stars arc over a night.
+latitude: 45
+# How many full turns of the star field per in-game day (the sun does one). 1
+# keeps sun and stars locked; >1 wheels the sky faster than the sun for effect.
+siderealRate: 1.0
+# Overall star brightness multiplier (0 = no stars). Effect: a dense bright field
+# vs a few faint pinpricks.
+starBrightness: 0.6
+# Milky Way band strength (0 = off). The faint galactic band washes out first as
+# the sky hazes over. Effect: visibility of the glowing dust band.
+milkyWay: 0.3
+# Star scintillation rate (twinkle). Higher = faster shimmer; 0 = steady stars.
+twinkleSpeed: 0.0
+# Horizon extinction strength: how fast stars dim/redden toward the horizon.
+# Higher = stars vanish sooner as they set; lower = visible closer to the horizon.
+starExtinction: 0.30
+# Planets (0 = off): a few bright, *steady* (non-twinkling) coloured points on the
+# ecliptic that wheel with the stars. Effect: brightness of those planet dots.
+planets: 0.2
+# Shooting stars / meteors (0 = off .. ~1 = frequent): occasional bright streaks
+# that arc across the sky and fade. Effect: how often meteors appear.
+shootingStars: 0.3

@@ -8,11 +8,98 @@
 
 #include <glm/gtc/matrix_transform.hpp>
 
+#include <algorithm>
 #include <array>
+#include <cstring>
+#include <execution>
 #include <iostream>
 #include <stdexcept>
+#include <utility>
+#include <vector>
 
 namespace vg {
+
+namespace {
+
+// Six frustum planes (a,b,c,d) extracted from a clip matrix (Gribb-Hartmann),
+// each oriented so a point is inside the half-space when a*x+b*y+c*z+d >= 0.
+// The near plane is `row2` because the build forces Vulkan's [0,1] depth
+// (GLM_FORCE_DEPTH_ZERO_TO_ONE); the Y-flip in `proj` only relabels top/bottom,
+// which is harmless since all six planes are tested. Planes are left unnormalised
+// — only the sign of the half-space test matters, so the scale is irrelevant.
+std::array<glm::vec4, 6> extractFrustum(const glm::mat4& clip) {
+    auto row = [&](int i) { return glm::vec4(clip[0][i], clip[1][i], clip[2][i], clip[3][i]); };
+    const glm::vec4 r0 = row(0), r1 = row(1), r2 = row(2), r3 = row(3);
+    return {r3 + r0, r3 - r0, r3 + r1, r3 - r1, r2, r3 - r2};
+}
+
+// Conservative AABB-vs-frustum test: the box is culled only when it lies wholly
+// outside one plane (its "positive vertex" — the corner farthest along the plane
+// normal — is still on the outside). Never culls a box that's even partly
+// visible, so it can't pop on-screen geometry.
+bool aabbInFrustum(const std::array<glm::vec4, 6>& frustum, const glm::vec3& mn,
+                   const glm::vec3& mx) {
+    for (const glm::vec4& p : frustum) {
+        const glm::vec3 pv(p.x >= 0.0f ? mx.x : mn.x, p.y >= 0.0f ? mx.y : mn.y,
+                           p.z >= 0.0f ? mx.z : mn.z);
+        if (p.x * pv.x + p.y * pv.y + p.z * pv.z + p.w < 0.0f) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// Floor-modulo (b > 0): maps an absolute chunk coord to its ring-buffer slot,
+// matching World's chunk store so a streamed-in chunk reuses the departed
+// chunk's mesh slot. Identity over [0, b).
+int floormod(int a, int b) {
+    const int r = a % b;
+    return (r < 0) ? r + b : r;
+}
+
+// One chunk's combined buffer holds, in order: opaque vertices, water vertices,
+// opaque indices, water indices. Both index ranges live in the same allocation;
+// the water draw passes firstWaterVertex as its vertexOffset (its indices are
+// 0-based into the water vertices). This computes the byte offsets/counts.
+struct MeshLayout {
+    VkDeviceSize indexOffset      = 0; // opaque indices (4-byte aligned past the vertices)
+    VkDeviceSize waterIndexOffset = 0; // water indices (right after the opaque indices)
+    VkDeviceSize total            = 0;
+    uint32_t     indexCount       = 0;
+    uint32_t     waterIndexCount  = 0;
+    int32_t      firstWaterVertex = 0;
+};
+
+MeshLayout computeLayout(const MeshData& m) {
+    MeshLayout L{};
+    const VkDeviceSize ov = sizeof(Vertex) * m.vertices.size();
+    const VkDeviceSize wv = sizeof(Vertex) * m.waterVertices.size();
+    L.indexOffset      = (ov + wv + 3) & ~VkDeviceSize(3); // 4-byte index alignment
+    L.waterIndexOffset = L.indexOffset + sizeof(uint32_t) * m.indices.size();
+    L.total            = L.waterIndexOffset + sizeof(uint32_t) * m.waterIndices.size();
+    L.indexCount       = static_cast<uint32_t>(m.indices.size());
+    L.waterIndexCount  = static_cast<uint32_t>(m.waterIndices.size());
+    L.firstWaterVertex = static_cast<int32_t>(m.vertices.size());
+    return L;
+}
+
+// Lay the four sub-arrays into a destination buffer per `L` (each copy guarded
+// so an empty sub-array doesn't memcpy from a null data()).
+void writeBlob(char* p, const MeshData& m, const MeshLayout& L) {
+    const VkDeviceSize ov = sizeof(Vertex) * m.vertices.size();
+    const VkDeviceSize wv = sizeof(Vertex) * m.waterVertices.size();
+    if (ov) std::memcpy(p, m.vertices.data(), static_cast<size_t>(ov));
+    if (wv) std::memcpy(p + ov, m.waterVertices.data(), static_cast<size_t>(wv));
+    if (!m.indices.empty()) {
+        std::memcpy(p + L.indexOffset, m.indices.data(), sizeof(uint32_t) * m.indices.size());
+    }
+    if (!m.waterIndices.empty()) {
+        std::memcpy(p + L.waterIndexOffset, m.waterIndices.data(),
+                    sizeof(uint32_t) * m.waterIndices.size());
+    }
+}
+
+} // namespace
 
 WorldRenderer::WorldRenderer(VulkanContext& ctx, VkRenderPass renderPass,
                              uint32_t framesInFlight, const World& world,
@@ -23,45 +110,448 @@ WorldRenderer::WorldRenderer(VulkanContext& ctx, VkRenderPass renderPass,
     pipeline_ = std::make_unique<Pipeline>(ctx_, renderPass,
                                            shaderDir + "/chunk.vert.spv",
                                            shaderDir + "/chunk.frag.spv");
+    // Same shaders, but the translucent flavor (alpha blend on, depth-write off)
+    // for the second, water pass — drawn after opaque so the seabed shows through.
+    waterPipeline_ = std::make_unique<Pipeline>(ctx_, renderPass,
+                                                shaderDir + "/chunk.vert.spv",
+                                                shaderDir + "/chunk.frag.spv",
+                                                /*translucent=*/true);
     buildMeshes();
     createUniformBuffers(framesInFlight);
     createDescriptorSets(framesInFlight);
+    framesInFlight_ = framesInFlight;
+    meshVersion_.assign(meshes_.size(), 0);
+    if (world_.streaming() && world_.streamWorkers() > 0) {
+        startWorkers(world_.streamWorkers());
+    }
 }
 
 WorldRenderer::~WorldRenderer() {
+    stopWorkers(); // join threads before tearing down anything they read
     if (descriptorPool_) {
         vkDestroyDescriptorPool(ctx_.device(), descriptorPool_, nullptr);
     }
 }
 
+int WorldRenderer::chunkIndex(int cx, int cy, int cz) const {
+    return floormod(cx, counts_.x) +
+           counts_.x * (floormod(cy, counts_.y) + counts_.y * floormod(cz, counts_.z));
+}
+
+ChunkMesher::NeighborSampler WorldRenderer::makeSampler(int cx, int cy, int cz) const {
+    const int baseX = cx * Chunk::kSize;
+    const int baseY = cy * Chunk::kSize;
+    const int baseZ = cz * Chunk::kSize;
+    // The sampler is consumed synchronously by greedyMesh(), so capturing the
+    // world by reference (via this) is safe.
+    return [this, baseX, baseY, baseZ](int lx, int ly, int lz) {
+        return world_.blockAt(baseX + lx, baseY + ly, baseZ + lz);
+    };
+}
+
+ChunkMesher::LightSampler WorldRenderer::makeLightSampler(int cx, int cy, int cz) const {
+    const int baseX = cx * Chunk::kSize;
+    const int baseY = cy * Chunk::kSize;
+    const int baseZ = cz * Chunk::kSize;
+    return [this, baseX, baseY, baseZ](int lx, int ly, int lz) -> ChunkMesher::LightSample {
+        const int wx = baseX + lx, wy = baseY + ly, wz = baseZ + lz;
+        return {world_.skyLightAt(wx, wy, wz), world_.blockLightAt(wx, wy, wz)};
+    };
+}
+
+VkImageView WorldRenderer::blockTextureView() const { return textures_->view(); }
+VkSampler   WorldRenderer::blockTextureSampler() const { return textures_->sampler(); }
+
+void WorldRenderer::uploadChunkMesh(int cx, int cy, int cz) {
+    // Smooth lighting (per-corner AO + light) is always on; the mesher's flat
+    // mode remains only as a debugging path. Main-thread meshing → free old
+    // buffers immediately (callers issue a device-idle wait first).
+    MeshData mesh = ChunkMesher::greedyMesh(world_.chunk(cx, cy, cz), world_.registry(),
+                                            makeSampler(cx, cy, cz),
+                                            makeLightSampler(cx, cy, cz), true);
+    installMesh(cx, cy, cz, std::move(mesh), /*deferOldBuffers=*/false);
+}
+
+void WorldRenderer::swapChunkBuffers(int cx, int cy, int cz, Buffer&& meshBuffer,
+                                     VkDeviceSize indexOffset, uint32_t indexCount,
+                                     VkDeviceSize waterIndexOffset, uint32_t waterIndexCount,
+                                     int32_t firstWaterVertex, bool deferOldBuffers) {
+    ChunkMesh& cm = meshes_[chunkIndex(cx, cy, cz)];
+
+    // Drop this slot's previous contribution before rebuilding it. A slot counts
+    // as a drawn chunk if it has either opaque or water geometry.
+    const bool hadGeometry = cm.indexCount > 0 || cm.waterIndexCount > 0;
+    totalTriangles_ -= (cm.indexCount + cm.waterIndexCount) / 3;
+    if (hadGeometry) {
+        --drawnChunks_;
+        if (deferOldBuffers) {
+            // An in-flight frame may still reference the old buffer, and the worker
+            // path can't issue a per-frame device wait — retire it for a few frames
+            // instead of freeing now. tickRetired() reaps it.
+            retired_.emplace_back(static_cast<int>(framesInFlight_) + 1, std::move(cm.meshBuffer));
+        }
+    }
+    cm.meshBuffer       = std::move(meshBuffer);
+    cm.indexOffset      = indexOffset;
+    cm.indexCount       = indexCount;
+    cm.waterIndexOffset = waterIndexOffset;
+    cm.waterIndexCount  = waterIndexCount;
+    cm.firstWaterVertex = firstWaterVertex;
+    if (indexCount > 0 || waterIndexCount > 0) {
+        ++drawnChunks_;
+    }
+    cm.worldPos = glm::vec3(cx, cy, cz) * static_cast<float>(Chunk::kSize);
+    totalTriangles_ += (cm.indexCount + cm.waterIndexCount) / 3;
+}
+
+void WorldRenderer::installMesh(int cx, int cy, int cz, MeshData&& mesh, bool deferOldBuffers) {
+    // Main-thread immediate path (one GPU submit+wait in createDeviceLocal) — fine
+    // for the rare, small sync remeshes (block edits, falloff). The streaming path
+    // uses installMeshBatch(). Vertices + indices share ONE allocation (halves the
+    // device allocation count vs a buffer each — see WORLD_GEN_AGENT_TIPS §5).
+    if (mesh.empty()) {
+        swapChunkBuffers(cx, cy, cz, Buffer{}, 0, 0, 0, 0, 0, deferOldBuffers);
+        return;
+    }
+    const MeshLayout L = computeLayout(mesh);
+    std::vector<uint8_t> blob(static_cast<size_t>(L.total));
+    writeBlob(reinterpret_cast<char*>(blob.data()), mesh, L);
+    Buffer mb = Buffer::createDeviceLocal(
+        ctx_, blob.data(), L.total,
+        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
+    swapChunkBuffers(cx, cy, cz, std::move(mb), L.indexOffset, L.indexCount,
+                     L.waterIndexOffset, L.waterIndexCount, L.firstWaterVertex,
+                     deferOldBuffers);
+}
+
+void WorldRenderer::installMeshBatch(std::vector<MeshResult>& batch) {
+    // Build the device buffers + host staging now (no GPU work yet) and swap the
+    // device buffers into their slots. The staging->device COPY is deferred to
+    // recordPendingUploads(), which records it into the frame's own command buffer
+    // before the render pass — so the upload rides the frame's submit with zero
+    // extra device sync. (createDeviceLocal's per-buffer submit+wait was the lag.)
+    for (MeshResult& r : batch) {
+        const size_t slot = static_cast<size_t>(chunkIndex(r.cx, r.cy, r.cz));
+        if (meshVersion_[slot] != r.version) {
+            continue; // superseded by a newer request — discard this stale mesh
+        }
+        if (r.data.empty()) {
+            swapChunkBuffers(r.cx, r.cy, r.cz, Buffer{}, 0, 0, 0, 0, 0, /*deferOldBuffers=*/true);
+            continue;
+        }
+        const MeshLayout L = computeLayout(r.data);
+        // One host staging buffer holding all vertices then all indices.
+        Buffer stage(ctx_, L.total, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        writeBlob(static_cast<char*>(stage.map()), r.data, L);
+        // One device buffer used as both vertex and index source.
+        Buffer dev(ctx_, L.total,
+                   VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
+                       VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                   VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+        PendingUpload up;
+        up.dst   = dev.handle(); // stable handle; the slot owns the buffer after the swap
+        up.size  = L.total;
+        up.stage = std::move(stage);
+        pendingUploads_.push_back(std::move(up));
+
+        swapChunkBuffers(r.cx, r.cy, r.cz, std::move(dev), L.indexOffset, L.indexCount,
+                         L.waterIndexOffset, L.waterIndexCount, L.firstWaterVertex,
+                         /*deferOldBuffers=*/true);
+    }
+}
+
+void WorldRenderer::recordPendingUploads(VkCommandBuffer cmd) {
+    if (pendingUploads_.empty()) {
+        return;
+    }
+    for (PendingUpload& p : pendingUploads_) {
+        VkBufferCopy copy{};
+        copy.size = p.size;
+        vkCmdCopyBuffer(cmd, p.stage.handle(), p.dst, 1, &copy);
+    }
+    // One barrier so the transfer writes are visible to the vertex/index fetch in
+    // the render pass that follows in this same command buffer.
+    VkMemoryBarrier barrier{};
+    barrier.sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT | VK_ACCESS_INDEX_READ_BIT;
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_VERTEX_INPUT_BIT,
+                         0, 1, &barrier, 0, nullptr, 0, nullptr);
+
+    // Keep the staging buffers alive until this frame's GPU work (the copy) is done.
+    const int life = static_cast<int>(framesInFlight_) + 1;
+    for (PendingUpload& p : pendingUploads_) {
+        retired_.emplace_back(life, std::move(p.stage));
+    }
+    pendingUploads_.clear();
+}
+
+void WorldRenderer::tickRetired() {
+    if (retired_.empty()) {
+        return;
+    }
+    for (auto& r : retired_) {
+        --r.first;
+    }
+    // Erasing frees the Buffer (RAII): safe now — framesInFlight_+1 frames have
+    // elapsed, so every frame that could reference it has completed.
+    retired_.erase(std::remove_if(retired_.begin(), retired_.end(),
+                                  [](const std::pair<int, Buffer>& r) { return r.first <= 0; }),
+                   retired_.end());
+}
+
 void WorldRenderer::buildMeshes() {
-    const glm::ivec3 counts = world_.chunkCounts();
-    for (int cz = 0; cz < counts.z; ++cz) {
-        for (int cy = 0; cy < counts.y; ++cy) {
-            for (int cx = 0; cx < counts.x; ++cx) {
-                MeshData mesh = ChunkMesher::greedyMesh(world_.chunk(cx, cy, cz),
-                                                        world_.registry());
-                if (mesh.empty()) {
-                    continue; // air (or fully-occluded) chunk: nothing to draw
-                }
+    counts_ = world_.chunkCounts();
+    meshes_.resize(static_cast<size_t>(counts_.x) * counts_.y * counts_.z);
 
-                ChunkMesh cm;
-                cm.vertexBuffer = Buffer::createDeviceLocal(
-                    ctx_, mesh.vertices.data(), sizeof(Vertex) * mesh.vertices.size(),
-                    VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
-                cm.indexBuffer = Buffer::createDeviceLocal(
-                    ctx_, mesh.indices.data(), sizeof(uint32_t) * mesh.indices.size(),
-                    VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
-                cm.indexCount = static_cast<uint32_t>(mesh.indices.size());
-                cm.worldPos = glm::vec3(cx, cy, cz) * static_cast<float>(Chunk::kSize);
-
-                totalTriangles_ += cm.indexCount / 3;
-                meshes_.push_back(std::move(cm));
+    // Greedy-meshing thousands of chunks one-at-a-time on the main thread was the
+    // bulk of startup. greedyMesh() only READS the world, so mesh every chunk in
+    // parallel into CPU mesh data first, then install serially (Vulkan is main-
+    // thread only). The window is generated at origin {0,0,0} at construction.
+    std::vector<glm::ivec3> coords;
+    coords.reserve(meshes_.size());
+    for (int cz = 0; cz < counts_.z; ++cz) {
+        for (int cy = 0; cy < counts_.y; ++cy) {
+            for (int cx = 0; cx < counts_.x; ++cx) {
+                coords.push_back({cx, cy, cz});
             }
         }
     }
-    std::cout << "[world] meshed " << meshes_.size() << " chunks, "
+    std::vector<MeshData> meshed(coords.size());
+    std::transform(std::execution::par, coords.begin(), coords.end(), meshed.begin(),
+                   [this](const glm::ivec3& c) {
+                       return ChunkMesher::greedyMesh(
+                           world_.chunk(c.x, c.y, c.z), world_.registry(),
+                           makeSampler(c.x, c.y, c.z), makeLightSampler(c.x, c.y, c.z), true);
+                   });
+
+    // Upload in slices: record every chunk's staging->device copy into ONE command
+    // buffer and submit+wait once per slice, instead of installMesh()'s submit+wait
+    // PER chunk (thousands of GPU round-trips were the rest of the startup cost).
+    // The slice bound keeps live allocations (accumulating device buffers + this
+    // slice's staging) under Vulkan's maxMemoryAllocationCount (~4096).
+    constexpr size_t kSlice = 384;
+    for (size_t start = 0; start < coords.size(); start += kSlice) {
+        const size_t end = std::min(start + kSlice, coords.size());
+        std::vector<Buffer> staging; // freed at slice end (after the copy completes)
+        staging.reserve(end - start);
+        VkCommandBuffer cmd = ctx_.beginSingleTimeCommands();
+        for (size_t i = start; i < end; ++i) {
+            const glm::ivec3& c = coords[i];
+            MeshData& m = meshed[i];
+            if (m.empty()) {
+                swapChunkBuffers(c.x, c.y, c.z, Buffer{}, 0, 0, 0, 0, 0, /*deferOldBuffers=*/false);
+                continue;
+            }
+            const MeshLayout L = computeLayout(m);
+            Buffer stage(ctx_, L.total, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+            writeBlob(static_cast<char*>(stage.map()), m, L);
+            Buffer dev(ctx_, L.total,
+                       VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
+                           VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                       VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+            VkBufferCopy copy{};
+            copy.size = L.total;
+            vkCmdCopyBuffer(cmd, stage.handle(), dev.handle(), 1, &copy);
+            staging.push_back(std::move(stage));
+            swapChunkBuffers(c.x, c.y, c.z, std::move(dev), L.indexOffset, L.indexCount,
+                             L.waterIndexOffset, L.waterIndexCount, L.firstWaterVertex,
+                             /*deferOldBuffers=*/false);
+        }
+        ctx_.endSingleTimeCommands(cmd); // one submit+wait for the whole slice
+    }
+    std::cout << "[world] meshed " << drawnChunks_ << " non-empty chunks, "
               << totalTriangles_ << " triangles\n";
+}
+
+void WorldRenderer::remeshChunk(int cx, int cy, int cz) {
+    // The chunk's old buffers may still be referenced by frames in flight, so wait
+    // for the GPU to drain before we free and replace them. Remeshing is a rare,
+    // discrete event (a block edit, a chunk streaming in), so a full device wait
+    // here is acceptable and keeps buffer lifetime trivial.
+    vkDeviceWaitIdle(ctx_.device());
+    if (!meshVersion_.empty()) {
+        ++meshVersion_[static_cast<size_t>(chunkIndex(cx, cy, cz))];
+    }
+    uploadChunkMesh(cx, cy, cz);
+}
+
+void WorldRenderer::remeshChunks(const std::vector<glm::ivec3>& chunks) {
+    if (chunks.empty()) {
+        return;
+    }
+    vkDeviceWaitIdle(ctx_.device()); // drain once for the whole batch
+    for (const glm::ivec3& c : chunks) {
+        // Bump the slot's version so any in-flight worker result for it is treated
+        // as stale and discarded (this immediate remesh is the newest state).
+        if (!meshVersion_.empty()) {
+            ++meshVersion_[static_cast<size_t>(chunkIndex(c.x, c.y, c.z))];
+        }
+        uploadChunkMesh(c.x, c.y, c.z);
+    }
+}
+
+void WorldRenderer::remeshAll() {
+    // Lighting is baked into the vertex data, so a global lighting change (e.g.
+    // a new falloff) means every loaded chunk must be rebuilt. One drain for the
+    // lot. Iterate the window's absolute coords — it may have streamed away from 0.
+    vkDeviceWaitIdle(ctx_.device());
+    const glm::ivec3 o = world_.chunkOrigin();
+    for (int cz = o.z; cz < o.z + counts_.z; ++cz) {
+        for (int cy = o.y; cy < o.y + counts_.y; ++cy) {
+            for (int cx = o.x; cx < o.x + counts_.x; ++cx) {
+                if (!meshVersion_.empty()) {
+                    ++meshVersion_[static_cast<size_t>(chunkIndex(cx, cy, cz))];
+                }
+                uploadChunkMesh(cx, cy, cz);
+            }
+        }
+    }
+}
+
+void WorldRenderer::queueRemesh(const std::vector<glm::ivec3>& chunks) {
+    for (const glm::ivec3& c : chunks) {
+        pendingRemesh_.push_back(c);
+    }
+}
+
+void WorldRenderer::processRemeshQueue(int budget) {
+    if (pendingRemesh_.empty() || budget <= 0) {
+        return;
+    }
+    std::vector<glm::ivec3> batch;
+    batch.reserve(static_cast<size_t>(budget));
+    while (!pendingRemesh_.empty() && static_cast<int>(batch.size()) < budget) {
+        batch.push_back(pendingRemesh_.front());
+        pendingRemesh_.pop_front();
+    }
+    remeshChunks(batch); // one GPU drain for this frame's slice
+}
+
+// --- Worker-thread streaming meshing -----------------------------------------
+// Workers only ever READ the World (to greedy-mesh) and produce CPU MeshData; the
+// main thread does all Vulkan (uploads via installMesh). The main thread is the
+// sole World mutator and calls drainMeshJobs() (streamBarrier) before mutating, so
+// a worker never reads chunk/light data mid-write. Per-slot meshVersion_ makes the
+// newest request win: a result is applied only if it's still the latest for its slot.
+
+void WorldRenderer::startWorkers(int n) {
+    stopWorkers_ = false;
+    for (int i = 0; i < n; ++i) {
+        workers_.emplace_back([this] { workerLoop(); });
+    }
+}
+
+void WorldRenderer::stopWorkers() {
+    {
+        std::lock_guard<std::mutex> lk(jobMutex_);
+        stopWorkers_ = true;
+    }
+    jobCv_.notify_all();
+    for (std::thread& t : workers_) {
+        if (t.joinable()) {
+            t.join();
+        }
+    }
+    workers_.clear();
+}
+
+void WorldRenderer::workerLoop() {
+    for (;;) {
+        MeshJob job;
+        {
+            std::unique_lock<std::mutex> lk(jobMutex_);
+            jobCv_.wait(lk, [this] { return stopWorkers_ || !jobQueue_.empty(); });
+            if (jobQueue_.empty()) {
+                if (stopWorkers_) {
+                    return;
+                }
+                continue;
+            }
+            job = jobQueue_.front();
+            jobQueue_.pop_front();
+        }
+
+        // Read-only: safe because the main thread drains us before mutating World.
+        MeshData md = ChunkMesher::greedyMesh(world_.chunk(job.cx, job.cy, job.cz),
+                                              world_.registry(),
+                                              makeSampler(job.cx, job.cy, job.cz),
+                                              makeLightSampler(job.cx, job.cy, job.cz), true);
+        {
+            std::lock_guard<std::mutex> lk(resultMutex_);
+            resultQueue_.push_back(MeshResult{job.cx, job.cy, job.cz, job.version, std::move(md)});
+        }
+        if (jobsOutstanding_.fetch_sub(1) == 1) {
+            // Reached zero — wake a thread blocked in drainMeshJobs(). Notify under
+            // the barrier mutex so the waiter can't miss it between predicate + wait.
+            std::lock_guard<std::mutex> lk(barrierMutex_);
+            barrierCv_.notify_all();
+        }
+    }
+}
+
+void WorldRenderer::enqueueMeshJobs(const std::vector<glm::ivec3>& chunks) {
+    if (chunks.empty()) {
+        return;
+    }
+    {
+        std::lock_guard<std::mutex> lk(jobMutex_);
+        for (const glm::ivec3& c : chunks) {
+            const size_t slot = static_cast<size_t>(chunkIndex(c.x, c.y, c.z));
+            const std::uint64_t v = ++meshVersion_[slot]; // main-thread-only field
+            jobQueue_.push_back(MeshJob{c.x, c.y, c.z, v});
+            jobsOutstanding_.fetch_add(1);
+        }
+    }
+    jobCv_.notify_all();
+}
+
+void WorldRenderer::drainMeshJobs() {
+    std::unique_lock<std::mutex> lk(barrierMutex_);
+    barrierCv_.wait(lk, [this] { return jobsOutstanding_.load() == 0; });
+}
+
+void WorldRenderer::processMeshResults(int budget) {
+    // Pop up to `budget` finished meshes, then upload them all with a single GPU
+    // submit+wait (installMeshBatch) — per-buffer device waits here were the load lag.
+    std::vector<MeshResult> batch;
+    batch.reserve(static_cast<size_t>(budget));
+    {
+        std::lock_guard<std::mutex> lk(resultMutex_);
+        while (static_cast<int>(batch.size()) < budget && !resultQueue_.empty()) {
+            batch.push_back(std::move(resultQueue_.front()));
+            resultQueue_.pop_front();
+        }
+    }
+    if (batch.empty()) {
+        return;
+    }
+    installMeshBatch(batch);
+}
+
+void WorldRenderer::streamBarrier() {
+    if (!workers_.empty()) {
+        drainMeshJobs();
+    }
+}
+
+void WorldRenderer::streamRemesh(const std::vector<glm::ivec3>& chunks) {
+    if (!workers_.empty()) {
+        enqueueMeshJobs(chunks);
+    } else {
+        queueRemesh(chunks);
+    }
+}
+
+void WorldRenderer::streamPump(int budget) {
+    if (!workers_.empty()) {
+        processMeshResults(budget);
+    } else {
+        processRemeshQueue(budget);
+    }
 }
 
 void WorldRenderer::createUniformBuffers(uint32_t n) {
@@ -133,8 +623,11 @@ void WorldRenderer::createDescriptorSets(uint32_t n) {
 }
 
 void WorldRenderer::record(VkCommandBuffer cmd, uint32_t frameIndex, VkExtent2D extent,
-                           const glm::mat4& view, const glm::mat4& proj) {
-    CameraUBO ubo{view, proj};
+                           const glm::mat4& view, const glm::mat4& proj,
+                           const glm::vec4& sunDirAmbient, const glm::vec4& sunColIntensity) {
+    tickRetired(); // reap deferred buffer frees whose in-flight frames have completed
+
+    CameraUBO ubo{view, proj, sunDirAmbient, sunColIntensity};
     uniformBuffers_[frameIndex].upload(&ubo, sizeof(ubo));
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_->handle());
@@ -154,17 +647,63 @@ void WorldRenderer::record(VkCommandBuffer cmd, uint32_t frameIndex, VkExtent2D 
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_->layout(),
                             0, 1, &descriptorSets_[frameIndex], 0, nullptr);
 
-    // One draw per chunk, each translated to its world position via push constant.
-    for (const ChunkMesh& m : meshes_) {
-        glm::mat4 model = glm::translate(glm::mat4(1.0f), m.worldPos);
-        vkCmdPushConstants(cmd, pipeline_->layout(), VK_SHADER_STAGE_VERTEX_BIT, 0,
-                           Pipeline::kPushConstantSize, &model);
+    // One draw per non-empty chunk, each translated to its world position via a
+    // push constant. Empty slots (air chunks) carry no geometry and are skipped,
+    // as are chunks whose bounding box falls entirely outside the view frustum
+    // (frustum culling — the GPU already discards back faces, but skipping the
+    // draw call entirely also spares vertex processing for off-screen chunks).
+    const std::array<glm::vec4, 6> frustum = extractFrustum(proj * view);
+    const glm::vec3 chunkExtent(static_cast<float>(Chunk::kSize));
 
-        VkBuffer vbs[] = {m.vertexBuffer.handle()};
-        VkDeviceSize offsets[] = {0};
-        vkCmdBindVertexBuffers(cmd, 0, 1, vbs, offsets);
-        vkCmdBindIndexBuffer(cmd, m.indexBuffer.handle(), 0, VK_INDEX_TYPE_UINT32);
+    // --- Pass 1: opaque terrain (writes colour + depth) ----------------------
+    for (const ChunkMesh& m : meshes_) {
+        if (m.indexCount == 0) {
+            continue;
+        }
+        if (!aabbInFrustum(frustum, m.worldPos, m.worldPos + chunkExtent)) {
+            continue;
+        }
+        PushConstants pc;
+        pc.model      = glm::translate(glm::mat4(1.0f), m.worldPos);
+        pc.params.x   = 1.0f; // fully opaque
+        vkCmdPushConstants(cmd, pipeline_->layout(), VK_SHADER_STAGE_VERTEX_BIT, 0,
+                           Pipeline::kPushConstantSize, &pc);
+
+        VkBuffer     vb   = m.meshBuffer.handle();
+        VkDeviceSize zero = 0;
+        vkCmdBindVertexBuffers(cmd, 0, 1, &vb, &zero);
+        vkCmdBindIndexBuffer(cmd, vb, m.indexOffset, VK_INDEX_TYPE_UINT32);
         vkCmdDrawIndexed(cmd, m.indexCount, 1, 0, 0, 0);
+    }
+
+    // --- Pass 2: translucent water (depth test on, depth write off) ----------
+    // Drawn after all opaque geometry so each water surface alpha-blends over the
+    // seabed/terrain already in the colour buffer. The viewport/scissor are
+    // dynamic and persist; the descriptor set layout is identical, but rebind it
+    // against the water pipeline's layout to be explicit.
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, waterPipeline_->handle());
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, waterPipeline_->layout(),
+                            0, 1, &descriptorSets_[frameIndex], 0, nullptr);
+    for (const ChunkMesh& m : meshes_) {
+        if (m.waterIndexCount == 0) {
+            continue;
+        }
+        if (!aabbInFrustum(frustum, m.worldPos, m.worldPos + chunkExtent)) {
+            continue;
+        }
+        PushConstants pc;
+        pc.model    = glm::translate(glm::mat4(1.0f), m.worldPos);
+        pc.params.x = 0.7f; // ~70% opacity — see the seabed through it
+        vkCmdPushConstants(cmd, waterPipeline_->layout(), VK_SHADER_STAGE_VERTEX_BIT, 0,
+                           Pipeline::kPushConstantSize, &pc);
+
+        VkBuffer     vb   = m.meshBuffer.handle();
+        VkDeviceSize zero = 0;
+        vkCmdBindVertexBuffers(cmd, 0, 1, &vb, &zero);
+        vkCmdBindIndexBuffer(cmd, vb, m.waterIndexOffset, VK_INDEX_TYPE_UINT32);
+        // Water indices are 0-based into the water vertices, which sit after the
+        // opaque vertices in the same buffer — firstWaterVertex is the offset.
+        vkCmdDrawIndexed(cmd, m.waterIndexCount, 1, 0, m.firstWaterVertex, 0);
     }
 }
 

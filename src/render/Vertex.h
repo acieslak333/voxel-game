@@ -18,14 +18,20 @@ namespace vg {
 //     texture tiles once per block instead of stretching across the whole quad.
 //     This is the crux of combining greedy meshing with textures.
 //   * layer selects which slice of the 2D texture *array* to sample.
-//   * shade is a cheap per-face brightness (top brighter than sides than
-//     bottom) so the blocky geometry reads clearly without real lighting.
+//   * light is per-vertex brightness split by source: x = sky-lit, y = block-lit
+//     (each already includes ambient occlusion). Keeping them separate lets the
+//     shader tint sky light and block light different colours. The rasteriser
+//     interpolates both, giving the soft "smooth lighting" gradient.
+//   * normal is the face index (the Face enum, 0..5); the shader decodes it to a
+//     unit normal and lights the face against the *current* sun/moon direction,
+//     so shading sweeps around with the time of day without remeshing.
 // -----------------------------------------------------------------------------
 struct Vertex {
     glm::vec3 pos;
     glm::vec2 uv;
     uint32_t  layer;
-    float     shade;
+    glm::vec2 light;
+    uint32_t  normal;
 
     // How to fetch one Vertex from the vertex buffer.
     static VkVertexInputBindingDescription bindingDescription() {
@@ -37,12 +43,13 @@ struct Vertex {
     }
 
     // How to interpret each field as a shader input attribute.
-    static std::array<VkVertexInputAttributeDescription, 4> attributeDescriptions() {
-        std::array<VkVertexInputAttributeDescription, 4> a{};
+    static std::array<VkVertexInputAttributeDescription, 5> attributeDescriptions() {
+        std::array<VkVertexInputAttributeDescription, 5> a{};
         a[0] = {0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, pos)};
         a[1] = {1, 0, VK_FORMAT_R32G32_SFLOAT,    offsetof(Vertex, uv)};
         a[2] = {2, 0, VK_FORMAT_R32_UINT,         offsetof(Vertex, layer)};
-        a[3] = {3, 0, VK_FORMAT_R32_SFLOAT,       offsetof(Vertex, shade)};
+        a[3] = {3, 0, VK_FORMAT_R32G32_SFLOAT,    offsetof(Vertex, light)};
+        a[4] = {4, 0, VK_FORMAT_R32_UINT,         offsetof(Vertex, normal)};
         return a;
     }
 };

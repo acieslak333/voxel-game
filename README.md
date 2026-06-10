@@ -124,7 +124,11 @@ folders relative to its own location.
 | `Left Ctrl`      | Descend (free-fly)                                |
 | `Left Shift`     | Sprint                                             |
 | `F`              | Toggle walking / free-fly                          |
-| `Esc`            | Quit                                               |
+| Left click       | Break the block under the crosshair                |
+| Right click      | Place a block against the targeted face            |
+| `1` `2` `3`      | Pick the block to place (hotbar slot)              |
+| `Esc`            | Open / close the menu (options + Resume / Exit)    |
+| `F1`             | Toggle the debug info overlay (position, FPS, …)    |
 
 In **walking** mode the player has gravity and collides with solid blocks
 (stand on, walk into, jump onto). **Free-fly** mode disables both for debugging
@@ -152,16 +156,27 @@ xvfb-run -a -s "-screen 0 1280x720x24" ./build/bin/voxelgame --screenshot out.pn
 
 ```
 src/
-  core/      app, window, input, timing (delta time in the main loop)
+  core/      app, window, input, timing, colour palette (delta time in the loop)
   render/    Vulkan: context, swapchain, renderer, pipeline, buffers,
              texture array, world renderer, screenshot
   world/     block, block registry, chunk, greedy mesher, noise, world gen
   player/    camera, player controller (gravity, AABB collision, free-fly)
 shaders/     GLSL (chunk.vert/frag), compiled to SPIR-V at build time
-assets/      textures/  (one solid-colour PNG per block face)
+assets/      textures/ (PNG per block face), blocks.yaml (block types),
+             world.yaml (world size/seed + terrain noise), textures.yaml
+             (texture-generation knobs), colors.yaml + colormap.png (named
+             colour palette), settings.yaml (runtime settings)
 third_party/ vendored single-header libs (stb_image)
-scripts/     gen_textures.py (regenerates the placeholder textures)
+scripts/     gen_textures.py (regenerates textures from textures.yaml),
+             gen_colors.py (regenerates colors.yaml from colormap.png)
+docs/        CONFIGURATION.md (data/config convention — read before adding knobs)
 ```
+
+> **Configuration convention:** tunable values live in documented YAML under
+> `assets/`, not as magic numbers in scripts/code. Before adding a constant, read
+> [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) — it lists every config file,
+> what it controls, and how to add a value with the required what/where/effect
+> comment.
 
 Vulkan setup is split into focused, RAII-wrapped classes
 (`VulkanContext`, `Swapchain`, `Renderer`, `Pipeline`, `Buffer`,
@@ -179,6 +194,27 @@ own.
   **REPEAT** sampler, so each block shows one full texture tile.
 - A **block registry** (`world/BlockRegistry`) is the single source of truth for
   block properties and per-face texture layers, and is trivial to extend.
+- **Sky lighting**: `world/World` floods a per-block sky-light level (0–15) from
+  every column open to the sky, losing a level per step into shadow, so caves,
+  pits and roofed areas fade to dark. Edits re-flood the field and remesh the
+  affected chunks.
+- **Smooth lighting**: the mesher computes per-vertex *ambient occlusion* (each
+  face corner is darkened by the neighbouring blocks hemming it in) and a
+  per-vertex *sky-light* term (averaged over the same corner neighbourhood), on
+  top of a directional top/side/bottom shade. The rasteriser interpolates the
+  result across each face, giving soft darkening in crevices and a smooth falloff
+  into shadow.
+- **Pixelation**: the world is rendered into a low-resolution offscreen image
+  (`render/OffscreenTarget`) and nearest-upscaled onto the swapchain, for chunky
+  retro pixels without touching colours or textures. The chunkiness is set by
+  `Renderer::kPixelScale` (each low-res pixel covers that many window pixels; 1 =
+  off, 4 = quite chunky).
+- **Day-night cycle**: `core/DayNight` (configured by `assets/sky.yaml`) moves a
+  sun across the sky with a moon opposite it; `render/SkyRenderer` draws the
+  gradient sky + discs, and the chunk shader lights faces *directionally*
+  against the live sun/moon vector (ambient + diffuse·max(N·L,0)), so shadows
+  sweep around blocks through the day with no remeshing. Time of day, day
+  length, and a time freeze live in the Esc menu (persisted to settings.yaml).
 
 ### Procedural terrain (Milestone 3)
 

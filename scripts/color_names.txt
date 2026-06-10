@@ -1,0 +1,29 @@
+# Names for the palette swatches in assets/colormap.png, in the SAME order the
+# pixels are read (left-to-right, top-to-bottom). gen_colors.py pairs name[i]
+# with swatch[i] and writes assets/colors.yaml. Edit freely; lines starting with
+# '#' and blank lines are ignored. Any swatch without a name here is written as
+# color_NN. Code looks colours up by these names (e.g. App uses "sky_blue").
+maroon
+brick
+rust
+gold
+brown
+cocoa
+near_black
+charcoal
+taupe
+stone_gray
+cream
+lilac
+rose
+plum
+wine
+indigo
+blue
+periwinkle
+sky_blue
+grass_green
+lime
+olive
+forest
+deep_teal

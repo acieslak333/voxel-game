@@ -18,8 +18,7 @@ the current code should make them hard to add. Search the codebase for
 | Custom block models    | Not built  | Block registry render-type + mesher dispatch.        |
 | Island shaping         | Not built  | World generation noise pipeline.                     |
 | Chunk streaming        | Not built  | `World` load/unload around the player.               |
-| Extra survival stats   | Not built  | `Player` stats block (alongside health).             |
-| Texture mipmapping     | Not built  | Texture array upload.                                 |
+| Texture mipmapping     | Not built  | Texture array upload.                                |
 
 ---
 
@@ -45,8 +44,9 @@ the current code should make them hard to add. Search the codebase for
 - Collision goes through a `SolidFn` predicate, so the controller is independent
   of how the world is stored — it works unchanged when the single chunk becomes
   a streamed multi-chunk world.
-- Collision response is currently per-axis with a one-frame gap; a swept-AABB
-  solve (move exactly to contact) is a noted refinement.
+- Collision response is a per-axis **swept-AABB** solve: each axis advances
+  exactly to the first block face it would hit (no one-frame gap), while leaving
+  the other axes free so the player still slides along walls.
 - **`Camera`** is intentionally minimal (position + yaw/pitch); other drivers
   (spectator, cutscene) could reuse it.
 
@@ -59,13 +59,18 @@ the current code should make them hard to add. Search the codebase for
   grid) and *island shaping* (multiply the height field by a radial falloff so
   land is surrounded by water). The generator (`columnHeight` + material noise)
   is the place to add biomes, caves, ores, trees.
-- **Cross-chunk meshing**: chunks are currently meshed treating neighbours as
-  air, so faces on chunk boundaries between two solid chunks are emitted but
-  hidden (correct, slightly wasteful). Feeding the mesher a neighbour-aware
-  sampler (the `Chunk::getOrAir` seam) would cull them.
-- **`WorldRenderer`** meshes the whole world once. The seam for editing/streaming
-  is per-chunk remeshing: rebuild only the chunk(s) whose blocks changed and
-  swap their GPU buffers, rather than everything.
+- **Cross-chunk meshing** *(done)*: `ChunkMesher::greedyMesh` takes a
+  `NeighborSampler` that resolves chunk-local coords just past an edge to the
+  neighbouring chunk's block (`World::blockAt`), so faces between two solid
+  chunks are culled. A chunk only emits faces for blocks it owns, so a shared
+  solid/air boundary is meshed exactly once by the chunk holding the solid side.
+- **`WorldRenderer`** meshes the whole world up front, but per-chunk remeshing is
+  in place: `remeshChunk(cx,cy,cz)` rebuilds one chunk's geometry and swaps its
+  GPU buffers, leaving the rest untouched. `World::setBlock` returns exactly the
+  chunk coordinates to remesh (the edited chunk plus any neighbour sharing the
+  touched face). **Block editing** is built on this seam: `App::editBlocks`
+  raycasts the crosshair (`world/Raycast`), edits with `World::setBlock`, and
+  remeshes only the returned chunks. Chunk streaming is the remaining consumer.
 - **`ChunkMesher`** only handles cube blocks. Non-cube render types (cross,
   custom model) should be detected via a future `BlockProperties::renderType` and
   emit their own geometry, bypassing the greedy pass.

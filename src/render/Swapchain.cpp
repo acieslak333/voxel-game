@@ -65,6 +65,11 @@ void Swapchain::create() {
     if (support.capabilities.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) {
         createInfo.imageUsage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
     }
+    // And copying *into* them: the world is rendered to a low-res offscreen image
+    // and nearest-blitted onto the swapchain for the PS1-style pixelation.
+    if (support.capabilities.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_DST_BIT) {
+        createInfo.imageUsage |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    }
 
     // If the graphics and present queues differ, the swapchain images must be
     // shared between them (CONCURRENT). Otherwise EXCLUSIVE is faster.

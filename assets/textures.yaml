@@ -1,0 +1,187 @@
+# =============================================================================
+#  Texture-generation configuration
+# =============================================================================
+#  READ BY:   scripts/gen_textures.py  (run by hand: `python scripts/gen_textures.py`)
+#  WRITES:    assets/textures/*.png    (the placeholder block-face textures)
+#  CONSUMED BY (at runtime): vg::TextureArray loads those PNGs into the block
+#             texture array; vg::BlockRegistry maps each block face to one of them
+#             via assets/blocks.yaml.
+#
+#  WHY THIS FILE EXISTS
+#  --------------------
+#  Project convention (see docs/CONFIGURATION.md): tunable values do NOT live as
+#  magic numbers inside scripts. Every knob the texture generator uses lives here,
+#  named and described, so a designer can re-tune the look by editing data and
+#  re-running the script — no Python edits, no guessing what a bare `0.80` meant.
+#  If you add a knob to gen_textures.py, add it here with a comment first.
+#
+#  COLOURS
+#  -------
+#  Every `base`/band colour is a NAME from the project palette (assets/colors.yaml,
+#  which gen_colors.py samples from assets/colormap.png — so the colormap image is
+#  the single source of truth for colour). A literal "#RRGGBB" also works for a
+#  one-off shade, but prefer a palette name so re-painting the colormap re-tints
+#  the blocks. The same palette is loaded in C++ by vg::Palette.
+# =============================================================================
+
+# Edge length, in pixels, of every generated texture (textures are square).
+#   USED IN: the pixel loop and PNG writer in gen_textures.py.
+#   CHANGES: resolution/crispness of every block tile. The REPEAT sampler shows
+#            one full copy of this square per block, so larger = finer detail per
+#            block face but bigger PNGs. All layers must share this size (the
+#            texture array requires equal dimensions), so changing it re-bakes all.
+size: 16
+
+# Flat-shading mode. When true, every texture is a SOLID fill of its base colour:
+# the per-pixel patterns/grain below (speckle, bands, rings, streaks, planks, ore
+# flecks — the "noise") are skipped, but alpha-cutout shapes (leaves/bush) are
+# kept so foliage still reads. The pattern logic stays in gen_textures.py for
+# later; set this back to false and re-run to restore the detailed look.
+#   USED IN: make_texture() in gen_textures.py.
+flat: false
+
+# -----------------------------------------------------------------------------
+#  patterns: shared constants for the procedural pattern helpers in make_texture.
+#  These are the same for every texture that opts into a given pattern; a texture
+#  turns a pattern on via its entry under `textures:` below.
+# -----------------------------------------------------------------------------
+patterns:
+  # Per-column vertical jitter (in pixels) applied to the lower edge of a
+  # `top_band` (e.g. the grass strip on grass_side). For each column the script
+  # picks one value at random from this list and adds it to the band height.
+  #   USED IN: the `top_band` branch of make_texture (grass_side).
+  #   CHANGES: how ragged the grass-to-dirt boundary looks. All-zeros => a
+  #            straight line; wider spread / more positive values => a deeper,
+  #            more uneven fringe. Duplicate entries (the two 0s) weight the
+  #            result toward no offset, so the band stays near its nominal height.
+  band_jitter: [-2, -1, 0, 0, 1, 2, 3, 4]
+
+  # Vertical "bark" streaks (e.g. oak_log_side).
+  streak:
+    columns: [2, 3, 8, 11, 12] # x pixel columns that get darkened into bark streaks
+    shade: 0.80        # brightness multiplier for those columns (1.0 = no change)
+
+  # Horizontal plank divisions + a vertical seam (e.g. planks).
+  planks:
+    period: 8          # a dark groove every `period` rows (the row where y % period == period-1)
+    groove_shade: 0.70 # brightness of the groove rows (lower = darker division)
+    seam_shade: 0.78   # brightness of the single vertical seam column (x == size/2)
+
+  # Concentric tree-ring banding on a log's cut face (e.g. oak_log_top).
+  rings:
+    shade_step: 0.06   # brightness step between alternating rings (0 = flat, larger = bolder rings)
+
+  # Alpha-cutout foliage (oak_leaves, bush). These textures sit on CROSS blocks
+  # (two intersecting quads); the transparent pixels make the X read as leaves.
+  leaves:
+    round: 8.4         # pixels: kill anything farther than this from the tile centre (rounds corners into a blob)
+    gap: 0.10          # fraction of the remaining pixels punched transparent (gaps between leaves)
+    vein_shade: 0.72   # darken ~18% of opaque pixels by this factor for leaf-vein texture
+
+  # Ore flecks (coal_ore, iron_ore, ...). A stone base sprinkled with coloured
+  # mineral pixels. A texture opts in via its own `ore_color` key below.
+  ore:
+    fleck_chance: 0.22 # fraction of pixels recoloured to the mineral colour
+    fleck_jitter: 0.28 # per-fleck brightness variation (glint)
+
+# -----------------------------------------------------------------------------
+#  textures: one entry per output PNG. The key is the file written to
+#  assets/textures/. ADD A BLOCK FACE HERE, then reference the PNG from
+#  assets/blocks.yaml. Recognised keys per texture:
+#     base       required. Palette name (or "#RRGGBB") of the fill colour.
+#     speckle    optional. Per-pixel brightness jitter amount (0..1); 0/omitted
+#                = flat. e.g. 0.11 => each pixel scaled by 1 ± up to 0.11.
+#     top_band   optional. [colour, height] — paint `colour` over the top
+#                `height` rows (its lower edge is jittered by patterns.band_jitter).
+#     planks / streaks / rings  optional bool. Turn on that pattern (constants
+#                above). Omit or false to leave it off.
+#  Keys combine; speckle is always applied last so grain shows over any pattern.
+# -----------------------------------------------------------------------------
+textures:
+  grass_top.png:
+    base: lime
+    speckle: 0.05
+  # Grass side: dirt with a ragged green band along the top edge.
+  grass_side.png:
+    base: brown
+    top_band: [lime, 8]
+    speckle: 0.08
+  dirt.png:
+    base: brown
+    speckle: 0.07
+  stone.png:
+    base: stone_gray
+    speckle: 0.11
+  sand.png:
+    base: cream
+    speckle: 0.07
+  gravel.png:
+    base: stone_gray
+    speckle: 0.20
+  cobblestone.png:
+    base: taupe
+    speckle: 0.16
+  planks.png:
+    base: rust
+    planks: true
+    speckle: 0.04
+  oak_log_side.png:
+    base: cocoa
+    streaks: true
+  oak_log_top.png:
+    base: brown
+    rings: true
+  glowstone.png:
+    base: gold
+    speckle: 0.14
+  # Foliage (alpha cutout) for CROSS blocks — see the `leaves` pattern above.
+  # Canopy leaves: deep oak green with broken gaps.
+  oak_leaves.png:
+    base: "#3F6B2A"
+    speckle: 0.18
+    leaves: true
+  # Ground bush: a slightly lighter, brighter green so shrubs read apart from canopy.
+  bush.png:
+    base: "#4F7E33"
+    speckle: 0.20
+    leaves: true
+  # Liquids (issue: water & lava). Water is a cool blue drawn in the renderer's
+  # translucent pass (alpha-blended over the terrain/seabed behind it), so the
+  # texture itself stays solid. Lava is a hot orange that also emits block light
+  # (glows) and stays opaque — molten rock you can't see through.
+  water.png:
+    base: "#2E6EB5"
+    speckle: 0.06
+  lava.png:
+    base: "#E2531E"
+    speckle: 0.13
+  # Ores: stone base (matches stone.png) sprinkled with a mineral colour. See the
+  # `ore` pattern above; `ore_color` is the fleck tint.
+  coal_ore.png:
+    base: stone_gray
+    speckle: 0.11
+    ore_color: "#1A1A1A"
+  iron_ore.png:
+    base: stone_gray
+    speckle: 0.11
+    ore_color: "#C8A883"
+  gold_ore.png:
+    base: stone_gray
+    speckle: 0.11
+    ore_color: "#F2C94C"
+  ruby_ore.png:
+    base: stone_gray
+    speckle: 0.11
+    ore_color: "#D7263D"
+  emerald_ore.png:
+    base: stone_gray
+    speckle: 0.11
+    ore_color: "#27C26E"
+  mythril_ore.png:
+    base: stone_gray
+    speckle: 0.11
+    ore_color: "#7FD7E8"
+  # Snow: the cold-biome / mountain-peak surface coat.
+  snow.png:
+    base: "#EAF2FA"
+    speckle: 0.05

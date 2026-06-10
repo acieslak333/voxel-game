@@ -55,6 +55,10 @@ Clear module separation. Suggested top-level structure:
 
 Data-oriented where it matters (chunk storage, meshing) but readable everywhere else.
 
+
+
+Configuration lives in data, not magic numbers. Tunable values (texture params, noise/world constants, block definitions, the colour palette, runtime settings) belong in documented YAML under /assets, each value commented with what it is, where it is used, and what changes if you alter it — scripts and C++ read those files. This is a project rule: see docs/CONFIGURATION.md before introducing any constant in a script or .cpp, and follow the same what/where/effect comment style. gen_textures.py / gen_colors.py are thin readers of assets/textures.yaml / assets/colormap.png — keep new knobs in the data, not the script.
+
 Core Data Model
 
 Block

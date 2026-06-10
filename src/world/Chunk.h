@@ -44,11 +44,10 @@ public:
         blocks_[index(x, y, z)] = b;
     }
 
-    // Like get(), but returns air for out-of-bounds coordinates. The mesher uses
-    // this so chunk-boundary faces are emitted (the chunk is meshed as if
-    // surrounded by air).
-    // TODO(future): in multi-chunk worlds, sample the neighbouring chunk here
-    // instead of returning air, so internal faces between chunks are culled.
+    // Like get(), but returns air for out-of-bounds coordinates. Handy for an
+    // isolated, single-chunk mesh. (The world mesher instead samples neighbouring
+    // chunks across edges via ChunkMesher::NeighborSampler, so faces between two
+    // solid chunks are culled rather than emitted-and-hidden.)
     [[nodiscard]] Block getOrAir(int x, int y, int z) const {
         return inBounds(x, y, z) ? blocks_[index(x, y, z)] : Block{};
     }

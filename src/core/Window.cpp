@@ -22,6 +22,7 @@ Window::Window(int width, int height, std::string title) {
     // Store a back-pointer so static GLFW callbacks can reach this instance.
     glfwSetWindowUserPointer(window_, this);
     glfwSetFramebufferSizeCallback(window_, framebufferResizeCallback);
+    glfwSetScrollCallback(window_, scrollCallback);
 }
 
 Window::~Window() {
@@ -82,6 +83,17 @@ void Window::waitWhileMinimized() const {
 void Window::framebufferResizeCallback(GLFWwindow* window, int /*width*/, int /*height*/) {
     auto* self = static_cast<Window*>(glfwGetWindowUserPointer(window));
     self->framebufferResized_ = true;
+}
+
+double Window::takeScrollDelta() {
+    const double d = scrollAccum_;
+    scrollAccum_ = 0.0;
+    return d;
+}
+
+void Window::scrollCallback(GLFWwindow* window, double /*xoffset*/, double yoffset) {
+    auto* self = static_cast<Window*>(glfwGetWindowUserPointer(window));
+    self->scrollAccum_ += yoffset;
 }
 
 } // namespace vg

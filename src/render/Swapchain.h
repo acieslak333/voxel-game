@@ -42,6 +42,7 @@ public:
     }
     [[nodiscard]] VkFramebuffer  framebuffer(uint32_t i) const { return framebuffers_[i]; }
     [[nodiscard]] VkImage        image(uint32_t i)       const { return images_[i]; }
+    [[nodiscard]] VkImageView    imageView(uint32_t i)   const { return imageViews_[i]; }
 
 private:
     void create();              // swapchain + image views + depth + framebuffers
