@@ -347,6 +347,12 @@ int runLogicTest(const std::string& assetDir) {
         check(!reg.placeable(pick),                    "pickaxe is NOT placeable");
         check(!reg.placeable(sword),                   "sword is NOT placeable");
 
+        // Torch: a placeable, walk-through, light-emitting block.
+        const uint16_t torch = reg.idByName("torch");
+        check(reg.placeable(torch),                    "torch is placeable");
+        check(reg.emission(torch) > 0,                 "torch emits block light");
+        check(!reg.isSolid(torch),                     "torch is walk-through");
+
         // Fall damage: harmless under the safe-fall height, scaling above it.
         check(near(vg::PlayerController::fallDamage(0.0f), 0.0f),  "no fall = no damage");
         check(vg::PlayerController::fallDamage(12.0f) == 0.0f,     "a 2-3 block fall is safe");

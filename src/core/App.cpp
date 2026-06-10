@@ -110,6 +110,7 @@ App::App()
         give("oak_trunk", 16);
         give("oak_leaves", 16);
         give("glowstone", 8);
+        give("torch", 16);
         give("chest", 3);
         give("iron_helmet", 1);
         give("iron_chestplate", 1);

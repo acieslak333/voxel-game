@@ -281,3 +281,16 @@
   regen: 3.0
   textures:
     all: life_charm.png
+
+# --- Light sources (ISSUES #13B) ----------------------------------------------
+# Torch: a placeable block-light source. Cross-rendered (walk through it, breakable
+# like foliage) and non-opaque so its light floods the surroundings through the
+# existing block-light flood — lights caves and the night. Appended last.
+- name: torch
+  hardness: 0.1
+  solid: false
+  opaque: false
+  light: 13
+  render: cross
+  textures:
+    all: torch.png
