@@ -67,6 +67,17 @@ public:
     void setInvulnerable(bool v) { invulnerable_ = v; }
     [[nodiscard]] bool invulnerable() const { return invulnerable_; }
 
+    // Equipment-derived modifiers, pushed by App from the equipped armour/trinkets.
+    // armorReduction is a 0..0.8 damage-reduction fraction; the others scale walk/
+    // jump speed and add to passive regen.
+    void setEquipModifiers(float armorReduction, float speedMul, float jumpMul,
+                           float regenBonus) {
+        armorReduction_ = armorReduction;
+        speedMul_       = speedMul;
+        jumpMul_        = jumpMul;
+        regenBonus_     = regenBonus;
+    }
+
     // Pure fall-damage curve: HP lost on landing at `impactSpeed` (downward m/s).
     // Below the safe-fall height it's 0; above it scales with the extra height.
     // Static + side-effect-free so --logictest can verify it without a world.
@@ -105,6 +116,11 @@ private:
     float     maxHealth_  = 100.0f;
     bool      invulnerable_ = false;
     float     regenDelay_ = 0.0f; // seconds before passive regen resumes after a hit
+    // Equipment modifiers (set by App from the equipped armour/trinkets).
+    float     armorReduction_ = 0.0f; // 0..0.8 damage-reduction fraction
+    float     speedMul_   = 1.0f;
+    float     jumpMul_    = 1.0f;
+    float     regenBonus_ = 0.0f;     // extra HP/s
     Inventory inventory_;
 
     float     sensitivity_ = 0.08f; // mouse look (matches the old kSensitivity)

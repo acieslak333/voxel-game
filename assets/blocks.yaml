@@ -250,3 +250,34 @@
   opaque: true
   textures:
     all: chest.png
+
+# --- Equipment: armour + trinkets (ISSUES #13B) -------------------------------
+# Armour pieces slot into head/chest/legs/feet and grant `armor` damage-reduction
+# points (the player caps total reduction at 80%). Trinkets slot into a generic
+# accessory slot and grant passive bonuses (speed/jump/regen). All non-placeable;
+# appended last so existing ids/saved chunks don't shift.
+- name: iron_helmet
+  equip: head
+  armor: 8
+  textures:
+    all: iron_helmet.png
+- name: iron_chestplate
+  equip: chest
+  armor: 16
+  textures:
+    all: iron_chestplate.png
+- name: iron_boots
+  equip: feet
+  armor: 6
+  textures:
+    all: iron_boots.png
+- name: swift_charm
+  equip: trinket
+  speed_mul: 1.35
+  textures:
+    all: swift_charm.png
+- name: life_charm
+  equip: trinket
+  regen: 3.0
+  textures:
+    all: life_charm.png

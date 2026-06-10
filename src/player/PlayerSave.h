@@ -28,9 +28,11 @@ struct PlayerSave {
     bool      creative = true;
     // One (blockId, count) per inventory slot, in slot order.
     std::vector<std::pair<uint16_t, uint16_t>> slots;
+    // One (blockId, count) per equipment slot (armour + trinkets), in slot order.
+    std::vector<std::pair<uint16_t, uint16_t>> equip;
 
     static constexpr char     kMagic[4] = {'V', 'G', 'P', 'L'};
-    static constexpr uint32_t kVersion  = 1;
+    static constexpr uint32_t kVersion  = 2; // v2 adds the equipment list
 
     // Serialise to a self-describing byte buffer (magic + version + payload).
     [[nodiscard]] std::vector<uint8_t> serialize() const {
@@ -51,6 +53,12 @@ struct PlayerSave {
         const uint16_t n = static_cast<uint16_t>(slots.size());
         put(&n, sizeof n);
         for (const auto& s : slots) {
+            put(&s.first, sizeof s.first);
+            put(&s.second, sizeof s.second);
+        }
+        const uint16_t e = static_cast<uint16_t>(equip.size());
+        put(&e, sizeof e);
+        for (const auto& s : equip) {
             put(&s.first, sizeof s.first);
             put(&s.second, sizeof s.second);
         }
@@ -84,6 +92,15 @@ struct PlayerSave {
             uint16_t id = 0, count = 0;
             if (!get(&id, sizeof id) || !get(&count, sizeof count)) return false;
             slots.emplace_back(id, count);
+        }
+        uint16_t e = 0;
+        if (!get(&e, sizeof e)) return false;
+        equip.clear();
+        equip.reserve(e);
+        for (uint16_t i = 0; i < e; ++i) {
+            uint16_t id = 0, count = 0;
+            if (!get(&id, sizeof id) || !get(&count, sizeof count)) return false;
+            equip.emplace_back(id, count);
         }
         return true;
     }

@@ -58,6 +58,7 @@ float PlayerController::fallDamage(float impactSpeed) {
 
 void PlayerController::damage(float amount) {
     if (invulnerable_ || amount <= 0.0f) return;
+    amount *= (1.0f - armorReduction_); // armour soaks a fraction of every hit
     health_ = std::max(0.0f, health_ - amount);
     regenDelay_ = kRegenDelay; // hold off regen so it isn't instantly undone
 }
@@ -104,13 +105,13 @@ void PlayerController::update(float dt, const InputState& input) {
     if (glm::dot(wish, wish) > 0.0f) {
         wish = glm::normalize(wish);
     }
-    const float speed = input.sprint ? kSprintSpeed : kWalkSpeed;
+    const float speed = (input.sprint ? kSprintSpeed : kWalkSpeed) * speedMul_;
     velocity_.x = wish.x * speed;
     velocity_.z = wish.z * speed;
 
     velocity_.y += kGravity * dt;
     if (onGround_ && input.jump) {
-        velocity_.y = kJumpSpeed;
+        velocity_.y = kJumpSpeed * jumpMul_;
     }
 
     // Integrate + resolve collisions per axis (allows sliding along walls). Capture
@@ -133,7 +134,7 @@ void PlayerController::update(float dt, const InputState& input) {
     if (regenDelay_ > 0.0f) {
         regenDelay_ = std::max(0.0f, regenDelay_ - dt);
     } else {
-        heal(kRegenRate * dt);
+        heal((kRegenRate + regenBonus_) * dt);
     }
 
     syncCameraToBody();

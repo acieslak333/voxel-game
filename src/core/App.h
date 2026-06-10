@@ -8,6 +8,7 @@
 #include "core/Window.h"
 #include "player/ChestStore.h"
 #include "player/Crafting.h"
+#include "player/Equipment.h"
 #include "player/PlayerController.h"
 #include "render/Renderer.h"
 #include "render/SkyRenderer.h"
@@ -89,6 +90,11 @@ private:
     // Move items between a clicked slot and the mouse-held cursor stack (pick up /
     // drop / merge / swap) — shared by the inventory and chest screens.
     void clickSlot(ItemStack& s);
+    // Armour/trinket equip column in the inventory screen; clicks validate the item
+    // type per slot. applyEquipmentStats pushes the aggregated bonuses to the player.
+    void buildEquipment(class Ui& ui, float x, float y, const InputState& in);
+    void clickEquipSlot(int slotIndex);
+    void applyEquipmentStats();
     void openChestAt(const glm::ivec3& pos); // open the chest block at pos
     void toggleChest();                      // close the open chest (return cursor)
     void buildMenu(class Ui& ui, float px, float py, float pw, float ph); // Esc menu column
@@ -142,6 +148,7 @@ private:
     PlayerController  player_;
     Crafting          crafting_; // data-driven recipe list (assets/recipes.yaml)
     ChestStore        chests_;   // per-position chest contents (persisted to disk)
+    Equipment         equipment_; // worn armour + trinkets (persisted with the player)
 
     // UI state.
     bool             paused_ = false;        // escape menu open

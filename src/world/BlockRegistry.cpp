@@ -63,6 +63,18 @@ ToolKind parseTool(const YAML::Node& node, const char* key) {
     return ToolKind::None;
 }
 
+// Parse an equip-slot name; unknown / absent -> None.
+EquipSlot parseEquip(const YAML::Node& node, const char* key) {
+    if (!node[key]) return EquipSlot::None;
+    const std::string s = node[key].as<std::string>();
+    if (s == "head")    return EquipSlot::Head;
+    if (s == "chest")   return EquipSlot::Chest;
+    if (s == "legs")    return EquipSlot::Legs;
+    if (s == "feet")    return EquipSlot::Feet;
+    if (s == "trinket") return EquipSlot::Trinket;
+    return EquipSlot::None;
+}
+
 } // namespace
 
 BlockRegistry::BlockRegistry(const std::string& blocksFile) {
@@ -103,8 +115,17 @@ BlockRegistry::BlockRegistry(const std::string& blocksFile) {
         props.tool          = parseTool(entry, "tool");
         props.toolSpeed     = valueOr(entry, "tool_speed", 1.0f);
         props.attackDamage  = valueOr(entry, "attack_damage", 1.0f);
-        // Tools/items default to non-placeable; ordinary blocks place by default.
-        props.placeable     = valueOr(entry, "placeable", props.tool == ToolKind::None);
+
+        // Equipment: armour pieces (damage reduction) + trinkets (passive bonuses).
+        props.equip      = parseEquip(entry, "equip");
+        props.armor      = valueOr(entry, "armor", 0.0f);
+        props.speedMul   = valueOr(entry, "speed_mul", 1.0f);
+        props.jumpMul    = valueOr(entry, "jump_mul", 1.0f);
+        props.regenBonus = valueOr(entry, "regen", 0.0f);
+
+        // Tools/equipment default to non-placeable; ordinary blocks place by default.
+        const bool isItem = props.tool != ToolKind::None || props.equip != EquipSlot::None;
+        props.placeable  = valueOr(entry, "placeable", !isItem);
 
         // Render type (default cube). Non-cube blocks emit their own geometry in
         // the mesher's second pass instead of greedy cubes (see RenderType).

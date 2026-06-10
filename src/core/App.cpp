@@ -111,6 +111,9 @@ App::App()
         give("oak_leaves", 16);
         give("glowstone", 8);
         give("chest", 3);
+        give("iron_helmet", 1);
+        give("iron_chestplate", 1);
+        give("swift_charm", 1);
     }
 
     try { chestId_ = world_.registry().idByName("chest"); } catch (...) { chestId_ = 0; }
@@ -367,6 +370,10 @@ void App::savePlayer() const {
         const ItemStack& s = player_.inventory().slot(i);
         ps.slots.emplace_back(s.blockId, s.count);
     }
+    ps.equip.reserve(Equipment::kSlots);
+    for (const ItemStack& s : equipment_.slots) {
+        ps.equip.emplace_back(s.blockId, s.count);
+    }
     const std::vector<uint8_t> bytes = ps.serialize();
     std::ofstream f(dir + "/player.dat", std::ios::binary | std::ios::trunc);
     if (f) f.write(reinterpret_cast<const char*>(bytes.data()),
@@ -397,6 +404,19 @@ bool App::loadPlayer() {
         inv.slot(i) = s;
     }
 
+    for (int i = 0; i < Equipment::kSlots; ++i) {
+        ItemStack s;
+        if (i < static_cast<int>(ps.equip.size())) {
+            s.blockId = ps.equip[static_cast<size_t>(i)].first;
+            s.count   = ps.equip[static_cast<size_t>(i)].second;
+            // Drop a removed id, or one that no longer fits this slot type.
+            if (s.blockId >= blockCount || !Equipment::fits(world_.registry(), i, s.blockId)) {
+                s.clear();
+            }
+        }
+        equipment_.slots[static_cast<size_t>(i)] = s;
+    }
+
     player_.teleport(ps.feet);
     player_.camera().yaw = ps.yaw;
     player_.camera().pitch = ps.pitch;
@@ -404,7 +424,25 @@ bool App::loadPlayer() {
     inv.setSelected(ps.selected);
     creativeMode_ = ps.creative;
     player_.setInvulnerable(creativeMode_);
+    applyEquipmentStats();
     return true;
+}
+
+void App::applyEquipmentStats() {
+    const Equipment::Stats st = equipment_.computeStats(world_.registry());
+    player_.setEquipModifiers(st.armorReduction, st.speedMul, st.jumpMul, st.regenBonus);
+}
+
+void App::clickEquipSlot(int slotIndex) {
+    ItemStack& s = equipment_.slots[static_cast<size_t>(slotIndex)];
+    if (cursorStack_.empty()) {
+        cursorStack_ = s; // take the equipped item off
+        s.clear();
+    } else if (Equipment::fits(world_.registry(), slotIndex, cursorStack_.blockId)) {
+        std::swap(s, cursorStack_); // equip / swap a valid item in
+    }
+    // else: the held item doesn't fit this slot — ignore the click
+    applyEquipmentStats();
 }
 
 void App::seedLiquid(int x, int y, int z) {
@@ -593,6 +631,7 @@ void App::run(long maxFrames, const std::string& screenshotPath) {
         // Gameplay only runs while no overlay (menu / inventory / chest) owns the
         // cursor.
         if (!paused_ && !inventoryOpen_ && !chestOpen_) {
+            applyEquipmentStats(); // armour/trinket bonuses, current before movement
             player_.update(dt, in);
             editBlocks(in, dt);
             updateSurvival(dt);
@@ -1024,7 +1063,8 @@ void App::buildInventory(Ui& ui, float w, float h, const InputState& in) {
         cell(c, gridX + c * (slot + gap), hotY);
     }
 
-    // Crafting list panel, just to the right of the inventory.
+    // Equipment column to the left, crafting list to the right of the inventory.
+    buildEquipment(ui, px - 18.0f - 84.0f, py, in);
     buildCrafting(ui, px + panelW + 18.0f, py, 250.0f, in);
 
     // The cursor-held stack follows the mouse (icon only, no frame).
@@ -1075,6 +1115,30 @@ void App::buildCrafting(Ui& ui, float x, float y, float w, const InputState& in)
         }
         ry += rowH;
     }
+}
+
+void App::buildEquipment(Ui& ui, float x, float y, const InputState& in) {
+    const BlockRegistry& reg = world_.registry();
+    const float slot = 54.0f, gap = 8.0f, radius = 16.0f;
+    const float pad = 15.0f, titleH = 26.0f, secGap = 14.0f;
+    const int   armor = Equipment::kArmorSlots, trinks = Equipment::kTrinketSlots;
+    const float panelW = slot + 2.0f * pad;
+    const float panelH = titleH + armor * slot + (armor - 1) * gap + secGap +
+                         trinks * slot + (trinks - 1) * gap + 2.0f * pad;
+    ui.frame(x, y, panelW, panelH, kPanelFill, kCream, kFrameThick, kFrameRadius);
+    ui.label(x + pad - 2.0f, y + pad - 4.0f, "Gear", 0.55f, kUiText);
+
+    const float sx = x + pad;
+    float sy = y + pad + titleH;
+    auto eqCell = [&](int idx, float cy) {
+        const ItemStack& s = equipment_.slots[static_cast<size_t>(idx)];
+        const bool hov = ui.hovered(sx, cy, slot, slot);
+        drawSlot(ui, reg, sx, cy, slot, radius, s, hov);
+        if (hov && in.pointerPressed) clickEquipSlot(idx);
+    };
+    for (int i = 0; i < armor; ++i) eqCell(i, sy + i * (slot + gap));   // head/chest/legs/feet
+    sy += armor * (slot + gap) + secGap;
+    for (int i = 0; i < trinks; ++i) eqCell(armor + i, sy + i * (slot + gap)); // trinkets
 }
 
 void App::clickSlot(ItemStack& s) {

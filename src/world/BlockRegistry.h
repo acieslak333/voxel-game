@@ -14,6 +14,10 @@ namespace vg {
 // Survival starts with just two tools (see ISSUES #13B): a pickaxe and a sword.
 enum class ToolKind { None, Pickaxe, Sword };
 
+// Equipment slot an item occupies: four armour pieces + a generic Trinket
+// (accessory) slot. None = an ordinary item/block (ISSUES #13B, Terraria-style).
+enum class EquipSlot { None, Head, Chest, Legs, Feet, Trinket };
+
 // -----------------------------------------------------------------------------
 //  BlockProperties
 // -----------------------------------------------------------------------------
@@ -60,6 +64,14 @@ struct BlockProperties {
     float toolSpeed = 1.0f;
     // Combat damage this item deals when used as a weapon (swords; future mobs).
     float attackDamage = 1.0f;
+
+    // --- Equipment (armour pieces + trinkets) --------------------------------
+    EquipSlot equip = EquipSlot::None; // which equip slot this item fits (None = not equippable)
+    float armor = 0.0f;          // damage-reduction points this armour piece grants
+    float speedMul = 1.0f;       // trinket: walk-speed multiplier while equipped
+    float jumpMul  = 1.0f;       // trinket: jump-speed multiplier while equipped
+    float regenBonus = 0.0f;     // trinket: extra HP/s passive regen while equipped
+
     // Can the player place this in the world? False for tools / pure items.
     bool placeable = true;
 
@@ -96,6 +108,7 @@ public:
     [[nodiscard]] float hardness(uint16_t id) const { return get(id).hardness; }
     [[nodiscard]] bool placeable(uint16_t id) const { return get(id).placeable; }
     [[nodiscard]] ToolKind tool(uint16_t id) const { return get(id).tool; }
+    [[nodiscard]] EquipSlot equip(uint16_t id) const { return get(id).equip; }
 
     // Seconds to break `target` while holding item `held` (0 = nothing/by hand).
     // Returns 0 for an instant break and a negative value for an unbreakable block.

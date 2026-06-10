@@ -1,6 +1,7 @@
 #include "core/App.h"
 #include "player/ChestStore.h"
 #include "player/Crafting.h"
+#include "player/Equipment.h"
 #include "player/PlayerSave.h"
 
 #include "world/BlockRegistry.h"
@@ -424,6 +425,32 @@ int runLogicTest(const std::string& assetDir) {
         vg::ChestStore cbad;
         const uint8_t cjunk[6] = {9, 9, 9, 9, 9, 9};
         check(!cbad.deserialize(cjunk, sizeof cjunk), "corrupt chest store is rejected");
+
+        // Equipment: slot validation + aggregated stats + armour damage reduction.
+        const uint16_t helmet = reg.idByName("iron_helmet");
+        const uint16_t chestplate = reg.idByName("iron_chestplate");
+        const uint16_t swift = reg.idByName("swift_charm");
+        const uint16_t life = reg.idByName("life_charm");
+        check(vg::Equipment::accepts(0) == vg::EquipSlot::Head, "slot 0 is the head slot");
+        check(vg::Equipment::fits(reg, 0, helmet), "helmet fits the head slot");
+        check(!vg::Equipment::fits(reg, 0, swift), "a trinket doesn't fit the head slot");
+        check(vg::Equipment::fits(reg, 4, swift), "trinket fits a trinket slot");
+        check(!vg::Equipment::fits(reg, 1, helmet), "helmet doesn't fit the chest slot");
+
+        vg::Equipment eq;
+        eq.slots[0] = vg::ItemStack{helmet, 1};       // 8 armour
+        eq.slots[1] = vg::ItemStack{chestplate, 1};   // 16 armour -> 24% reduction
+        eq.slots[4] = vg::ItemStack{swift, 1};        // x1.35 speed
+        eq.slots[5] = vg::ItemStack{life, 1};         // +3 regen
+        const vg::Equipment::Stats st = eq.computeStats(reg);
+        check(near(st.armorReduction, 0.24f), "8+16 armour = 24% reduction");
+        check(near(st.speedMul, 1.35f), "swift charm = 1.35x speed");
+        check(near(st.regenBonus, 3.0f), "life charm = +3 regen");
+
+        vg::PlayerController pc2(glm::vec3(0.0f));
+        pc2.setEquipModifiers(0.25f, 1.0f, 1.0f, 0.0f);
+        pc2.damage(40.0f);
+        check(near(pc2.health(), 70.0f), "25% armour: 40 damage -> 30 taken");
     } catch (const std::exception& e) {
         std::cerr << "[logic] FAIL: exception: " << e.what() << '\n';
         return EXIT_FAILURE;
