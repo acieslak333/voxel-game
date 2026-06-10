@@ -1,4 +1,5 @@
 #include "core/App.h"
+#include "entity/ItemEntity.h"
 #include "player/ChestStore.h"
 #include "player/Crafting.h"
 #include "player/Equipment.h"
@@ -451,6 +452,29 @@ int runLogicTest(const std::string& assetDir) {
         pc2.setEquipModifiers(0.25f, 1.0f, 1.0f, 0.0f);
         pc2.damage(40.0f);
         check(near(pc2.health(), 70.0f), "25% armour: 40 damage -> 30 taken");
+
+        // Dropped items: gravity + ground settle, then magnet pickup into inventory.
+        auto floorAt0 = [](int, int y, int) { return y < 0; }; // solid everywhere below y=0
+        {
+            vg::ItemEntities items;
+            vg::Inventory inv3;
+            items.spawn(glm::vec3(0.5f, 5.0f, 0.5f), vg::ItemStack{stone, 3});
+            // Player far away: it should fall and settle on the floor, not be collected.
+            for (int s = 0; s < 240; ++s) items.update(0.05f, floorAt0, glm::vec3(40, 0, 40), inv3);
+            check(items.size() == 1, "far item is not picked up");
+            check(items.items()[0].pos.y > 0.0f && items.items()[0].pos.y < 0.5f,
+                  "item settles on the ground");
+            check(inv3.count(stone) == 0, "far item left the inventory empty");
+        }
+        {
+            vg::ItemEntities items;
+            vg::Inventory inv4;
+            items.spawn(glm::vec3(0.0f, 0.9f, 0.0f), vg::ItemStack{stone, 5});
+            items.update(0.05f, floorAt0, glm::vec3(0, 0, 0), inv4); // age 0.05 < delay
+            check(items.size() == 1 && inv4.count(stone) == 0, "no pickup before the delay");
+            for (int s = 0; s < 40; ++s) items.update(0.05f, floorAt0, glm::vec3(0, 0, 0), inv4);
+            check(items.size() == 0 && inv4.count(stone) == 5, "nearby item is collected");
+        }
     } catch (const std::exception& e) {
         std::cerr << "[logic] FAIL: exception: " << e.what() << '\n';
         return EXIT_FAILURE;

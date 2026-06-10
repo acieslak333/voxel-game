@@ -2,6 +2,7 @@
 
 #include "clouds/CloudSystem.h"
 #include "core/DayNight.h"
+#include "entity/ItemEntity.h"
 #include "core/Input.h"
 #include "core/Palette.h"
 #include "core/Settings.h"
@@ -149,6 +150,7 @@ private:
     Crafting          crafting_; // data-driven recipe list (assets/recipes.yaml)
     ChestStore        chests_;   // per-position chest contents (persisted to disk)
     Equipment         equipment_; // worn armour + trinkets (persisted with the player)
+    ItemEntities      droppedItems_; // dropped-item entities (physics + walk-over pickup)
 
     // UI state.
     bool             paused_ = false;        // escape menu open

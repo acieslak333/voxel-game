@@ -300,7 +300,13 @@ void App::breakBlockAt(const glm::ivec3& b) {
 
     const std::vector<glm::ivec3> dirty = world_.setBlock(b.x, b.y, b.z, Block{});
     if (broken != 0 && !creativeMode_) {
-        player_.inventory().add(broken, 1); // survival: drops into the inventory
+        // Survival: into the inventory, but if it's full the surplus becomes a
+        // dropped-item entity at the block centre rather than vanishing.
+        const int leftover = player_.inventory().add(broken, 1);
+        if (leftover > 0) {
+            droppedItems_.spawn(glm::vec3(b) + glm::vec3(0.5f),
+                                ItemStack{broken, static_cast<uint16_t>(leftover)});
+        }
     }
     worldRenderer_.remeshChunks(dirty);
     seedLiquid(b.x, b.y, b.z); // liquid may flow into the new gap
@@ -635,6 +641,11 @@ void App::run(long maxFrames, const std::string& screenshotPath) {
             player_.update(dt, in);
             editBlocks(in, dt);
             updateSurvival(dt);
+            // Dropped-item entities: fall, magnetise to the player, walk-over pickup.
+            // (Rendering is pending the EntityRenderer; until then this only carries
+            // mining overflow that wouldn't fit, so nothing is silently lost.)
+            droppedItems_.update(dt, [this](int x, int y, int z) { return world_.isSolid(x, y, z); },
+                                 player_.feetPosition(), player_.inventory());
             // Liquid flow: drain a budget of the flow queue a few times a second.
             liquidTimer_ += dt;
             if (liquidTimer_ >= 0.20f) {
