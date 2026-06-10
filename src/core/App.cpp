@@ -73,9 +73,11 @@ App::App()
     // Spawn standing on the surface at the centre of the world.
     const int cx = world_.sizeInBlocks().x / 2;
     const int cz = world_.sizeInBlocks().z / 2;
-    player_.teleport(glm::vec3(static_cast<float>(cx),
-                               static_cast<float>(world_.surfaceHeight(cx, cz)) + 2.0f,
-                               static_cast<float>(cz)));
+    spawnFeet_ = glm::vec3(static_cast<float>(cx),
+                           static_cast<float>(world_.surfaceHeight(cx, cz)) + 2.0f,
+                           static_cast<float>(cz));
+    player_.teleport(spawnFeet_);
+    player_.setInvulnerable(creativeMode_); // creative ignores fall/lava/combat damage
 
     // Collide against the generated world.
     player_.setSolidFn([this](int x, int y, int z) { return world_.isSolid(x, y, z); });
@@ -182,6 +184,10 @@ void App::stockCreative() {
 
 void App::toggleGameMode() {
     creativeMode_ = !creativeMode_;
+    player_.setInvulnerable(creativeMode_); // creative is invincible; survival can be hurt
+    if (creativeMode_) {
+        player_.setHealth(player_.maxHealth()); // leave survival -> full heal on return is fine
+    }
     // Entering creative refills every block; leaving it keeps whatever you hold
     // (so a switch isn't destructive). Placing/mining behaviour is gated on the
     // flag in editBlocks().
@@ -279,6 +285,39 @@ void App::placeBlockAt(const glm::ivec3& t, uint16_t id) {
     }
     worldRenderer_.remeshChunks(dirty);
     seedLiquid(t.x, t.y, t.z);
+}
+
+void App::updateSurvival(float dt) {
+    if (creativeMode_) {
+        return; // creative: no environmental damage, no death
+    }
+    // Environmental damage: standing in lava hurts continuously. Scan the block
+    // cells the player's AABB overlaps for lava (cheap: a handful of cells).
+    const glm::vec3 eye = player_.camera().position;
+    const int x0 = static_cast<int>(std::floor(eye.x - 0.3f));
+    const int x1 = static_cast<int>(std::floor(eye.x + 0.3f));
+    const int z0 = static_cast<int>(std::floor(eye.z - 0.3f));
+    const int z1 = static_cast<int>(std::floor(eye.z + 0.3f));
+    const int feetY = static_cast<int>(std::floor(eye.y - 1.62f)); // eye -> feet
+    const int headY = static_cast<int>(std::floor(eye.y));
+    const uint16_t lava = world_.registry().idByName("lava");
+    bool inLava = false;
+    for (int y = feetY; y <= headY && !inLava; ++y) {
+        for (int x = x0; x <= x1 && !inLava; ++x) {
+            for (int z = z0; z <= z1 && !inLava; ++z) {
+                if (world_.blockAt(x, y, z).id == lava) inLava = true;
+            }
+        }
+    }
+    if (inLava) {
+        player_.damage(kLavaDamagePerSec * dt);
+    }
+
+    // Death -> respawn at the world spawn with full health (player save comes later).
+    if (player_.isDead()) {
+        player_.teleport(spawnFeet_);
+        player_.setHealth(player_.maxHealth());
+    }
 }
 
 void App::seedLiquid(int x, int y, int z) {
@@ -466,6 +505,7 @@ void App::run(long maxFrames, const std::string& screenshotPath) {
         if (!paused_ && !inventoryOpen_) {
             player_.update(dt, in);
             editBlocks(in, dt);
+            updateSurvival(dt);
             // Liquid flow: drain a budget of the flow queue a few times a second.
             liquidTimer_ += dt;
             if (liquidTimer_ >= 0.20f) {
@@ -828,6 +868,18 @@ void App::buildHotbar(Ui& ui, float w, float h) {
     for (int i = 0; i < count; ++i) {
         const float x = x0 + i * (slot + gap);
         drawSlot(ui, reg, x, y, slot, radius, inv.slot(i), i == inv.selected());
+    }
+
+    // Health bar (survival only — creative is invincible). A red fill on a charcoal
+    // track, sized to the hotbar width, sitting just above the slot row.
+    if (!creativeMode_) {
+        const float frac = std::clamp(player_.health() / player_.maxHealth(), 0.0f, 1.0f);
+        const float bh = 8.0f, by = y - 14.0f;
+        ui.roundRect(x0 - 1.0f, by - 1.0f, total + 2.0f, bh + 2.0f, 3.0f, kCharcoal);
+        ui.roundRect(x0, by, total, bh, 3.0f, glm::vec4(0.16f, 0.05f, 0.05f, 0.9f));
+        if (frac > 0.0f) {
+            ui.roundRect(x0, by, total * frac, bh, 3.0f, glm::vec4(0.82f, 0.18f, 0.20f, 1.0f));
+        }
     }
 
     // Game-mode tag at the bottom-left (G toggles it).

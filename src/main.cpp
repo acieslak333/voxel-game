@@ -340,6 +340,26 @@ int runLogicTest(const std::string& assetDir) {
         check(reg.placeable(stone),                    "stone is placeable");
         check(!reg.placeable(pick),                    "pickaxe is NOT placeable");
         check(!reg.placeable(sword),                   "sword is NOT placeable");
+
+        // Fall damage: harmless under the safe-fall height, scaling above it.
+        check(near(vg::PlayerController::fallDamage(0.0f), 0.0f),  "no fall = no damage");
+        check(vg::PlayerController::fallDamage(12.0f) == 0.0f,     "a 2-3 block fall is safe");
+        check(vg::PlayerController::fallDamage(30.0f) > 0.0f,      "a big fall hurts");
+        check(vg::PlayerController::fallDamage(40.0f) >
+              vg::PlayerController::fallDamage(30.0f),             "higher fall = more damage");
+
+        // Health API: damage clamps at 0, heal clamps at max, invulnerability blocks.
+        vg::PlayerController pc(glm::vec3(0.0f));
+        pc.damage(30.0f);
+        check(near(pc.health(), 70.0f), "damage subtracts HP");
+        pc.heal(1000.0f);
+        check(near(pc.health(), pc.maxHealth()), "heal clamps at max");
+        pc.damage(1e9f);
+        check(pc.isDead() && pc.health() == 0.0f, "lethal damage -> dead, HP floored at 0");
+        pc.setHealth(50.0f);
+        pc.setInvulnerable(true);
+        pc.damage(50.0f);
+        check(near(pc.health(), 50.0f), "invulnerable ignores damage");
     } catch (const std::exception& e) {
         std::cerr << "[logic] FAIL: exception: " << e.what() << '\n';
         return EXIT_FAILURE;

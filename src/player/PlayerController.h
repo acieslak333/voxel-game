@@ -49,8 +49,25 @@ public:
     [[nodiscard]] Camera&       camera()       { return camera_; }
     [[nodiscard]] const Camera& camera() const { return camera_; }
     [[nodiscard]] Mode  mode()    const { return mode_; }
-    [[nodiscard]] float health()  const { return health_; }
     [[nodiscard]] bool  onGround() const { return onGround_; }
+
+    // --- Health / damage (ISSUES #13B; no hunger) --------------------------
+    [[nodiscard]] float health()    const { return health_; }
+    [[nodiscard]] float maxHealth() const { return maxHealth_; }
+    [[nodiscard]] bool  isDead()    const { return health_ <= 0.0f; }
+    // Subtract `amount` HP (clamped at 0); a no-op while invulnerable. Pauses the
+    // slow passive regen briefly so chip damage isn't instantly undone.
+    void damage(float amount);
+    void heal(float amount);
+    void setHealth(float h);
+    // Creative / debug: ignore all damage (fall, lava, combat).
+    void setInvulnerable(bool v) { invulnerable_ = v; }
+    [[nodiscard]] bool invulnerable() const { return invulnerable_; }
+
+    // Pure fall-damage curve: HP lost on landing at `impactSpeed` (downward m/s).
+    // Below the safe-fall height it's 0; above it scales with the extra height.
+    // Static + side-effect-free so --logictest can verify it without a world.
+    [[nodiscard]] static float fallDamage(float impactSpeed);
 
     // The player's item storage (hotbar + backpack). Mining adds to it; placing
     // consumes from its selected hotbar slot. See player/Inventory.h.
@@ -67,8 +84,7 @@ public:
     // placing a block inside the player.
     [[nodiscard]] bool occupies(int bx, int by, int bz) const;
 
-    // TODO(future): additional survival stats (hunger, thirst, stamina) and a
-    // damage API would live next to health_ here.
+    // TODO(future): additional survival stats (stamina) would live next to health_.
 
 private:
     // Move along one axis (0=x,1=y,2=z) by `delta`, swept against solid blocks:
@@ -82,7 +98,10 @@ private:
     glm::vec3 velocity_{0.0f};
     Mode      mode_     = Mode::Walking;
     bool      onGround_ = false;
-    float     health_   = 100.0f;
+    float     health_     = 100.0f;
+    float     maxHealth_  = 100.0f;
+    bool      invulnerable_ = false;
+    float     regenDelay_ = 0.0f; // seconds before passive regen resumes after a hit
     Inventory inventory_;
 
     float     sensitivity_ = 0.08f; // mouse look (matches the old kSensitivity)

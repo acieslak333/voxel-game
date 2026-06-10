@@ -51,6 +51,10 @@ private:
     void breakBlockAt(const glm::ivec3& b);
     void placeBlockAt(const glm::ivec3& t, uint16_t id);
 
+    // Survival per-frame upkeep: environmental damage (lava) and death/respawn.
+    // No-op in creative. Health regen/fall damage live in PlayerController.
+    void updateSurvival(float dt);
+
     // Simple liquid flow (water & lava): drain a budget of queued liquid cells,
     // spreading them down then sideways (decaying distance in Block::metadata, no
     // recede). Event-driven — editBlocks seeds the queue around any edit. Mutates
@@ -93,6 +97,8 @@ private:
 
     // How far (in blocks) the player can reach to edit terrain.
     static constexpr float kReach = 5.0f;
+    // HP per second of standing in lava.
+    static constexpr float kLavaDamagePerSec = 20.0f;
 
     // World size, seed, and terrain shaping live in assets/world.yaml (loaded into
     // a WorldConfig and passed to World below).
@@ -127,6 +133,8 @@ private:
     float      mineProgress_ = 0.0f; // seconds accumulated on the current block
     float      mineNeeded_   = 0.0f; // seconds required to break it (0 = instant)
     float      mineProgress01_ = 0.0f; // 0..1 for the crosshair break meter
+
+    glm::vec3  spawnFeet_{0.0f}; // respawn point (world spawn; player save comes later)
     float            smoothedDt_ = 1.0f / 60.0f; // EMA of frame time, for the overlay's FPS
 
     // Atmosphere tuning panel (ephemeral 2nd menu column; not persisted).

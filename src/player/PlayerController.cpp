@@ -20,6 +20,14 @@ constexpr float kFlySprint   = 26.0f;
 
 constexpr float kGravity     = -26.0f;  // m/s^2
 constexpr float kJumpSpeed   = 8.4f;    // gives ~1.35 block jump height
+
+// Fall damage: falls up to kSafeFall blocks are harmless; beyond that you lose
+// kFallDmgPerBlock HP per extra block (so on a 100-HP scale a ~23-block drop kills).
+constexpr float kSafeFall       = 3.0f;
+constexpr float kFallDmgPerBlock = 5.0f;
+// Passive regen: after kRegenDelay seconds without a hit, heal kRegenRate HP/s.
+constexpr float kRegenDelay = 5.0f;
+constexpr float kRegenRate  = 2.0f;
 } // namespace
 
 PlayerController::PlayerController(glm::vec3 feetPosition) : feet_(feetPosition) {
@@ -39,6 +47,28 @@ void PlayerController::teleport(glm::vec3 feet) {
 void PlayerController::setMode(Mode m) {
     mode_ = m;
     velocity_ = glm::vec3(0.0f);
+}
+
+float PlayerController::fallDamage(float impactSpeed) {
+    if (impactSpeed <= 0.0f) return 0.0f;
+    // Height the impact speed corresponds to (v^2 = 2 g h).
+    const float h = impactSpeed * impactSpeed / (2.0f * -kGravity);
+    return std::max(0.0f, h - kSafeFall) * kFallDmgPerBlock;
+}
+
+void PlayerController::damage(float amount) {
+    if (invulnerable_ || amount <= 0.0f) return;
+    health_ = std::max(0.0f, health_ - amount);
+    regenDelay_ = kRegenDelay; // hold off regen so it isn't instantly undone
+}
+
+void PlayerController::heal(float amount) {
+    if (amount <= 0.0f) return;
+    health_ = std::min(maxHealth_, health_ + amount);
+}
+
+void PlayerController::setHealth(float h) {
+    health_ = std::clamp(h, 0.0f, maxHealth_);
 }
 
 void PlayerController::update(float dt, const InputState& input) {
@@ -83,12 +113,28 @@ void PlayerController::update(float dt, const InputState& input) {
         velocity_.y = kJumpSpeed;
     }
 
-    // Integrate + resolve collisions per axis (allows sliding along walls).
+    // Integrate + resolve collisions per axis (allows sliding along walls). Capture
+    // the downward speed just before the Y sweep so a landing can score fall damage.
+    const bool wasAirborne = !onGround_;
+    const float impactSpeed = -velocity_.y; // >0 while falling
     onGround_ = false;
     const glm::vec3 delta = velocity_ * dt;
     moveAxis(feet_, delta.x, 0);
     moveAxis(feet_, delta.z, 2);
     moveAxis(feet_, delta.y, 1);
+
+    // Landed this frame after falling: apply fall damage from the impact speed.
+    if (onGround_ && wasAirborne) {
+        damage(fallDamage(impactSpeed));
+    }
+
+    // Slow passive regen once you've gone a few seconds without taking damage
+    // (there's no hunger to gate it, by design).
+    if (regenDelay_ > 0.0f) {
+        regenDelay_ = std::max(0.0f, regenDelay_ - dt);
+    } else {
+        heal(kRegenRate * dt);
+    }
 
     syncCameraToBody();
 }
