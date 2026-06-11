@@ -548,6 +548,25 @@ void App::tickLiquids() {
             if (becameStone) continue; // this cell is stone now — it no longer flows
         }
 
+        // Infinite water source: a FLOWING water cell (level > 0) with >=2 horizontal
+        // SOURCE-water neighbours becomes a source itself (Minecraft rule). So a 2x2
+        // pool turns all-source and a hole between two sources refills permanently.
+        if (lid == water && level > 0) {
+            const int hx[4] = {1, -1, 0, 0};
+            const int hz[4] = {0, 0, 1, -1};
+            int sourceNeighbours = 0;
+            for (int k = 0; k < 4; ++k) {
+                const Block n = world_.blockAt(c.x + hx[k], c.y, c.z + hz[k]);
+                if (n.id == water && n.metadata == 0) ++sourceNeighbours;
+            }
+            if (sourceNeighbours >= 2 && !pending(c.x, c.y, c.z)) {
+                edits.push_back({c, Block{water, 0}}); // promote to a source
+                if (next.size() < 12000) next.push_back(c); // spreads as a source next tick
+                ++fills;
+                continue;
+            }
+        }
+
         auto fill = [&](int x, int y, int z, int nl) {
             if (world_.blockAt(x, y, z).id != 0 || pending(x, y, z)) {
                 return; // occupied, or already filled earlier this tick

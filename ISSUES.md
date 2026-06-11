@@ -399,7 +399,12 @@ Core Optimizations:
       batched edit, relit by setBlocksBatch; counted toward the per-tick fill cap so
       a large contact solidifies over a few ticks). Triggers on flow/placement
       (seedLiquid is queued on place + break). No obsidian variant, per user.
-    - Infinite source (two sources fill the gap between them, like Minecraft).
+    - ~~Infinite source (two sources fill the gap between them, like Minecraft).~~
+      **DONE.** In App::tickLiquids, a FLOWING water cell (metadata > 0) with >=2
+      horizontal SOURCE-water neighbours (metadata 0) promotes itself to a source.
+      So a 2x2 pool becomes all-source and a hole dug between two sources refills
+      permanently. Geometrically bounded (a 1-wide line never runs away), matching
+      Minecraft.
     - Kill the per-tick `vkDeviceWaitIdle` in liquid remeshes — route flow remeshes
       through the streaming path (the remaining flow-time stutter; remeshChunks does
       a full device drain every 0.2s tick while water spreads).
