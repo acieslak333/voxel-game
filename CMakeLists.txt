@@ -252,6 +252,7 @@ add_executable(voxelgame
     src/entity/ItemEntity.cpp
     src/entity/Armature.cpp
     src/entity/Particles.cpp
+    src/entity/Critters.cpp
 )
 add_dependencies(voxelgame shaders)
 

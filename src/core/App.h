@@ -3,6 +3,7 @@
 #include "clouds/CloudSystem.h"
 #include "core/DayNight.h"
 #include "entity/Armature.h"
+#include "entity/Critters.h"
 #include "entity/ItemEntity.h"
 #include "entity/Particles.h"
 #include "core/Input.h"
@@ -132,8 +133,8 @@ private:
     // Where the persisted settings live (next to the game's assets).
     [[nodiscard]] static std::string settingsPath();
 
-    static constexpr int kWidth  = 1280;
-    static constexpr int kHeight = 720;
+    static constexpr int kWidth  = 1600;
+    static constexpr int kHeight = 900;
 
     // How far (in blocks) the player can reach to edit terrain.
     static constexpr float kReach = 5.0f;
@@ -172,6 +173,9 @@ private:
     glm::vec3         entityPos_{0.0f};   // world position (feet) of the test biped
     float             entityAnimTime_ = 0.0f;
     void buildTestEntity();
+
+    Critters          critters_;          // passive wandering critters (placeholder box rig)
+    void spawnCritters();                 // seed a few around spawn on the surface
 
     // UI state.
     bool             paused_ = false;        // escape menu open

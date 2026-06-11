@@ -225,6 +225,7 @@ App::App()
                                static_cast<float>(ez));
         buildTestEntity();
     }
+    spawnCritters(); // a few passive wanderers around spawn
     player_.setInvulnerable(creativeMode_); // creative ignores fall/lava/combat damage
 
     // Collide against the generated world.
@@ -888,6 +889,18 @@ void App::buildTestEntity() {
     swing(4, +1.0f); // armR counter-swings legR
 }
 
+void App::spawnCritters() {
+    // Seed a handful of wanderers on the surface near spawn (placeholder box rig;
+    // real mob models arrive with the glTF loader). Each drops onto the terrain.
+    const glm::vec3 c = entityPos_;
+    for (int i = 0; i < 6; ++i) {
+        const int ox = static_cast<int>(c.x) + (i % 3) * 3 - 3;
+        const int oz = static_cast<int>(c.z) + (i / 3) * 3 + 2;
+        const float y = static_cast<float>(world_.surfaceHeight(ox, oz)) + 1.0f;
+        critters_.spawn(glm::vec3(static_cast<float>(ox), y, static_cast<float>(oz)));
+    }
+}
+
 void App::run(long maxFrames, const std::string& screenshotPath) {
     double lastTime = glfwGetTime();
     long frame = 0;
@@ -1029,6 +1042,8 @@ void App::run(long maxFrames, const std::string& screenshotPath) {
             // (rendered as little spinning block cubes by the EntityRenderer pass).
             droppedItems_.update(dt, [this](int x, int y, int z) { return world_.isSolid(x, y, z); },
                                  player_.feetPosition(), player_.inventory());
+            // Passive critters: wander + gravity (rendered as box-rig figures below).
+            critters_.update(dt, [this](int x, int y, int z) { return world_.isSolid(x, y, z); });
             // Block-break chip particles: gravity + settle, age out.
             particles_.update(dt, [this](int x, int y, int z) { return world_.isSolid(x, y, z); });
             // Liquid flow: drain a budget of the flow queue a few times a second.
@@ -1139,6 +1154,21 @@ void App::run(long maxFrames, const std::string& screenshotPath) {
                         bakeMesh(testEntity_, worldMatrices(testEntity_, pose));
                     std::vector<EntityRenderer::Draw> draws{
                         {&bipedMesh, glm::translate(glm::mat4(1.0f), entityPos_)}};
+
+                    // Passive critters: the SAME box rig, each baked at its own walk
+                    // phase and placed by its position + heading. Reserve so the held
+                    // meshes don't reallocate (draws hold pointers into this vector).
+                    std::vector<std::vector<EntityVertex>> critterMeshes;
+                    critterMeshes.reserve(critters_.size());
+                    for (const Critter& cr : critters_.all()) {
+                        critterMeshes.push_back(bakeMesh(
+                            testEntity_,
+                            worldMatrices(testEntity_,
+                                          sampleClip(testEntity_, testWalk_, cr.animTime))));
+                        glm::mat4 m = glm::translate(glm::mat4(1.0f), cr.pos);
+                        m = glm::rotate(m, cr.yaw, glm::vec3(0.0f, 1.0f, 0.0f));
+                        draws.push_back({&critterMeshes.back(), m});
+                    }
 
                     // One cube mesh per distinct block id (reused across items +
                     // particles of that type); the map keeps the vertex data alive for
@@ -1495,11 +1525,12 @@ void App::buildInventory(Ui& ui, float w, float h, const InputState& in) {
     Inventory& inv = player_.inventory();
     ui.panel(0.0f, 0.0f, w, h, kUiDim); // dim the world behind the screen
 
-    const float slot = 54.0f, gap = 8.0f, radius = 16.0f;
+    const float S = 1.7f; // inventory screen scale — bigger, comfier slots (ISSUES #15)
+    const float slot = 54.0f * S, gap = 8.0f * S, radius = 16.0f * S;
     const int   cols = Inventory::kStorageCols;
     const int   rows = Inventory::kStorageRows;
     const float gridW = cols * slot + (cols - 1) * gap;
-    const float pad = 22.0f, titleH = 30.0f, hotGap = 18.0f;
+    const float pad = 22.0f * S, titleH = 30.0f * S, hotGap = 18.0f * S;
     const float panelW = gridW + 2.0f * pad;
     const float panelH = titleH + rows * slot + (rows - 1) * gap + hotGap + slot + 2.0f * pad;
     const float px = std::round((w - panelW) * 0.5f);
@@ -1536,7 +1567,7 @@ void App::buildInventory(Ui& ui, float w, float h, const InputState& in) {
 
     // Equipment column to the left, crafting list to the right of the inventory.
     buildEquipment(ui, px - 18.0f, py, in); // right-anchored beside the inventory
-    buildCrafting(ui, px + panelW + 18.0f, py, 250.0f, in);
+    buildCrafting(ui, px + panelW + 18.0f, py, 270.0f, in);
 
     // The cursor-held stack follows the mouse (icon only, no frame).
     if (!cursorStack_.empty()) {
@@ -1588,7 +1619,8 @@ void App::buildCrafting(Ui& ui, float x, float y, float w, const InputState& in)
     const std::vector<Crafting::Recipe>& recipes = crafting_.recipes();
     const int total = static_cast<int>(recipes.size());
 
-    const float pad = 16.0f, rowH = 46.0f, titleH = 28.0f;
+    const float S = 1.5f; // scale rows/icons up to match the bigger inventory
+    const float pad = 16.0f * S, rowH = 46.0f * S, titleH = 28.0f * S;
     const int   maxVisible = 8;
     const int   visible = total > 0 ? std::min(total, maxVisible) : 1;
     const float panelH = titleH + 2.0f * pad + visible * rowH;
@@ -1605,7 +1637,7 @@ void App::buildCrafting(Ui& ui, float x, float y, float w, const InputState& in)
     const int maxScroll = std::max(0, total - maxVisible);
     craftScroll_ = std::clamp(craftScroll_ - in.hotbarScroll, 0, maxScroll);
 
-    const float rx = x + pad, rw = w - 2.0f * pad, iconR = 15.0f;
+    const float rx = x + pad, rw = w - 2.0f * pad, iconR = 15.0f * S;
     float ry = y + pad + titleH;
     int hoverIdx = -1;
     for (int row = 0; row < maxVisible; ++row) {
@@ -1660,8 +1692,9 @@ void App::buildCrafting(Ui& ui, float x, float y, float w, const InputState& in)
 
 void App::buildEquipment(Ui& ui, float rightX, float y, const InputState& in) {
     const BlockRegistry& reg = world_.registry();
-    const float slot = 54.0f, gap = 8.0f, radius = 16.0f;
-    const float pad = 15.0f, titleH = 26.0f, secGap = 20.0f, subH = 16.0f;
+    const float S = 1.7f; // match the inventory screen scale
+    const float slot = 54.0f * S, gap = 8.0f * S, radius = 16.0f * S;
+    const float pad = 15.0f * S, titleH = 26.0f * S, secGap = 20.0f * S, subH = 16.0f * S;
     // Boots (the lone armour slot) above the trinkets laid out in a compact 2-wide
     // grid (ISSUES #15 — trimmed armour + tighter trinket space).
     const int   cols = 2;
