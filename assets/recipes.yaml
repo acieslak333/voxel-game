@@ -13,6 +13,10 @@
 #  A recipe naming an unknown block (output or input) is skipped at load, so a
 #  typo can't crash the game. Block names come from assets/blocks.yaml.
 #  (A future `station:` key will gate recipes by a nearby workbench/furnace.)
+#
+#  EDIT WITH THE MOUSE: `python tools/recipe_tool.py` (needs `pip install flask
+#  ruamel.yaml`) opens a localhost editor that picks blocks by icon and writes this
+#  file (comments preserved). You can still hand-edit it below.
 # =============================================================================
 recipes:
   # Wood processing: a trunk or a log splits into four planks.
