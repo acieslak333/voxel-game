@@ -160,6 +160,19 @@ features:
   bush_density: 0.1
 
 # -----------------------------------------------------------------------------
+#  structures: hand-authored voxel templates (assets/structures/*.yaml) stamped
+#  sparsely on land — wells, boulders, glowing pillars. Candidate origins sit on a
+#  coarse grid: every `spacing` blocks a cell has a `density` chance of rooting one
+#  (jittered within the cell, picked by weight). Seam-safe: each column gathers the
+#  nearby origins whose footprint covers it, so a structure is identical regardless
+#  of chunk load order. density: 0 disables them. Author new ones by dropping a YAML
+#  in assets/structures/ (see the files there for the layer/legend format).
+# -----------------------------------------------------------------------------
+structures:
+  spacing: 80      # average blocks between candidate structure cells
+  density: 0.35    # chance a candidate cell actually roots a structure
+
+# -----------------------------------------------------------------------------
 #  caves: tunnels carved through the stone. They are hollowed where two 3D-noise
 #  fields are BOTH near zero — the intersection of two surfaces is a winding line,
 #  so caves snake instead of forming round blobs. Only stone is carved (dirt and

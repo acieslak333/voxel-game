@@ -116,7 +116,9 @@ World::World(const WorldConfig& config, const std::string& blocksFile)
       // asset dir as blocks.yaml; worldHeight is the vertical block extent.
       gen_(config.seed, registry_,
            std::filesystem::path(blocksFile).parent_path().string(),
-           config.chunksY * Chunk::kSize) {
+           config.chunksY * Chunk::kSize),
+      structures_((std::filesystem::path(blocksFile).parent_path() / "structures").string(),
+                  registry_) {
     // Resolve the block types the generator places (throws if a name is absent
     // from the block-definition file).
     grassId_  = registry_.idByName("grass");
@@ -660,6 +662,43 @@ void World::generateColumn(int cx, int cz) {
                         const int rim = cyc - rV / 2; // just below the crown's middle
                         const int len = droop + static_cast<int>(hash01(wx, wz, seed ^ 0x7243u) * 2.99f);
                         for (int k = 0; k < len; ++k) place(rim - k, leafBlk);
+                    }
+                }
+            }
+
+            // --- Structures: seam-safe stamp from nearby candidate origins -----
+            // Candidate origins live on a coarse grid; this column gathers every
+            // nearby origin whose footprint covers it and stamps that origin's
+            // voxel column. A pure function of world coords, so the structure comes
+            // out identical no matter which chunk streams in first (like trees).
+            if (!structures_.empty() && config_.structureDensity > 0.0f) {
+                const int S = std::max(8, config_.structureSpacing);
+                const int cellR = structures_.maxReachXZ() / S + 1;
+                auto placeForce = [&](int wy, uint16_t pid) {
+                    if (wy < 0 || wy >= worldTop) return;
+                    const int pcy = wy / N;
+                    if (!needNoise[static_cast<size_t>(pcy)]) return;
+                    chunks_[slots[static_cast<size_t>(pcy)]].set(lx, wy % N, lz, Block{pid, 0});
+                };
+                const int gx = floordiv(wx, S), gz = floordiv(wz, S);
+                for (int cgz = gz - cellR; cgz <= gz + cellR; ++cgz) {
+                    for (int cgx = gx - cellR; cgx <= gx + cellR; ++cgx) {
+                        if (hash01(cgx, cgz, seed ^ 0x57b1u) >= config_.structureDensity) continue;
+                        const int si = structures_.pick(hash01(cgx, cgz, seed ^ 0x57b4u));
+                        if (si < 0) continue;
+                        const Structure& st = structures_.all()[static_cast<size_t>(si)];
+                        const int ox = cgx * S + static_cast<int>(hash01(cgx, cgz, seed ^ 0x57b2u) * (S - 1));
+                        const int oz = cgz * S + static_cast<int>(hash01(cgx, cgz, seed ^ 0x57b3u) * (S - 1));
+                        const int slx = (wx - ox) + st.anchor.x;
+                        const int slz = (wz - oz) + st.anchor.z;
+                        if (slx < 0 || slz < 0 || slx >= st.size.x || slz >= st.size.z) continue;
+                        const ColumnInfo oc = gen_.columnInfo(ox, oz);
+                        if (st.surface && oc.height <= oc.waterLevel) continue; // not in water
+                        const int oh = oc.height;
+                        for (int ly = 0; ly < st.size.y; ++ly) {
+                            const uint16_t bid = st.at(slx, ly, slz);
+                            if (bid != Structure::kSkip) placeForce(oh + (ly - st.anchor.y), bid);
+                        }
                     }
                 }
             }

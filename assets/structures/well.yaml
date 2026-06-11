@@ -1,0 +1,24 @@
+# A stone well: a 3x3 cobblestone well-head with a central water shaft. See
+# src/world/Structure.cpp for the format. anchor [1,1,1] = the centre cell sits at
+# the surface, so the lowest layer is a buried foundation and the top two build up.
+name: well
+weight: 1.0
+surface: true        # only on dry land
+anchor: [1, 1, 1]
+legend:
+  '.': skip          # leave the existing block
+  'C': cobblestone
+  'W': water
+layers:
+  # y0 — foundation (one block below the surface) with the water shaft's base
+  - ["CCC",
+     "CWC",
+     "CCC"]
+  # y1 — at the surface: the water rim
+  - ["CCC",
+     "CWC",
+     "CCC"]
+  # y2 — the raised well-head above ground
+  - ["CCC",
+     "CWC",
+     "CCC"]

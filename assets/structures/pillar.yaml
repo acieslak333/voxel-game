@@ -1,0 +1,14 @@
+# A broken cobblestone pillar topped with glowstone — a natural lamppost that pools
+# warm light at night. 1x1 footprint, anchor at the bottom on the surface.
+name: pillar
+weight: 1.0
+surface: true
+anchor: [0, 0, 0]
+legend:
+  'C': cobblestone
+  'G': glowstone
+layers:
+  - ["C"]   # y0 (surface)
+  - ["C"]   # y1
+  - ["C"]   # y2
+  - ["G"]   # y3 — the glowing cap

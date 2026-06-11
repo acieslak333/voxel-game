@@ -95,6 +95,14 @@ struct WorldConfig {
     float treeDensity    = 0.02f;  // oak tree (thin trunk + crossed-quad leaf canopy), grass only
     float bushDensity     = 0.02f; // single-cell crossed-quad shrub on grass
 
+    // --- Structures (assets/structures/*.yaml) --------------------------------
+    // Hand-authored voxel templates stamped sparsely on land. Candidate origins sit
+    // on a coarse grid: every structureSpacing blocks a cell has a structureDensity
+    // chance of rooting one (jittered within the cell, seam-safe via per-column
+    // gather). 0 density disables them.
+    int   structureSpacing = 80;
+    float structureDensity = 0.35f;
+
     // --- Caves -----------------------------------------------------------------
     // Tunnels are carved through the stone where two 3D-noise fields are both near
     // zero (their intersection is a 1D-ish curve), so they wind rather than blob.

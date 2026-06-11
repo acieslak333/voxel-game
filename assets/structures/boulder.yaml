@@ -1,0 +1,23 @@
+# A rounded rock — a 3x3x3 stone lump with a cobble core, sitting on the surface.
+# anchor [1,0,1] = bottom-centre meets the ground (no buried foundation).
+name: boulder
+weight: 2.0          # the common one
+surface: true
+anchor: [1, 0, 1]
+legend:
+  '.': skip
+  'S': stone
+  'C': cobblestone
+layers:
+  # y0 — a plus-shaped base
+  - [".S.",
+     "SSS",
+     ".S."]
+  # y1 — full middle, cobble core
+  - ["SSS",
+     "SCS",
+     "SSS"]
+  # y2 — rounded cap
+  - [".S.",
+     "SCS",
+     ".S."]

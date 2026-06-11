@@ -240,6 +240,7 @@ add_executable(voxelgame
     src/world/NoiseStack.cpp
     src/world/Raycast.cpp
     src/world/Shape.cpp
+    src/world/Structure.cpp
     src/world/TerrainGenerator.cpp
     src/world/World.cpp
     src/world/WorldConfig.cpp

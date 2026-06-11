@@ -77,10 +77,10 @@ int runWorldGenSelfTest(const std::string& assetDir) {
 
     // Recorded golden. NOTE: the selftest reads assets/biomes.yaml, so TUNING the
     // generation (e.g. via tools/genmap_tool.py) intentionally changes this hash —
-    // rebaseline when the config settles. Last set for the 256-tall world (height
-    // 16 chunks, sea level 128, biomes.yaml splines/cave/ore depths scaled for
-    // dramatic mountains). Bump ONLY for an intentional worldgen change (per WORLD_GEN_AGENT_TIPS §6).
-    constexpr uint64_t kGolden = 0x44839fef385a5627ull;
+    // rebaseline when the config settles. Last set for structures (assets/
+    // structures/*.yaml stamped on land via the seam-safe per-column gather in
+    // generateColumn). Bump ONLY for an intentional worldgen change (per WORLD_GEN_AGENT_TIPS §6).
+    constexpr uint64_t kGolden = 0x1c4b38cf6a1b8067ull;
 
     uint64_t h1 = 0, h2 = 0;
     try {

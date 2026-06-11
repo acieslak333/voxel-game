@@ -81,6 +81,10 @@ WorldConfig WorldConfig::load(const std::string& path) {
         get(ft["tree_density"], c.treeDensity);
         get(ft["bush_density"], c.bushDensity);
     }
+    if (const YAML::Node st = root["structures"]) {
+        get(st["spacing"], c.structureSpacing);
+        get(st["density"], c.structureDensity);
+    }
     if (const YAML::Node cv = root["caves"]) {
         get(cv["frequency"], c.caveFrequency);
         get(cv["threshold"], c.caveThreshold);

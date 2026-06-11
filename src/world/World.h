@@ -4,6 +4,7 @@
 #include "world/Chunk.h"
 #include "world/Noise.h"
 #include "world/Shape.h"
+#include "world/Structure.h"
 #include "world/TerrainGenerator.h"
 #include "world/WorldConfig.h"
 
@@ -232,6 +233,7 @@ private:
     Noise         materialNoise_;
     Noise         caveNoise_;     // 3D noise for carving cave tunnels
     TerrainGenerator gen_;        // data-driven shape + biome pipeline (assets/biomes.yaml)
+    StructureSet     structures_; // hand-authored templates stamped on land (assets/structures/)
     std::vector<Chunk>   chunks_;     // flat ring buffer, indexed by chunkIndex()
     std::vector<uint8_t> skyLight_;   // per-block sky light, indexed by lightIndex()
     std::vector<uint8_t> blockLight_; // per-block emitted light, same indexing
