@@ -274,6 +274,9 @@ void TerrainGenerator::loadConfig(const std::string& assetDir, const BlockRegist
                        : t == "willow" ? TreeKind::Willow
                        : TreeKind::Oak;
             }
+            if (const YAML::Node tn = bn["tint"]; tn && tn.IsSequence() && tn.size() >= 3) {
+                b.vegTint = {tn[0].as<float>(), tn[1].as<float>(), tn[2].as<float>()};
+            }
             loaded.push_back(b);
         }
         if (!loaded.empty()) {
@@ -474,6 +477,7 @@ ColumnInfo TerrainGenerator::columnInfo(int wx, int wz) const {
     ci.bushDensity = b.bushDensity;
     ci.plantKind   = b.plant;
     ci.treeKind    = b.tree;
+    ci.vegTint     = b.vegTint;
 
     if (ci.height < ci.waterLevel) {
         // Submerged (ocean or under a perched lake): floor block, nothing grows.

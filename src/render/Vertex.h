@@ -39,6 +39,11 @@ struct Vertex {
     glm::vec2 light;
     uint32_t  normal;
     uint32_t  blockColor = 0; // packed RGBA8 emitter hue (R low byte)
+    // Biome vegetation tint, packed RGBA8 (white = no tint). The fragment shader
+    // multiplies the sampled albedo by this, so grass/leaves/plants take on a
+    // per-biome colour (lush forest, dry savanna, pale snow, dark swamp) while all
+    // other blocks carry the default white and are unaffected.
+    uint32_t  tint = 0xFFFFFFFFu;
 
     // How to fetch one Vertex from the vertex buffer.
     static VkVertexInputBindingDescription bindingDescription() {
@@ -50,8 +55,8 @@ struct Vertex {
     }
 
     // How to interpret each field as a shader input attribute.
-    static std::array<VkVertexInputAttributeDescription, 6> attributeDescriptions() {
-        std::array<VkVertexInputAttributeDescription, 6> a{};
+    static std::array<VkVertexInputAttributeDescription, 7> attributeDescriptions() {
+        std::array<VkVertexInputAttributeDescription, 7> a{};
         a[0] = {0, 0, VK_FORMAT_R32G32B32_SFLOAT,  offsetof(Vertex, pos)};
         a[1] = {1, 0, VK_FORMAT_R32G32_SFLOAT,     offsetof(Vertex, uv)};
         a[2] = {2, 0, VK_FORMAT_R32_UINT,          offsetof(Vertex, layer)};
@@ -59,6 +64,7 @@ struct Vertex {
         a[4] = {4, 0, VK_FORMAT_R32_UINT,          offsetof(Vertex, normal)};
         // R8G8B8A8_UNORM: read in the shader as a normalised vec4 in [0,1].
         a[5] = {5, 0, VK_FORMAT_R8G8B8A8_UNORM,    offsetof(Vertex, blockColor)};
+        a[6] = {6, 0, VK_FORMAT_R8G8B8A8_UNORM,    offsetof(Vertex, tint)};
         return a;
     }
 };

@@ -7,6 +7,7 @@ layout(location = 2) in uint  inLayer;  // texture-array layer for this face
 layout(location = 3) in vec2  inLight;  // x = sky-lit, y = block-lit (incl AO)
 layout(location = 4) in uint  inNormal; // face index (Face enum, 0..5)
 layout(location = 5) in vec4  inBlockColor; // emitter hue for the block-lit term (RGBA8->0..1)
+layout(location = 6) in vec4  inTint;       // biome vegetation tint (RGBA8->0..1, white = none)
 
 // Camera matrices + the day-night sun state, shared by the whole draw. The sun
 // fields are consumed in the fragment shader.
@@ -30,6 +31,7 @@ layout(location = 2) out vec2      fragLight;
 layout(location = 3) out flat uint fragNormal;
 layout(location = 4) out flat float fragAlpha;
 layout(location = 5) out vec3      fragBlockColor;
+layout(location = 6) out vec3      fragTint;
 
 void main() {
     gl_Position = camera.proj * camera.view * push.model * vec4(inPos, 1.0);
@@ -39,4 +41,5 @@ void main() {
     fragNormal     = inNormal;
     fragAlpha      = push.params.x;
     fragBlockColor = inBlockColor.rgb;
+    fragTint       = inTint.rgb;
 }

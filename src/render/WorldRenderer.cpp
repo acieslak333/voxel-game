@@ -160,6 +160,15 @@ ChunkMesher::LightSampler WorldRenderer::makeLightSampler(int cx, int cy, int cz
     };
 }
 
+ChunkMesher::TintSampler WorldRenderer::makeTintSampler(int cx, int /*cy*/, int cz) const {
+    const int baseX = cx * Chunk::kSize;
+    const int baseZ = cz * Chunk::kSize;
+    return [this, baseX, baseZ](int lx, int lz, uint16_t id) -> glm::vec3 {
+        if (!world_.isVegTintable(id)) return glm::vec3(1.0f); // common case: no tint
+        return world_.vegTintAt(baseX + lx, baseZ + lz);
+    };
+}
+
 VkImageView WorldRenderer::blockTextureView() const { return textures_->view(); }
 VkSampler   WorldRenderer::blockTextureSampler() const { return textures_->sampler(); }
 
@@ -170,7 +179,8 @@ void WorldRenderer::uploadChunkMesh(int cx, int cy, int cz) {
     MeshData mesh = ChunkMesher::greedyMesh(world_.chunk(cx, cy, cz), world_.registry(),
                                             makeSampler(cx, cy, cz),
                                             makeLightSampler(cx, cy, cz), true,
-                                            glm::ivec3(cx, cy, cz) * kChunkSize);
+                                            glm::ivec3(cx, cy, cz) * kChunkSize,
+                                            makeTintSampler(cx, cy, cz));
     installMesh(cx, cy, cz, std::move(mesh), /*deferOldBuffers=*/false);
 }
 
@@ -327,7 +337,7 @@ void WorldRenderer::buildMeshes() {
                        return ChunkMesher::greedyMesh(
                            world_.chunk(c.x, c.y, c.z), world_.registry(),
                            makeSampler(c.x, c.y, c.z), makeLightSampler(c.x, c.y, c.z), true,
-                           c * kChunkSize);
+                           c * kChunkSize, makeTintSampler(c.x, c.y, c.z));
                    });
 
     // Upload in slices: record every chunk's staging->device copy into ONE command
@@ -483,7 +493,8 @@ void WorldRenderer::workerLoop() {
                                               world_.registry(),
                                               makeSampler(job.cx, job.cy, job.cz),
                                               makeLightSampler(job.cx, job.cy, job.cz), true,
-                                              glm::ivec3(job.cx, job.cy, job.cz) * kChunkSize);
+                                              glm::ivec3(job.cx, job.cy, job.cz) * kChunkSize,
+                                              makeTintSampler(job.cx, job.cy, job.cz));
         {
             std::lock_guard<std::mutex> lk(resultMutex_);
             resultQueue_.push_back(MeshResult{job.cx, job.cy, job.cz, job.version, std::move(md)});

@@ -180,6 +180,8 @@ private:
     [[nodiscard]] ChunkMesher::NeighborSampler makeSampler(int cx, int cy, int cz) const;
     // Resolves chunk-local coords to the world's sky-light field for this chunk.
     [[nodiscard]] ChunkMesher::LightSampler makeLightSampler(int cx, int cy, int cz) const;
+    // Resolves a tintable block at chunk-local (x,z) to its biome vegetation tint.
+    [[nodiscard]] ChunkMesher::TintSampler makeTintSampler(int cx, int cy, int cz) const;
     [[nodiscard]] int chunkIndex(int cx, int cy, int cz) const;
     void createUniformBuffers(uint32_t n);
     void createDescriptorSets(uint32_t n);

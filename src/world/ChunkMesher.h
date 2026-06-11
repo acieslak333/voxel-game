@@ -56,6 +56,12 @@ public:
     // fast path — every lookup goes through this.
     using LightSampler = std::function<LightSample(int x, int y, int z)>;
 
+    // Biome vegetation tint for a tintable block at chunk-local (x,z): the shader
+    // multiplies the albedo by it, so grass/leaves take a per-biome colour. Returns
+    // white (1,1,1) for non-tintable blocks (the common case), so the mesher can
+    // call it for every face and only foliage actually tints.
+    using TintSampler = std::function<glm::vec3(int x, int z, uint16_t id)>;
+
     // smoothLighting: true folds per-corner ambient occlusion + averaged sky
     // light into each vertex (soft, modern look); false uses only the flat
     // directional top/side/bottom shade (the simpler original look).
@@ -67,7 +73,8 @@ public:
                                              const NeighborSampler& neighbor,
                                              const LightSampler& light,
                                              bool smoothLighting,
-                                             const glm::ivec3& worldOrigin);
+                                             const glm::ivec3& worldOrigin,
+                                             const TintSampler& tint);
 };
 
 } // namespace vg

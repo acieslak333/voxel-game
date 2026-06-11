@@ -73,6 +73,7 @@ struct Mask {
     uint16_t block     = 0;
     bool     positive  = false; // face normal points along +axis?
     uint32_t layer     = 0;
+    uint32_t tint      = 0xFFFFFFFFu; // biome vegetation tint (white = none)
     float    baseShade = 0.0f;  // directional (top/bottom/side) brightness
     uint8_t  ao[4]     = {3, 3, 3, 3};         // occlusion 0..3 at the 4 face corners
     float    sky[4]    = {15, 15, 15, 15};      // smoothed sky light 0..15 per corner
@@ -81,7 +82,7 @@ struct Mask {
 
     bool operator==(const Mask& o) const {
         return present == o.present && block == o.block && positive == o.positive &&
-               layer == o.layer && baseShade == o.baseShade && ao[0] == o.ao[0] &&
+               layer == o.layer && tint == o.tint && baseShade == o.baseShade && ao[0] == o.ao[0] &&
                ao[1] == o.ao[1] && ao[2] == o.ao[2] && ao[3] == o.ao[3] &&
                sky[0] == o.sky[0] && sky[1] == o.sky[1] && sky[2] == o.sky[2] &&
                sky[3] == o.sky[3] && blk[0] == o.blk[0] && blk[1] == o.blk[1] &&
@@ -97,7 +98,7 @@ struct Mask {
 MeshData ChunkMesher::greedyMesh(const Chunk& chunk, const BlockRegistry& reg,
                                  const NeighborSampler& neighbor,
                                  const LightSampler& light, bool smoothLighting,
-                                 const glm::ivec3& worldOrigin) {
+                                 const glm::ivec3& worldOrigin, const TintSampler& tint) {
     MeshData mesh;
 
     // In-bounds blocks come straight from the chunk; the boundary sweep below
@@ -212,10 +213,10 @@ MeshData ChunkMesher::greedyMesh(const Chunk& chunk, const BlockRegistry& reg,
         const auto faceNormal = static_cast<uint32_t>(faceIndex(d, m.positive));
 
         const auto base_index = static_cast<uint32_t>(outV.size());
-        outV.push_back({p0, uvFor(p0), m.layer, lightOf(0), faceNormal, colorOf(0)});
-        outV.push_back({p1, uvFor(p1), m.layer, lightOf(1), faceNormal, colorOf(1)});
-        outV.push_back({p2, uvFor(p2), m.layer, lightOf(2), faceNormal, colorOf(2)});
-        outV.push_back({p3, uvFor(p3), m.layer, lightOf(3), faceNormal, colorOf(3)});
+        outV.push_back({p0, uvFor(p0), m.layer, lightOf(0), faceNormal, colorOf(0), m.tint});
+        outV.push_back({p1, uvFor(p1), m.layer, lightOf(1), faceNormal, colorOf(1), m.tint});
+        outV.push_back({p2, uvFor(p2), m.layer, lightOf(2), faceNormal, colorOf(2), m.tint});
+        outV.push_back({p3, uvFor(p3), m.layer, lightOf(3), faceNormal, colorOf(3), m.tint});
 
         // Winding: (u, v, d) form a right-handed basis, so p0->p1->p2->p3 is
         // counter-clockwise seen from the +d side. Positive faces use that order;
@@ -327,6 +328,9 @@ MeshData ChunkMesher::greedyMesh(const Chunk& chunk, const BlockRegistry& reg,
                                         variantHash(worldOrigin.x + cell[0],
                                                     worldOrigin.y + cell[1],
                                                     worldOrigin.z + cell[2]));
+            // Biome vegetation tint (white for non-foliage). Sampled at the owning
+            // cell's column; bakes into the vertices so grass varies by biome.
+            m.tint = packColorRGBA8(tint(cell[0], cell[2], blk));
             m.baseShade = faceShade(d, positive);
             if (!smoothLighting) {
                 // Simple mode: flat directional shade only (no AO, full sky light).
@@ -463,19 +467,20 @@ MeshData ChunkMesher::greedyMesh(const Chunk& chunk, const BlockRegistry& reg,
     auto pushQuad = [&](std::vector<Vertex>& outV, std::vector<uint32_t>& outI,
                         const glm::vec3& p0, const glm::vec3& p1, const glm::vec3& p2,
                         const glm::vec3& p3, uint32_t layer, const glm::vec2& lv,
-                        uint32_t normal, uint32_t blockCol, bool tiled) {
+                        uint32_t normal, uint32_t blockCol, bool tiled,
+                        uint32_t tintc = 0xFFFFFFFFu) {
         const auto b = static_cast<uint32_t>(outV.size());
         if (tiled) {
             const int axis = static_cast<int>(normal) / 2; // Face -> axis (0/1/2)
-            outV.push_back({p0, faceUV(p0, axis), layer, lv, normal, blockCol});
-            outV.push_back({p1, faceUV(p1, axis), layer, lv, normal, blockCol});
-            outV.push_back({p2, faceUV(p2, axis), layer, lv, normal, blockCol});
-            outV.push_back({p3, faceUV(p3, axis), layer, lv, normal, blockCol});
+            outV.push_back({p0, faceUV(p0, axis), layer, lv, normal, blockCol, tintc});
+            outV.push_back({p1, faceUV(p1, axis), layer, lv, normal, blockCol, tintc});
+            outV.push_back({p2, faceUV(p2, axis), layer, lv, normal, blockCol, tintc});
+            outV.push_back({p3, faceUV(p3, axis), layer, lv, normal, blockCol, tintc});
         } else {
-            outV.push_back({p0, {0.0f, 1.0f}, layer, lv, normal, blockCol});
-            outV.push_back({p1, {1.0f, 1.0f}, layer, lv, normal, blockCol});
-            outV.push_back({p2, {1.0f, 0.0f}, layer, lv, normal, blockCol});
-            outV.push_back({p3, {0.0f, 0.0f}, layer, lv, normal, blockCol});
+            outV.push_back({p0, {0.0f, 1.0f}, layer, lv, normal, blockCol, tintc});
+            outV.push_back({p1, {1.0f, 1.0f}, layer, lv, normal, blockCol, tintc});
+            outV.push_back({p2, {1.0f, 0.0f}, layer, lv, normal, blockCol, tintc});
+            outV.push_back({p3, {0.0f, 0.0f}, layer, lv, normal, blockCol, tintc});
         }
         outI.insert(outI.end(),
                     {b + 0, b + 1, b + 2, b + 0, b + 2, b + 3,    // front
@@ -485,18 +490,18 @@ MeshData ChunkMesher::greedyMesh(const Chunk& chunk, const BlockRegistry& reg,
     auto addNonCubeQuad = [&](const glm::vec3& p0, const glm::vec3& p1,
                               const glm::vec3& p2, const glm::vec3& p3,
                               uint32_t layer, const glm::vec2& lv, uint32_t normal,
-                              uint32_t blockCol = 0) {
+                              uint32_t blockCol = 0, uint32_t tintc = 0xFFFFFFFFu) {
         pushQuad(mesh.vertices, mesh.indices, p0, p1, p2, p3, layer, lv, normal,
-                 blockCol, /*tiled=*/false);
+                 blockCol, /*tiled=*/false, tintc);
     };
     // Axis-aligned box face: posts, slabs, stairs, walls, leaf-cube faces. The
     // texture tiles at 16 px/block so partial-size faces show the matching slice.
     auto addBoxQuad = [&](const glm::vec3& p0, const glm::vec3& p1,
                           const glm::vec3& p2, const glm::vec3& p3,
                           uint32_t layer, const glm::vec2& lv, uint32_t normal,
-                          uint32_t blockCol = 0) {
+                          uint32_t blockCol = 0, uint32_t tintc = 0xFFFFFFFFu) {
         pushQuad(mesh.vertices, mesh.indices, p0, p1, p2, p3, layer, lv, normal,
-                 blockCol, /*tiled=*/true);
+                 blockCol, /*tiled=*/true, tintc);
     };
 
     for (int z = 0; z < N; ++z) {
@@ -531,6 +536,9 @@ MeshData ChunkMesher::greedyMesh(const Chunk& chunk, const BlockRegistry& reg,
                                                          worldOrigin.y + y,
                                                          worldOrigin.z + z);
                 auto fl = [&](Face f) { return reg.faceLayer(id, f, cellVariant); };
+                // Biome vegetation tint for this cell's foliage (white for non-foliage,
+                // e.g. trunks/cactus/flowers, so only leaves & leafy plants tint).
+                const uint32_t cellTint = packColorRGBA8(tint(x, z, id));
 
                 if (flowing) {
                     // Corner-connected liquid surface (issue: invisible sides /
@@ -695,10 +703,10 @@ MeshData ChunkMesher::greedyMesh(const Chunk& chunk, const BlockRegistry& reg,
                     const float pt = leaf ? 1.0f + e : 1.0f;      // top overhang (plants flush)
                     addNonCubeQuad(o + glm::vec3(p0, pb, p0), o + glm::vec3(p1, pb, p1),
                                    o + glm::vec3(p1, pt, p1), o + glm::vec3(p0, pt, p0),
-                                   layer, lv, nrm, col);
+                                   layer, lv, nrm, col, cellTint);
                     addNonCubeQuad(o + glm::vec3(p0, pb, p1), o + glm::vec3(p1, pb, p0),
                                    o + glm::vec3(p1, pt, p0), o + glm::vec3(p0, pt, p1),
-                                   layer, lv, nrm, col);
+                                   layer, lv, nrm, col, cellTint);
                     if (rt == RenderType::LeafCube) {
                         // ...plus the full voxel-cube faces, so the canopy reads as
                         // solid leaf blocks with the cross fronds poking through.
@@ -711,7 +719,7 @@ MeshData ChunkMesher::greedyMesh(const Chunk& chunk, const BlockRegistry& reg,
                             if (nb == id || reg.isOpaque(nb)) return;
                             addBoxQuad(o + a, o + b, o + c, o + dd, fl(f),
                                        glm::vec2(sky, faceShade(axis, pos) * blk),
-                                       static_cast<uint32_t>(f), col);
+                                       static_cast<uint32_t>(f), col, cellTint);
                         };
                         leafFace(-1, 0, 0, glm::vec3(0, 0, 0), glm::vec3(0, 0, 1),
                                  glm::vec3(0, 1, 1), glm::vec3(0, 1, 0), 0, false, FaceNegX);

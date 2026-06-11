@@ -130,6 +130,10 @@ erosion_spline:
 #   tree          : tree species rooted here — oak / birch / pine / maple /
 #                   willow (default oak). Shapes the canopy (rounded / conical /
 #                   drooping) and picks the trunk + leaf blocks.
+#   tint          : [r, g, b] (0..1) MULTIPLIED into grass/leaf/foliage albedo so
+#                   the same green texture reads per-biome (lush / dry / pale /
+#                   dark). White [1,1,1] = no tint (default). Only multiplies, so
+#                   it can darken/shift but not brighten past the texture colour.
 biomes:
 - name: beach
   temp: [-2, 2]
@@ -169,6 +173,7 @@ biomes:
   bushes: 0.05
   plant: grass
   tree: maple
+  tint: [0.85, 0.78, 0.42]   # dry olive savanna grass
 - name: snowy
   temp: [-2, -0.35]
   humidity: [-2, 2]
@@ -180,6 +185,7 @@ biomes:
   bushes: 0.02
   plant: bush
   tree: pine
+  tint: [0.78, 0.86, 0.82]   # pale, cold-tinted snowy grass
 # Swamp: low, wet temperate ground just above the waterline. Tested before forest
 # so only the lowest wet land becomes swamp (higher wet land stays forest). Home
 # of the drooping willows.
@@ -193,6 +199,7 @@ biomes:
   bushes: 0.06
   plant: forest
   tree: willow
+  tint: [0.55, 0.68, 0.42]   # dark, murky swamp green
 - name: forest
   temp: [-0.35, 0.6]
   humidity: [0.2, 2]
@@ -203,6 +210,7 @@ biomes:
   bushes: 0.05
   plant: forest
   tree: oak
+  tint: [0.72, 1.00, 0.55]   # lush, deep forest green
 - name: plains
   temp: [-2, 2]
   humidity: [-2, 2]
@@ -213,3 +221,4 @@ biomes:
   bushes: 0.05
   plant: grass
   tree: birch
+  tint: [0.80, 0.95, 0.50]   # fresh plains green

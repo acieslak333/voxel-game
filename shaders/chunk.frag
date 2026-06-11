@@ -18,6 +18,7 @@ layout(location = 2) in vec2      fragLight;  // x = sky-lit, y = block-lit (0..
 layout(location = 3) in flat uint fragNormal; // face index (Face enum, 0..5)
 layout(location = 4) in flat float fragAlpha; // 1 opaque pass, <1 translucent water
 layout(location = 5) in vec3      fragBlockColor; // emitter hue for the block-lit term
+layout(location = 6) in vec3      fragTint;        // biome vegetation tint (white = none)
 
 layout(location = 0) out vec4 outColor;
 
@@ -39,6 +40,10 @@ void main() {
     if (texel.a < 0.5) {
         discard; // supports cut-out textures later (e.g. plants)
     }
+    // Biome vegetation tint: white for ordinary blocks (no-op), a per-biome colour
+    // for grass/leaves/plants so the same green texture reads lush / dry / pale by
+    // climate. Applied to the albedo before lighting.
+    texel.rgb *= fragTint;
 
     // --- Directional sun/moon lighting ---------------------------------------
     // The celestial light is a moving direction vector: faces turned toward it

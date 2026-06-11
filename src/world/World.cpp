@@ -330,6 +330,17 @@ uint16_t World::oreAt(int wx, int wy, int wz) const {
     return 0; // stays stone
 }
 
+bool World::isVegTintable(uint16_t id) const {
+    return id == grassId_ || id == leavesId_ || id == bushId_ ||
+           id == tallGrassId_ || id == fernId_ ||
+           id == birchLeavesId_ || id == pineLeavesId_ ||
+           id == mapleLeavesId_ || id == willowLeavesId_;
+}
+
+glm::vec3 World::vegTintAt(int wx, int wz) const {
+    return gen_.columnInfo(wx, wz).vegTint;
+}
+
 void World::generate() {
     // Iterate the loaded window's (X,Z) columns and generate each as a unit
     // (generateColumn shares the column shape across the vertical stack). Columns

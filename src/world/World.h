@@ -67,6 +67,15 @@ public:
     // Light the mesher actually shades with: the brighter of sky and block light.
     [[nodiscard]] uint8_t lightAt(int wx, int wy, int wz) const;
 
+    // --- Biome vegetation tinting --------------------------------------------
+    // True if this block's albedo should be multiplied by the biome tint (the
+    // green foliage: grass, leaves of any species, tall grass, fern, bush). Other
+    // blocks — incl. flowers/mushrooms/cactus — keep their authored colour.
+    [[nodiscard]] bool isVegTintable(uint16_t id) const;
+    // The biome vegetation tint at a column (white if uninteresting). Used by the
+    // mesher (via WorldRenderer's tint sampler) to colour tintable faces.
+    [[nodiscard]] glm::vec3 vegTintAt(int wx, int wz) const;
+
     // Is the block at world coords solid? Air (false) outside the world bounds.
     [[nodiscard]] bool isSolid(int wx, int wy, int wz) const;
 

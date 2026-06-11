@@ -3,6 +3,8 @@
 #include "world/Noise.h"
 #include "world/NoiseStack.h"
 
+#include <glm/glm.hpp>
+
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -54,6 +56,7 @@ struct BiomeDef {
     float  bushDensity   = 0.0f;  // per-column probability of a ground plant
     FloraKind plant      = FloraKind::Bush; // which plant family scatters here
     TreeKind  tree       = TreeKind::Oak;   // which tree species roots here
+    glm::vec3 vegTint{1.0f, 1.0f, 1.0f};    // multiplies grass/leaf albedo (white = none)
 };
 
 // What generateColumn needs to know about a single (x, z) column.
@@ -67,6 +70,7 @@ struct ColumnInfo {
     float    bushDensity = 0.0f;
     FloraKind plantKind  = FloraKind::None; // resolved plant family for this column
     TreeKind  treeKind   = TreeKind::Oak;   // resolved tree species for this column
+    glm::vec3 vegTint{1.0f, 1.0f, 1.0f};    // biome vegetation tint for this column
 };
 
 // -----------------------------------------------------------------------------
