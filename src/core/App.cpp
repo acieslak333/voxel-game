@@ -17,6 +17,7 @@
 #include <cstdlib>
 #include <iterator>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -32,6 +33,134 @@
 namespace vg {
 
 namespace {
+// The shapes the hammer radial offers, in display order (left to right).
+constexpr ShapeKind kPickerShapes[] = {
+    ShapeKind::Cube, ShapeKind::Slab, ShapeKind::Stairs,
+    ShapeKind::Post, ShapeKind::Wall, ShapeKind::VerticalSlab,
+};
+constexpr int kPickerShapeCount = static_cast<int>(sizeof(kPickerShapes) /
+                                                   sizeof(kPickerShapes[0]));
+int shapeIndex(ShapeKind k) {
+    for (int i = 0; i < kPickerShapeCount; ++i)
+        if (kPickerShapes[i] == k) return i;
+    return 0;
+}
+
+// Display name for a block shape (HUD indicator + picker labels).
+const char* shapeName(ShapeKind k) {
+    switch (k) {
+        case ShapeKind::Cube:         return "Cube";
+        case ShapeKind::Slab:         return "Slab";
+        case ShapeKind::Stairs:       return "Stairs";
+        case ShapeKind::Post:         return "Post";
+        case ShapeKind::Wall:         return "Wall";
+        case ShapeKind::VerticalSlab: return "Vertical Slab";
+    }
+    return "Cube";
+}
+
+// Orientation byte for a shape being placed / applied, from the ray hit (which
+// face + where on the cell) and the player's horizontal facing. Predictable rule:
+// the material goes where you point. A slab fills the half you aimed at; a stair
+// ascends in the direction you face (upside-down only when you hit the underside);
+// a post takes the clicked face's axis; a vertical slab hugs the clicked side.
+// `frac` is the hit point's fractional position within its cell.
+uint8_t orientForPlacement(ShapeKind shape, const glm::ivec3& normal,
+                           const glm::vec3& frac, const glm::vec3& viewDir) {
+    auto facingFromView = [&]() -> int {
+        return (std::abs(viewDir.x) >= std::abs(viewDir.z))
+                   ? (viewDir.x >= 0.0f ? 1 : 3)   // +X : -X
+                   : (viewDir.z >= 0.0f ? 2 : 0);  // +Z : -Z
+    };
+    auto sideFromNormal = [&]() -> int {
+        if (normal.x > 0) return 1; // +X face
+        if (normal.x < 0) return 3; // -X
+        if (normal.z > 0) return 2; // +Z
+        return 0;                   // -Z
+    };
+    switch (shape) {
+        case ShapeKind::Slab:
+            // The half you aimed at stays. A horizontal face pins it exactly (the hit
+            // point sits on a cell boundary, so frac.y is ambiguous there); a side
+            // face uses the clicked height. 1 = top, 0 = bottom.
+            if (normal.y > 0) return 1;             // clicked the TOP face -> top half
+            if (normal.y < 0) return 0;             // clicked the BOTTOM face -> bottom half
+            return frac.y > 0.5f ? 1 : 0;           // side -> by clicked height
+        case ShapeKind::VerticalSlab:
+            return static_cast<uint8_t>((normal.x || normal.z) ? sideFromNormal()
+                                                               : facingFromView());
+        case ShapeKind::Post:
+            if (normal.y) return 1;                 // top/bottom face -> Y axis
+            if (normal.x) return 0;                 // X face -> X axis
+            return 2;                               // Z face -> Z axis
+        case ShapeKind::Stairs: {
+            // Ascends the way you look; upside-down only when you hit the underside.
+            const int  facing = facingFromView();
+            const bool top    = normal.y < 0;
+            return static_cast<uint8_t>((facing & 3) | (top ? 4 : 0));
+        }
+        case ShapeKind::Wall:
+        case ShapeKind::Cube:
+        default:
+            return 0;
+    }
+}
+
+// A centred unit cube (half-extent `half`) as EntityVertex geometry, textured with
+// a block's six face layers and CCW-outward wound to match bakeMesh (so the shared
+// EntityRenderer pipeline draws it correctly). Used for dropped items and break
+// particles — both small textured cubes drawn with a per-draw model matrix.
+std::vector<EntityVertex> makeCubeMesh(const BlockRegistry& reg, uint16_t id, float half) {
+    struct Face { int axis; float sign; int u; int v; int face; };
+    static const Face kFaces[6] = {
+        {0, +1.0f, 1, 2, FacePosX}, {0, -1.0f, 2, 1, FaceNegX},
+        {1, +1.0f, 2, 0, FacePosY}, {1, -1.0f, 0, 2, FaceNegY},
+        {2, +1.0f, 0, 1, FacePosZ}, {2, -1.0f, 1, 0, FaceNegZ},
+    };
+    std::vector<EntityVertex> out;
+    out.reserve(36);
+    for (const Face& f : kFaces) {
+        glm::vec3 n(0.0f); n[f.axis] = f.sign;
+        glm::vec3 u(0.0f); u[f.u] = 1.0f;
+        glm::vec3 v(0.0f); v[f.v] = 1.0f;
+        const glm::vec3 fc = n * half;
+        const glm::vec3 p[4] = {fc - u * half - v * half, fc + u * half - v * half,
+                                fc + u * half + v * half, fc - u * half + v * half};
+        const glm::vec2 uv[4] = {{0, 1}, {1, 1}, {1, 0}, {0, 0}};
+        const uint32_t layer = reg.faceLayer(id, f.face);
+        auto emit = [&](int k) { out.push_back({p[k], n, uv[k], layer}); };
+        emit(0); emit(1); emit(2);
+        emit(0); emit(2); emit(3);
+    }
+    return out;
+}
+
+// Like makeCubeMesh but every face samples one explicit layer — used for the
+// block-break crack overlay (a slightly inflated cube of the crack-stage texture
+// drawn over the mined block; the entity shader's alpha cutout shows only cracks).
+std::vector<EntityVertex> makeCubeMeshLayer(uint32_t layer, float half) {
+    struct Face { int axis; float sign; int u; int v; };
+    static const Face kFaces[6] = {
+        {0, +1.0f, 1, 2}, {0, -1.0f, 2, 1}, {1, +1.0f, 2, 0},
+        {1, -1.0f, 0, 2}, {2, +1.0f, 0, 1}, {2, -1.0f, 1, 0},
+    };
+    std::vector<EntityVertex> out;
+    out.reserve(36);
+    for (const Face& f : kFaces) {
+        glm::vec3 n(0.0f); n[f.axis] = f.sign;
+        glm::vec3 u(0.0f); u[f.u] = 1.0f;
+        glm::vec3 v(0.0f); v[f.v] = 1.0f;
+        const glm::vec3 fc = n * half;
+        const glm::vec3 p[4] = {fc - u * half - v * half, fc + u * half - v * half,
+                                fc + u * half + v * half, fc - u * half + v * half};
+        const glm::vec2 uv[4] = {{0, 1}, {1, 1}, {1, 0}, {0, 0}};
+        auto emit = [&](int k) { out.push_back({p[k], n, uv[k], layer}); };
+        emit(0); emit(1); emit(2);
+        emit(0); emit(2); emit(3);
+    }
+    return out;
+}
+
 // Load the world config, but pre-apply the player's saved light falloff so the
 // world is generated AND meshed with the FINAL lighting. Without this,
 // applySettings() calls setLightFalloff() right after construction, and a changed
@@ -100,10 +229,13 @@ App::App()
 
     // Collide against the generated world.
     player_.setSolidFn([this](int x, int y, int z) { return world_.isSolid(x, y, z); });
-    // Thin (Model) blocks like the tree trunk collide as a centred column, not a
-    // full cell — return their X/Z inset so the player can stand right against them.
-    player_.setCollisionInsetFn(
-        [this](int x, int y, int z) { return world_.modelInsetAt(x, y, z); });
+    // Shaped/thin blocks (slabs, stairs, posts, walls, the tree trunk) collide as
+    // their box union, not a full cell — so the player stands on a slab, steps onto
+    // a stair, and brushes a thin post.
+    player_.setCollisionBoxesFn(
+        [this](int x, int y, int z, ShapeBox out[]) {
+            return world_.collisionBoxesAt(x, y, z, out);
+        });
     // Swim physics + drowning: tell the player which cells are water (resolve the id
     // once; blockAt is a cheap window lookup).
     const uint16_t waterId = world_.registry().idByName("water");
@@ -131,12 +263,22 @@ App::App()
         give("glowstone", 8);
         give("torch", 16);
         give("chest", 3);
-        give("iron_helmet", 1);
-        give("iron_chestplate", 1);
+        give("iron_boots", 1); // only armour piece (ISSUES #15: armour trimmed to boots)
         give("swift_charm", 1);
+    }
+    // The hammer (block-shape tool) is available in both modes (ISSUES #16).
+    {
+        Inventory& inv = player_.inventory();
+        try { inv.add(world_.registry().idByName("hammer"), 1); } catch (...) {}
     }
 
     try { chestId_ = world_.registry().idByName("chest"); } catch (...) { chestId_ = 0; }
+    try { hammerId_ = world_.registry().idByName("hammer"); } catch (...) { hammerId_ = 0; }
+    // Data-driven break particles (tunable in tools/particle_tool.py). A missing or
+    // bad file leaves the default burst.
+    try {
+        breakEffect_ = ParticleEffect::load(std::string(VG_ASSET_DIR) + "/particles/break.prtcl");
+    } catch (...) {}
 
     // Restore a saved player (position/look/health/inventory/mode) if one exists for
     // this world, overriding the default spawn + starter kit above. No-op otherwise.
@@ -162,6 +304,7 @@ void App::applySettings() {
     player_.camera().fovDegrees = settings_.fov;
     player_.setMouseSensitivity(settings_.sensitivity);
     player_.setFlySpeed(settings_.flySpeed);
+    window_.setFullscreen(settings_.fullscreen);
     dayNight_.setDayLengthMinutes(settings_.dayLengthMinutes);
     dayNight_.setRunning(settings_.timeRunning);
     // Sky colour from the palette: re-tints the *daytime* zenith of the day-night
@@ -248,19 +391,55 @@ void App::editBlocks(const InputState& in, float dt) {
     const RaycastHit hit = raycastVoxel(
         cam.position, cam.front(), kReach,
         [this](int x, int y, int z) { return world_.isTargetable(x, y, z); },
-        [this](int x, int y, int z) { return world_.modelInsetAt(x, y, z); });
+        [this](int x, int y, int z, ShapeBox out[]) { return world_.collisionBoxesAt(x, y, z, out); });
 
-    // ---- Mining: hold the left button to break, paced by the block's hardness and
-    //      the held tool's speed (creative breaks instantly). Aiming away or at a new
-    //      block restarts the timer, so you must dwell on one block to break it. -----
-    if (in.breakHeld && hit.hit) {
+    const uint16_t heldId       = inv.selectedStack().blockId;
+    const bool     holdingHammer = (hammerId_ != 0 && heldId == hammerId_);
+
+    if (holdingHammer) {
+        // ---- Hammer: left-click reshapes/rotates the targeted block (first click
+        //      sets the active shape; a block already that shape advances its
+        //      orientation). Right-click opens the shape radial — handled in the main
+        //      loop, since it suspends gameplay. The hammer neither mines nor places.
+        mineActive_     = false;
+        mineProgress_   = 0.0f;
+        mineProgress01_ = 0.0f;
+        if (in.breakBlock && hit.hit) {
+            const Block hb = world_.blockAt(hit.block.x, hit.block.y, hit.block.z);
+            if (world_.registry().shapeable(hb.id)) {
+                const glm::vec3 frac = hit.point - glm::floor(hit.point);
+                // Default: orient the shape from where the player is looking. Hold
+                // Ctrl to instead step through the orientations on each click (only
+                // meaningful once the block already is the active shape).
+                const bool ctrlRotate = in.ctrl && shapeKindOf(hb.metadata) == buildShape_;
+                const uint8_t orient =
+                    ctrlRotate
+                        ? static_cast<uint8_t>((shapeOrientOf(hb.metadata) + 1) %
+                                               shapeOrientCount(buildShape_))
+                        : orientForPlacement(buildShape_, hit.normal, frac, cam.front());
+
+                // Double-slab: applying a slab to the OPPOSITE half of an existing
+                // slab fills it back into a full cube (bottom + top = block).
+                uint8_t meta = packShape(buildShape_, orient);
+                if (!ctrlRotate && buildShape_ == ShapeKind::Slab &&
+                    shapeKindOf(hb.metadata) == ShapeKind::Slab &&
+                    shapeOrientOf(hb.metadata) != (orient & 1)) {
+                    meta = 0; // full cube
+                }
+                reshapeBlockAt(hit.block, hb.id, meta);
+            }
+        }
+        return; // hammer: no mining, no placement
+    } else if (in.breakHeld && hit.hit) {
+        // ---- Mining: hold the left button to break, paced by the block's hardness
+        //      and the held tool's speed (creative breaks instantly). Aiming away or
+        //      at a new block restarts the timer, so you must dwell to break it. -----
         if (!mineActive_ || hit.block != mineBlock_) {
             mineBlock_   = hit.block;
             mineActive_  = true;
             mineProgress_ = 0.0f;
             const uint16_t tid  = world_.blockAt(hit.block.x, hit.block.y, hit.block.z).id;
-            const uint16_t held = inv.selectedStack().blockId;
-            mineNeeded_ = creativeMode_ ? 0.0f : world_.registry().breakSeconds(tid, held);
+            mineNeeded_ = creativeMode_ ? 0.0f : world_.registry().breakSeconds(tid, heldId);
         }
         if (mineNeeded_ >= 0.0f) { // not unbreakable
             mineProgress_ += dt;
@@ -279,18 +458,22 @@ void App::editBlocks(const InputState& in, float dt) {
                           : 0.0f;
 
     // ---- Right-click: open a chest you're looking at; otherwise place the held
-    //      block onto the hit face (unless it's a tool/non-placeable or clips you). --
+    //      block onto the hit face. Placed blocks are always full cubes — shapes are
+    //      applied afterwards with the hammer (left-click). ------------------------
     if (in.placeBlock && hit.hit) {
-        const uint16_t hitId = world_.blockAt(hit.block.x, hit.block.y, hit.block.z).id;
-        if (chestId_ != 0 && hitId == chestId_) {
+        const BlockRegistry& reg = world_.registry();
+        const Block hitBlock = world_.blockAt(hit.block.x, hit.block.y, hit.block.z);
+
+        if (chestId_ != 0 && hitBlock.id == chestId_) {
             openChestAt(hit.block);
             return;
         }
-        const uint16_t placeId = inv.selectedStack().blockId;
-        if (placeId != 0 && world_.registry().placeable(placeId)) {
+
+        const uint16_t placeId = heldId;
+        if (placeId != 0 && reg.placeable(placeId)) {
             const glm::ivec3 t = hit.block + hit.normal;
             if (!world_.isSolid(t.x, t.y, t.z) && !player_.occupies(t.x, t.y, t.z)) {
-                placeBlockAt(t, placeId);
+                placeBlockAt(t, placeId); // metadata 0 = full cube
             }
         }
     }
@@ -333,20 +516,38 @@ void App::breakBlockAt(const glm::ivec3& b) {
     }
     worldRenderer_.remeshChunks(dirty);
     seedLiquid(b.x, b.y, b.z); // liquid may flow into the new gap
+    // Break feedback: pop a burst of chips out of the gap. The effect can name its
+    // own texture; an empty texture uses the broken block's top face.
+    if (broken != 0) {
+        const uint32_t layer = breakEffect_.texture.empty()
+            ? world_.registry().faceLayer(broken, FacePosY)
+            : world_.registry().textureLayer(breakEffect_.texture);
+        particles_.spawnEffect(breakEffect_, glm::vec3(b) + glm::vec3(0.5f), layer);
+    }
 }
 
-void App::placeBlockAt(const glm::ivec3& t, uint16_t id) {
+void App::placeBlockAt(const glm::ivec3& t, uint16_t id, uint8_t metadata) {
     if (relightFuture_.valid()) {
         worldRenderer_.streamRemesh(relightFuture_.get());
     }
     worldRenderer_.streamBarrier();
 
-    const std::vector<glm::ivec3> dirty = world_.setBlock(t.x, t.y, t.z, Block{id, 0});
+    const std::vector<glm::ivec3> dirty = world_.setBlock(t.x, t.y, t.z, Block{id, metadata});
     if (!creativeMode_) {
         player_.inventory().takeFromSelected(); // placing uses one up (creative is infinite)
     }
     worldRenderer_.remeshChunks(dirty);
     seedLiquid(t.x, t.y, t.z);
+}
+
+void App::reshapeBlockAt(const glm::ivec3& b, uint16_t id, uint8_t metadata) {
+    if (relightFuture_.valid()) {
+        worldRenderer_.streamRemesh(relightFuture_.get());
+    }
+    worldRenderer_.streamBarrier();
+    // Keep the block id, only change its shape metadata; relight + remesh as usual.
+    const std::vector<glm::ivec3> dirty = world_.setBlock(b.x, b.y, b.z, Block{id, metadata});
+    worldRenderer_.remeshChunks(dirty);
 }
 
 void App::updateSurvival(float dt) {
@@ -721,6 +922,38 @@ void App::run(long maxFrames, const std::string& screenshotPath) {
         }
     }
 
+    // Debug hook (headless screenshots): VG_SHAPES_DEMO places a row of stone in
+    // each shape on the surface near spawn and frames it, to verify shaped geometry
+    // and 16px/block textures. Inert unless the variable is set.
+    if (std::getenv("VG_SHAPES_DEMO")) {
+        const glm::ivec3 size = world_.sizeInBlocks();
+        const int bx = size.x / 2, bz = size.z / 2;
+        const int gy = world_.surfaceHeight(bx, bz);
+        const uint16_t stone = world_.registry().idByName("stone");
+        struct DemoBlock { glm::ivec3 p; ShapeKind k; uint8_t o; };
+        const DemoBlock demo[] = {
+            {{bx + 0, gy, bz}, ShapeKind::Slab, 0},          // bottom slab
+            {{bx + 1, gy, bz}, ShapeKind::Slab, 1},          // top slab
+            {{bx + 2, gy, bz}, ShapeKind::Stairs, 0},        // stairs
+            {{bx + 3, gy, bz}, ShapeKind::Post, 1},          // upright post
+            {{bx + 4, gy, bz}, ShapeKind::Wall, 0},          // wall (connects below)
+            {{bx + 4, gy, bz + 1}, ShapeKind::Wall, 0},      // ...neighbour so an arm shows
+            {{bx + 5, gy, bz}, ShapeKind::VerticalSlab, 0},  // vertical slab
+            {{bx + 6, gy, bz}, ShapeKind::Cube, 0},          // full cube (reference)
+        };
+        std::vector<glm::ivec3> dirty;
+        for (const DemoBlock& d : demo) {
+            auto dd = world_.setBlock(d.p.x, d.p.y, d.p.z, Block{stone, packShape(d.k, d.o)});
+            dirty.insert(dirty.end(), dd.begin(), dd.end());
+        }
+        worldRenderer_.streamBarrier();
+        worldRenderer_.remeshChunks(dirty);
+        player_.setMode(PlayerController::Mode::FreeFly);
+        player_.teleport(glm::vec3(bx + 3.0f, gy + 2.0f, bz + 7.0f));
+        player_.camera().yaw   = -90.0f; // look toward -Z, at the row
+        player_.camera().pitch = -10.0f;
+    }
+
     while (!window_.shouldClose()) {
         window_.pollEvents();
 
@@ -733,11 +966,14 @@ void App::run(long maxFrames, const std::string& screenshotPath) {
         const InputState in = input_.poll();
 
         if (in.toggleMenu) {
-            // Esc closes an open chest / the inventory first, else toggles the menu.
+            // Esc closes an open chest / inventory / shape picker first, else menu.
             if (chestOpen_) {
                 toggleChest();
             } else if (inventoryOpen_) {
                 toggleInventory();
+            } else if (shapePickerOpen_) {
+                shapePickerOpen_ = false; // Esc cancels the radial (keeps the old shape)
+                input_.resetMouseDelta();
             } else {
                 togglePause();
             }
@@ -747,6 +983,25 @@ void App::run(long maxFrames, const std::string& screenshotPath) {
             if (chestOpen_) toggleChest();
             else toggleInventory();
         }
+        // Hammer shape radial: hold right-click (while holding the hammer) to open;
+        // the mouse slides the selector; release commits the highlighted shape. The
+        // cursor stays locked — selection is driven by mouse delta in buildShapePicker.
+        if (!paused_ && !inventoryOpen_ && !chestOpen_) {
+            const bool holdingHammer =
+                hammerId_ != 0 && player_.inventory().selectedStack().blockId == hammerId_;
+            if (shapePickerOpen_) {
+                if (in.placeReleased) {        // commit the highlighted shape
+                    buildShape_ = shapePickerSel_;
+                    shapePickerOpen_ = false;
+                    input_.resetMouseDelta();
+                }
+            } else if (holdingHammer && in.placeBlock) {
+                shapePickerOpen_ = true;       // open, starting on the current shape
+                shapePickerSel_  = buildShape_;
+                pickerSelPos_    = static_cast<float>(shapeIndex(buildShape_)) + 0.5f;
+                input_.resetMouseDelta();
+            }
+        }
         // G switches creative <-> survival (during gameplay only).
         if (in.toggleGameMode && !paused_ && !inventoryOpen_ && !chestOpen_) {
             toggleGameMode();
@@ -754,22 +1009,28 @@ void App::run(long maxFrames, const std::string& screenshotPath) {
         if (in.toggleDebug) {
             debugOverlay_ = !debugOverlay_;
         }
+        // F11 toggles fullscreen (and remembers the choice in settings).
+        if (in.toggleFullscreen) {
+            window_.setFullscreen(!window_.isFullscreen());
+            settings_.fullscreen = window_.isFullscreen();
+        }
         // Exponentially smoothed frame time so the overlay's FPS readout is
         // steady instead of flickering with every frame.
         smoothedDt_ += (dt - smoothedDt_) * 0.05f;
         // Gameplay only runs while no overlay (menu / inventory / chest) owns the
         // cursor.
-        if (!paused_ && !inventoryOpen_ && !chestOpen_) {
+        if (!paused_ && !inventoryOpen_ && !chestOpen_ && !shapePickerOpen_) {
             applyEquipmentStats(); // armour/trinket bonuses, current before movement
             player_.update(dt, in);
             editBlocks(in, dt);
             updateSurvival(dt);
             entityAnimTime_ += dt; // drive the test biped's walk cycle
-            // Dropped-item entities: fall, magnetise to the player, walk-over pickup.
-            // (Rendering is pending the EntityRenderer; until then this only carries
-            // mining overflow that wouldn't fit, so nothing is silently lost.)
+            // Dropped-item entities: fall, magnetise to the player, walk-over pickup
+            // (rendered as little spinning block cubes by the EntityRenderer pass).
             droppedItems_.update(dt, [this](int x, int y, int z) { return world_.isSolid(x, y, z); },
                                  player_.feetPosition(), player_.inventory());
+            // Block-break chip particles: gravity + settle, age out.
+            particles_.update(dt, [this](int x, int y, int z) { return world_.isSolid(x, y, z); });
             // Liquid flow: drain a budget of the flow queue a few times a second.
             liquidTimer_ += dt;
             if (liquidTimer_ >= 0.20f) {
@@ -869,14 +1130,85 @@ void App::run(long maxFrames, const std::string& screenshotPath) {
                                       glm::vec4(sky.lightDir, ambient),
                                       glm::vec4(lightCol, intensity));
 
-                // Test entity (ISSUES #13E E4): pose -> bake -> draw into the same
-                // scene pass (shares depth + the composite/fog), lit like the terrain.
+                // Entities into the same scene pass (shared depth + composite/fog,
+                // lit like the terrain): the test biped, dropped items as little
+                // spinning block cubes, and break particles as tiny block cubes.
                 {
                     const LocalPose pose = sampleClip(testEntity_, testWalk_, entityAnimTime_);
-                    const std::vector<EntityVertex> mesh =
+                    const std::vector<EntityVertex> bipedMesh =
                         bakeMesh(testEntity_, worldMatrices(testEntity_, pose));
-                    const std::vector<EntityRenderer::Draw> draws{
-                        {&mesh, glm::translate(glm::mat4(1.0f), entityPos_)}};
+                    std::vector<EntityRenderer::Draw> draws{
+                        {&bipedMesh, glm::translate(glm::mat4(1.0f), entityPos_)}};
+
+                    // One cube mesh per distinct block id (reused across items +
+                    // particles of that type); the map keeps the vertex data alive for
+                    // the record() call below.
+                    std::unordered_map<uint16_t, std::vector<EntityVertex>> cubes;
+                    auto cubeFor = [&](uint16_t id) -> const std::vector<EntityVertex>* {
+                        auto it = cubes.find(id);
+                        if (it == cubes.end())
+                            it = cubes.emplace(id, makeCubeMesh(world_.registry(), id, 0.5f)).first;
+                        return &it->second;
+                    };
+
+                    // Dropped items: a small block, bobbing and spinning about Y.
+                    for (const ItemEntity& it : droppedItems_.items()) {
+                        if (it.stack.blockId == 0) continue;
+                        const float bob = 0.09f * std::sin(it.spin * 1.5f);
+                        glm::mat4 m = glm::translate(glm::mat4(1.0f),
+                                                     it.pos + glm::vec3(0.0f, bob, 0.0f));
+                        m = glm::rotate(m, it.spin, glm::vec3(0.0f, 1.0f, 0.0f));
+                        m = glm::scale(m, glm::vec3(0.34f));
+                        draws.push_back({cubeFor(it.stack.blockId), m});
+                    }
+
+                    // Break particles: flat camera-facing billboards (2D chips), all
+                    // batched into one mesh in world space using the camera's right/up
+                    // axes (extracted from the view matrix). Each chip shows a 1/4
+                    // sub-rect of its block's top texture; lit as a top face (up normal).
+                    std::vector<EntityVertex> chips;
+                    if (particles_.size() > 0) {
+                        const glm::vec3 right(view[0][0], view[1][0], view[2][0]);
+                        const glm::vec3 up(view[0][1], view[1][1], view[2][1]);
+                        const glm::vec3 N(0.0f, 1.0f, 0.0f);
+                        const float ds = 0.25f;
+                        chips.reserve(particles_.size() * 6);
+                        for (const Particle& p : particles_.all()) {
+                            const uint32_t layer = p.layer;
+                            const float h = p.size;
+                            // Roll the billboard axes by the particle's spin for variety.
+                            const float cs = std::cos(p.spin), sn = std::sin(p.spin);
+                            const glm::vec3 r = right * cs + up * sn;
+                            const glm::vec3 u = up * cs - right * sn;
+                            const glm::vec3 c0 = p.pos - r * h - u * h;
+                            const glm::vec3 c1 = p.pos + r * h - u * h;
+                            const glm::vec3 c2 = p.pos + r * h + u * h;
+                            const glm::vec3 c3 = p.pos - r * h + u * h;
+                            const glm::vec2 v = p.uv0;
+                            auto push = [&](const glm::vec3& pp, glm::vec2 uv) {
+                                chips.push_back({pp, N, uv, layer});
+                            };
+                            push(c0, {v.x, v.y + ds});      push(c1, {v.x + ds, v.y + ds});
+                            push(c2, {v.x + ds, v.y});      push(c0, {v.x, v.y + ds});
+                            push(c2, {v.x + ds, v.y});      push(c3, {v.x, v.y});
+                        }
+                        if (!chips.empty()) draws.push_back({&chips, glm::mat4(1.0f)});
+                    }
+
+                    // Crack overlay: while mining, a slightly inflated cube of the
+                    // crack-stage texture over the targeted block (cutout shows only
+                    // the cracks). The stage tracks the break progress.
+                    std::vector<EntityVertex> crackMesh; // lives until record() below
+                    if (mineActive_ && mineProgress01_ > 0.0f) {
+                        const BlockRegistry& reg = world_.registry();
+                        const int stage = std::min(reg.crackStages() - 1,
+                            static_cast<int>(mineProgress01_ * reg.crackStages()));
+                        crackMesh = makeCubeMeshLayer(reg.crackLayer(stage), 0.504f);
+                        draws.push_back({&crackMesh,
+                            glm::translate(glm::mat4(1.0f),
+                                           glm::vec3(mineBlock_) + glm::vec3(0.5f))});
+                    }
+
                     entityRenderer_.record(cmd, frameIndex, extent, view, proj,
                                            glm::vec4(sky.lightDir, ambient),
                                            glm::vec4(lightCol, intensity), draws);
@@ -968,6 +1300,7 @@ void App::buildUi(const InputState& in) {
     const VkExtent2D ext = swapchain_.extent();
     ui_.begin(ext);
     Ui ui(ui_, in.cursor.x, in.cursor.y, in.pointerDown, in.pointerPressed);
+    ui.setSprites(world_.registry().uiSprites()); // 9-patch UI sprites (ISSUES #15)
 
     const float W = static_cast<float>(ext.width);
     const float H = static_cast<float>(ext.height);
@@ -983,7 +1316,7 @@ void App::buildUi(const InputState& in) {
     if (paused_) {
         ui.panel(0.0f, 0.0f, W, H, kUiDim); // dim the world behind the menu
         // Two columns centred as a pair: the options menu + the atmosphere tuner.
-        const float pw = 460.0f, tw = 460.0f, gap = 24.0f, ph = 668.0f;
+        const float pw = 460.0f, tw = 460.0f, gap = 24.0f, ph = 712.0f;
         const float startX = std::round((W - (pw + gap + tw)) * 0.5f);
         const float py = std::round((H - ph) * 0.5f);
         buildMenu(ui, startX, py, pw, ph);
@@ -992,6 +1325,8 @@ void App::buildUi(const InputState& in) {
         buildChest(ui, W, H, in);
     } else if (inventoryOpen_) {
         buildInventory(ui, W, H, in);
+    } else if (shapePickerOpen_) {
+        buildShapePicker(ui, W, H, in);
     } else {
         // Same camera the scene is drawn with, so the block wireframe lines up.
         const Camera& cam = player_.camera();
@@ -1033,23 +1368,21 @@ void App::buildBlockIndicator(Ui& ui, const glm::mat4& view, const glm::mat4& pr
     const RaycastHit hit = raycastVoxel(
         cam.position, cam.front(), kReach,
         [this](int x, int y, int z) { return world_.isTargetable(x, y, z); },
-        [this](int x, int y, int z) { return world_.modelInsetAt(x, y, z); });
+        [this](int x, int y, int z, ShapeBox out[]) { return world_.collisionBoxesAt(x, y, z, out); });
     if (!hit.hit) {
         return; // nothing in reach
     }
 
-    // The box spans the targeted block. For a thin Model block (the tree trunk)
-    // inset the X/Z so the outline hugs the rendered column, not the air cell.
-    // Nudge the corners out a hair so the lines hug the surface without z-fighting.
-    const float inflate = 0.006f;
-    const Block tb = world_.blockAt(hit.block.x, hit.block.y, hit.block.z);
-    const float ins = world_.registry().renderType(tb.id) == RenderType::Model
-                          ? world_.registry().modelInset(tb.id)
-                          : 0.0f;
-    const glm::vec3 mn =
-        glm::vec3(hit.block) + glm::vec3(ins, 0.0f, ins) - glm::vec3(inflate);
-    const glm::vec3 mx =
-        glm::vec3(hit.block) + glm::vec3(1.0f - ins, 1.0f, 1.0f - ins) + glm::vec3(inflate);
+    // Outline the block's ACTUAL shape — the union of its collision/render boxes
+    // (vg::shapeBoxes via World::collisionBoxesAt) — so a slab/stairs/post/wall
+    // highlights its real volume, matching what you collide with. Targetable
+    // non-solid foliage returns no boxes, so fall back to the full cell.
+    ShapeBox boxes[kMaxShapeBoxes];
+    int nboxes = world_.collisionBoxesAt(hit.block.x, hit.block.y, hit.block.z, boxes);
+    if (nboxes == 0) {
+        boxes[0] = {glm::vec3(hit.block), glm::vec3(hit.block) + glm::vec3(1.0f)};
+        nboxes = 1;
+    }
 
     // Project a world point to HUD pixels; false if it is behind the camera.
     auto project = [&](const glm::vec3& wp, glm::vec2& out) -> bool {
@@ -1060,56 +1393,40 @@ void App::buildBlockIndicator(Ui& ui, const glm::mat4& view, const glm::mat4& pr
         return true;
     };
 
-    // Eight corners, indexed by bit (x=1, y=2, z=4).
-    glm::vec2 p[8];
-    bool ok[8];
-    for (int i = 0; i < 8; ++i) {
-        const glm::vec3 corner((i & 1) ? mx.x : mn.x, (i & 2) ? mx.y : mn.y,
-                               (i & 4) ? mx.z : mn.z);
-        ok[i] = project(corner, p[i]);
-    }
-
-    // A face is "visible" only if it both faces the camera AND is actually drawn
-    // by the mesher — i.e. its neighbour doesn't bury it. A face is buried only by
-    // an OPAQUE full cube or another cell of the same block (matching the mesher's
-    // culling): a thin/non-opaque neighbour like the tree trunk does NOT bury it,
-    // so e.g. the grass under a trunk still highlights. Faces: negX,posX,negY,posY,negZ,posZ.
-    const glm::ivec3 b = hit.block;
-    const uint16_t hitId = world_.blockAt(b.x, b.y, b.z).id;
-    auto buriedAt = [&](int dx, int dy, int dz) {
-        const uint16_t nb = world_.blockAt(b.x + dx, b.y + dy, b.z + dz).id;
-        return nb == hitId || world_.registry().isOpaque(nb);
-    };
-    const bool exposed[6] = {
-        !buriedAt(-1, 0, 0), !buriedAt(1, 0, 0), !buriedAt(0, -1, 0),
-        !buriedAt(0, 1, 0),  !buriedAt(0, 0, -1), !buriedAt(0, 0, 1),
-    };
-    const glm::vec3 eye = cam.position;
-    const bool front[6] = {
-        eye.x < mn.x, eye.x > mx.x, eye.y < mn.y,
-        eye.y > mx.y, eye.z < mn.z, eye.z > mx.z,
-    };
-    bool vis[6];
-    for (int i = 0; i < 6; ++i) {
-        vis[i] = front[i] && exposed[i];
-    }
-    // Each edge: its two corner indices + the two faces it borders.
+    // Each edge: its two corner indices (bit x=1,y=2,z=4) + the two faces it borders.
     struct Edge { int a, b, f0, f1; };
     static const Edge edges[12] = {
         {0, 1, 2, 4}, {2, 3, 3, 4}, {4, 5, 2, 5}, {6, 7, 3, 5}, // x edges
         {0, 2, 0, 4}, {1, 3, 1, 4}, {4, 6, 0, 5}, {5, 7, 1, 5}, // y edges
         {0, 4, 0, 2}, {1, 5, 1, 2}, {2, 6, 0, 3}, {3, 7, 1, 3}, // z edges
     };
-    auto visible = [&](const Edge& e) {
-        return (vis[e.f0] || vis[e.f1]) && ok[e.a] && ok[e.b];
+    const float inflate = 0.006f; // nudge out a hair to avoid z-fighting the surface
+    const glm::vec3 eye = cam.position;
+
+    // Draw one box's camera-facing edges at a given thickness/colour. Only edges of
+    // a box face turned toward the camera are drawn (a clean silhouette per box).
+    auto drawBox = [&](const ShapeBox& bx, float thick, const glm::vec4& col) {
+        const glm::vec3 mn = bx.lo - glm::vec3(inflate);
+        const glm::vec3 mx = bx.hi + glm::vec3(inflate);
+        glm::vec2 p[8];
+        bool ok[8];
+        for (int i = 0; i < 8; ++i) {
+            const glm::vec3 corner((i & 1) ? mx.x : mn.x, (i & 2) ? mx.y : mn.y,
+                                   (i & 4) ? mx.z : mn.z);
+            ok[i] = project(corner, p[i]);
+        }
+        const bool front[6] = {eye.x < mn.x, eye.x > mx.x, eye.y < mn.y,
+                               eye.y > mx.y, eye.z < mn.z, eye.z > mx.z};
+        for (const Edge& e : edges) {
+            if ((front[e.f0] || front[e.f1]) && ok[e.a] && ok[e.b]) {
+                ui.line(p[e.a], p[e.b], thick, col);
+            }
+        }
     };
-    // Outlined wireframe: a thin cream line on a slightly wider charcoal halo.
-    for (const Edge& e : edges) {
-        if (visible(e)) ui.line(p[e.a], p[e.b], 5.0f, kCharcoal);
-    }
-    for (const Edge& e : edges) {
-        if (visible(e)) ui.line(p[e.a], p[e.b], 2.0f, kCream);
-    }
+    // Halo pass over all boxes first, then the cream lines on top, so one box's
+    // halo never paints over another's line.
+    for (int i = 0; i < nboxes; ++i) drawBox(boxes[i], 5.0f, kCharcoal);
+    for (int i = 0; i < nboxes; ++i) drawBox(boxes[i], 2.0f, kCream);
 }
 
 namespace {
@@ -1117,17 +1434,15 @@ namespace {
 // `highlight`), then the item's isometric icon and its stack count (if > 1). Shared
 // by the HUD hotbar and the full inventory screen so both look identical.
 void drawSlot(Ui& ui, const BlockRegistry& reg, float x, float y, float slot,
-              float radius, const ItemStack& st, bool highlight) {
-    const float dark  = kFrameThin;
-    const float cream = highlight ? kFrameThick : kFrameThin;
-    ui.roundRectOutline(x, y, slot, slot, radius, dark, kCharcoal);
-    ui.roundRectOutline(x + dark, y + dark, slot - 2 * dark, slot - 2 * dark,
-                        radius - dark, cream, kCream);
+              float /*radius*/, const ItemStack& st, bool highlight) {
+    ui.box(UiBox::Eq, x, y, slot, slot); // 9-patch slot background
+    if (highlight) {
+        ui.box(UiBox::Border, x, y, slot, slot, kLilac); // selected / hovered ring
+    }
     if (st.empty()) {
         return;
     }
-    const float ringMax = kFrameThin + kFrameThick; // size icons to clear the thickest ring
-    const float iconR   = (slot - 2 * ringMax) * 0.5f - 4.0f;
+    const float iconR = slot * 0.5f - 11.0f; // inset to clear the slot border
     ui.isoCube(x + slot * 0.5f, y + slot * 0.5f, iconR,
                reg.faceLayer(st.blockId, FacePosY), reg.faceLayer(st.blockId, FacePosX));
     if (st.count > 1) {
@@ -1159,15 +1474,15 @@ void App::buildHotbar(Ui& ui, float w, float h) {
         drawSlot(ui, reg, x, y, slot, radius, inv.slot(i), i == inv.selected());
     }
 
-    // Health bar (survival only — creative is invincible). A red fill on a charcoal
-    // track, sized to the hotbar width, sitting just above the slot row.
+    // Health bar (survival only — creative is invincible). A small red fill on a
+    // charcoal track in the bottom-left corner, above the game-mode tag.
     if (!creativeMode_) {
         const float frac = std::clamp(player_.health() / player_.maxHealth(), 0.0f, 1.0f);
-        const float bh = 8.0f, by = y - 14.0f;
-        ui.roundRect(x0 - 1.0f, by - 1.0f, total + 2.0f, bh + 2.0f, 3.0f, kCharcoal);
-        ui.roundRect(x0, by, total, bh, 3.0f, glm::vec4(0.16f, 0.05f, 0.05f, 0.9f));
+        const float bw = 120.0f, bh = 7.0f, bx = 14.0f, by = h - 44.0f;
+        ui.roundRect(bx - 1.0f, by - 1.0f, bw + 2.0f, bh + 2.0f, 3.0f, kCharcoal);
+        ui.roundRect(bx, by, bw, bh, 3.0f, glm::vec4(0.16f, 0.05f, 0.05f, 0.9f));
         if (frac > 0.0f) {
-            ui.roundRect(x0, by, total * frac, bh, 3.0f, glm::vec4(0.82f, 0.18f, 0.20f, 1.0f));
+            ui.roundRect(bx, by, bw * frac, bh, 3.0f, glm::vec4(0.82f, 0.18f, 0.20f, 1.0f));
         }
     }
 
@@ -1220,7 +1535,7 @@ void App::buildInventory(Ui& ui, float w, float h, const InputState& in) {
     }
 
     // Equipment column to the left, crafting list to the right of the inventory.
-    buildEquipment(ui, px - 18.0f - 84.0f, py, in);
+    buildEquipment(ui, px - 18.0f, py, in); // right-anchored beside the inventory
     buildCrafting(ui, px + panelW + 18.0f, py, 250.0f, in);
 
     // The cursor-held stack follows the mouse (icon only, no frame).
@@ -1235,66 +1550,145 @@ void App::buildInventory(Ui& ui, float w, float h, const InputState& in) {
     }
 }
 
+void App::buildShapePicker(Ui& ui, float w, float h, const InputState& in) {
+    ui.panel(0.0f, 0.0f, w, h, kUiDim); // dim the world behind the radial
+    const int   n = kPickerShapeCount;
+    const float cell = 96.0f, gap = 12.0f, pad = 22.0f, titleH = 34.0f, hintH = 22.0f;
+    const float rowW = n * cell + (n - 1) * gap;
+    const float panelW = rowW + 2.0f * pad;
+    const float panelH = titleH + cell + hintH + 2.0f * pad;
+    const float px = std::round((w - panelW) * 0.5f);
+    const float py = std::round((h - panelH) * 0.5f);
+
+    // The mouse slides the selector (the cursor stays locked, so we use the raw
+    // horizontal delta). ~110 px of movement steps one cell. Clamp to the row.
+    pickerSelPos_ += in.look.x / 110.0f;
+    pickerSelPos_ = std::clamp(pickerSelPos_, 0.0f, static_cast<float>(n) - 0.001f);
+    const int selIdx = static_cast<int>(pickerSelPos_);
+    shapePickerSel_ = kPickerShapes[selIdx];
+
+    ui.box(UiBox::Bg2, px, py, panelW, panelH);
+    ui.label(px + pad, py + pad - 4.0f, "Build Shape", 0.6f, kUiText);
+
+    const float rowX = px + pad, rowY = py + pad + titleH;
+    for (int i = 0; i < n; ++i) {
+        const float cx = rowX + i * (cell + gap);
+        const bool on = (i == selIdx);
+        ui.roundRect(cx, rowY, cell, cell, 10.0f, on ? kCream : kCharcoal);
+        ui.labelCentered(cx + cell * 0.5f, rowY + cell * 0.5f - 6.0f,
+                         shapeName(kPickerShapes[i]), 0.5f, on ? kCharcoal : kCream);
+    }
+    ui.labelCentered(px + panelW * 0.5f, py + panelH - pad - 4.0f,
+                     "move the mouse to choose  -  release to set", 0.4f, kUiText);
+}
+
 void App::buildCrafting(Ui& ui, float x, float y, float w, const InputState& in) {
     const BlockRegistry& reg = world_.registry();
     Inventory& inv = player_.inventory();
-    const std::vector<int> can = crafting_.craftable(inv);
+    const std::vector<Crafting::Recipe>& recipes = crafting_.recipes();
+    const int total = static_cast<int>(recipes.size());
 
     const float pad = 16.0f, rowH = 46.0f, titleH = 28.0f;
-    const int   shown = std::min(static_cast<int>(can.size()), 8); // cap the visible list
-    const float panelH = titleH + 2.0f * pad +
-                         (shown > 0 ? shown * rowH : rowH);
-    ui.frame(x, y, w, panelH, kPanelFill, kCream, kFrameThick, kFrameRadius);
+    const int   maxVisible = 8;
+    const int   visible = total > 0 ? std::min(total, maxVisible) : 1;
+    const float panelH = titleH + 2.0f * pad + visible * rowH;
+    ui.box(UiBox::Bg2, x, y, w, panelH);
     ui.label(x + pad, y + pad - 4.0f, "Crafting", 0.6f, kUiText);
 
-    if (can.empty()) {
-        ui.label(x + pad, y + pad + titleH + 4.0f, "(nothing to craft)", 0.42f, kUiText);
+    if (total == 0) {
+        ui.label(x + pad, y + pad + titleH + 4.0f, "(no recipes)", 0.42f, kUiText);
         return;
     }
 
-    const float rx = x + pad, rw = w - 2.0f * pad;
+    // Scroll with the mouse wheel (free while the inventory screen owns the cursor;
+    // wheel up scrolls up). Clamp to the list bounds.
+    const int maxScroll = std::max(0, total - maxVisible);
+    craftScroll_ = std::clamp(craftScroll_ - in.hotbarScroll, 0, maxScroll);
+
+    const float rx = x + pad, rw = w - 2.0f * pad, iconR = 15.0f;
     float ry = y + pad + titleH;
-    for (int i = 0; i < shown; ++i) {
-        const Crafting::Recipe& r = crafting_.recipes()[static_cast<size_t>(can[static_cast<size_t>(i)])];
-        // Row background highlights on hover; clicking anywhere on it crafts one.
+    int hoverIdx = -1;
+    for (int row = 0; row < maxVisible; ++row) {
+        const int idx = craftScroll_ + row;
+        if (idx >= total) break;
+        const Crafting::Recipe& r = recipes[static_cast<size_t>(idx)];
+        const bool craftable = Crafting::canCraft(r, inv);
         const bool hov = ui.hovered(rx, ry, rw, rowH - 8.0f);
-        ui.roundRect(rx, ry, rw, rowH - 8.0f, 8.0f, hov ? kCream : kCharcoal);
-        const float iconR = 15.0f;
+
+        ui.box(UiBox::Bg3, rx, ry, rw, rowH - 8.0f);
+        if (craftable && hov) ui.box(UiBox::Border, rx, ry, rw, rowH - 8.0f, kLilac);
         ui.isoCube(rx + iconR + 6.0f, ry + (rowH - 8.0f) * 0.5f, iconR,
                    reg.faceLayer(r.output, FacePosY), reg.faceLayer(r.output, FacePosX));
-        const glm::vec4 txt = hov ? kCharcoal : kCream;
         std::string label = r.name;
         if (r.outCount > 1) label += " x" + std::to_string(r.outCount);
-        ui.label(rx + 2.0f * iconR + 14.0f, ry + 6.0f, label, 0.46f, txt);
-        if (hov && in.pointerPressed) {
+        ui.label(rx + 2.0f * iconR + 14.0f, ry + 6.0f, label, 0.46f, kCream);
+
+        if (!craftable) {
+            // Darken the whole row (icon + text) so un-craftable recipes read as
+            // disabled but still visible.
+            ui.roundRect(rx, ry, rw, rowH - 8.0f, 8.0f, kUiDim);
+        } else if (hov && in.pointerPressed) {
             Crafting::craft(r, inv);
         }
+        if (hov) hoverIdx = idx;
         ry += rowH;
+    }
+    // Scroll affordance: a hint when the list overflows the visible window.
+    if (maxScroll > 0) {
+        ui.labelCentered(x + w * 0.5f, y + panelH - pad + 1.0f, "scroll for more",
+                         0.34f, kUiText);
+    }
+
+    // Hover tooltip: what the recipe consumes (and whether you have enough).
+    if (hoverIdx >= 0) {
+        const Crafting::Recipe& r = recipes[static_cast<size_t>(hoverIdx)];
+        std::string need = "Needs: ";
+        for (size_t k = 0; k < r.inputs.size(); ++k) {
+            const uint16_t iid = r.inputs[k].first;
+            const int want = r.inputs[k].second, have = inv.count(iid);
+            need += std::to_string(want) + "x " + reg.get(iid).name +
+                    " (" + std::to_string(have) + ")";
+            if (k + 1 < r.inputs.size()) need += ",  ";
+        }
+        const float tw = std::max(120.0f, 8.0f * static_cast<float>(need.size()) + 24.0f);
+        const float tx = std::min(in.cursor.x + 14.0f, x + w - tw);
+        const float ty = in.cursor.y + 14.0f;
+        ui.frame(tx, ty, tw, 30.0f, kPanelFill, kCream, kFrameThin, 8.0f);
+        ui.label(tx + 10.0f, ty + 7.0f, need, 0.4f, kUiText);
     }
 }
 
-void App::buildEquipment(Ui& ui, float x, float y, const InputState& in) {
+void App::buildEquipment(Ui& ui, float rightX, float y, const InputState& in) {
     const BlockRegistry& reg = world_.registry();
     const float slot = 54.0f, gap = 8.0f, radius = 16.0f;
-    const float pad = 15.0f, titleH = 26.0f, secGap = 14.0f;
-    const int   armor = Equipment::kArmorSlots, trinks = Equipment::kTrinketSlots;
-    const float panelW = slot + 2.0f * pad;
-    const float panelH = titleH + armor * slot + (armor - 1) * gap + secGap +
-                         trinks * slot + (trinks - 1) * gap + 2.0f * pad;
-    ui.frame(x, y, panelW, panelH, kPanelFill, kCream, kFrameThick, kFrameRadius);
+    const float pad = 15.0f, titleH = 26.0f, secGap = 20.0f, subH = 16.0f;
+    // Boots (the lone armour slot) above the trinkets laid out in a compact 2-wide
+    // grid (ISSUES #15 — trimmed armour + tighter trinket space).
+    const int   cols = 2;
+    const int   trinkRows = (Equipment::kTrinketSlots + cols - 1) / cols;
+    const float gridW = cols * slot + (cols - 1) * gap;
+    const float panelW = gridW + 2.0f * pad;
+    const float panelH = titleH + slot + secGap + subH +
+                         trinkRows * slot + (trinkRows - 1) * gap + 2.0f * pad;
+    const float x = rightX - panelW; // right-anchored beside the inventory
+    ui.box(UiBox::Bg2, x, y, panelW, panelH);
     ui.label(x + pad - 2.0f, y + pad - 4.0f, "Gear", 0.55f, kUiText);
 
-    const float sx = x + pad;
-    float sy = y + pad + titleH;
-    auto eqCell = [&](int idx, float cy) {
+    auto eqCell = [&](int idx, float cx, float cy) {
         const ItemStack& s = equipment_.slots[static_cast<size_t>(idx)];
-        const bool hov = ui.hovered(sx, cy, slot, slot);
-        drawSlot(ui, reg, sx, cy, slot, radius, s, hov);
+        const bool hov = ui.hovered(cx, cy, slot, slot);
+        drawSlot(ui, reg, cx, cy, slot, radius, s, hov);
         if (hov && in.pointerPressed) clickEquipSlot(idx);
     };
-    for (int i = 0; i < armor; ++i) eqCell(i, sy + i * (slot + gap));   // head/chest/legs/feet
-    sy += armor * (slot + gap) + secGap;
-    for (int i = 0; i < trinks; ++i) eqCell(armor + i, sy + i * (slot + gap)); // trinkets
+    const float sx = x + pad;
+    float sy = y + pad + titleH;
+    eqCell(0, sx + (gridW - slot) * 0.5f, sy); // boots, centred over the grid
+    sy += slot + secGap;
+    ui.label(sx, sy - subH + 2.0f, "Trinkets", 0.42f, kUiText);
+    for (int i = 0; i < Equipment::kTrinketSlots; ++i) {
+        const int r = i / cols, c = i % cols;
+        eqCell(Equipment::kArmorSlots + i, sx + c * (slot + gap), sy + r * (slot + gap));
+    }
 }
 
 void App::clickSlot(ItemStack& s) {
@@ -1431,7 +1825,7 @@ void App::buildDebugOverlay(Ui& ui) {
     const RaycastHit hit = raycastVoxel(
         cam.position, cam.front(), kReach,
         [this](int x, int y, int z) { return world_.isTargetable(x, y, z); },
-        [this](int x, int y, int z) { return world_.modelInsetAt(x, y, z); });
+        [this](int x, int y, int z, ShapeBox out[]) { return world_.collisionBoxesAt(x, y, z, out); });
 
     const double elapsed = glfwGetTime();
     const int fps = static_cast<int>(std::lround(1.0f / std::max(smoothedDt_, 1e-5f)));
@@ -1551,6 +1945,21 @@ void App::buildMenu(Ui& ui, float px, float py, float pw, float ph) {
         y += 42.0f;
         return clicked;
     };
+
+    // Game mode (G key) + fullscreen (F11), side by side on one row.
+    {
+        const float bw = (cw - 8.0f) * 0.5f;
+        if (ui.button(lx, y, bw, 34.0f,
+                      std::string("Mode: ") + (creativeMode_ ? "Creative" : "Survival"))) {
+            toggleGameMode();
+        }
+        if (ui.button(lx + bw + 8.0f, y, bw, 34.0f,
+                      std::string("Fullscreen: ") + (window_.isFullscreen() ? "On" : "Off"))) {
+            window_.setFullscreen(!window_.isFullscreen());
+            settings_.fullscreen = window_.isFullscreen();
+        }
+        y += 42.0f;
+    }
 
     // Pixelate 0..16 (integer).
     const int pv = static_cast<int>(std::lround(

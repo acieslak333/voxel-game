@@ -71,6 +71,26 @@ void Window::setCursorDisabled(bool disabled) const {
     }
 }
 
+void Window::setFullscreen(bool on) {
+    if (on == fullscreen_) return;
+    if (on) {
+        // Remember the windowed rect so we can restore it later.
+        glfwGetWindowPos(window_, &winX_, &winY_);
+        glfwGetWindowSize(window_, &winW_, &winH_);
+        GLFWmonitor* mon = glfwGetPrimaryMonitor();
+        const GLFWvidmode* mode = mon ? glfwGetVideoMode(mon) : nullptr;
+        if (mon && mode) {
+            glfwSetWindowMonitor(window_, mon, 0, 0, mode->width, mode->height,
+                                 mode->refreshRate);
+        }
+    } else {
+        const int w = winW_ > 0 ? winW_ : 1280, h = winH_ > 0 ? winH_ : 720;
+        glfwSetWindowMonitor(window_, nullptr, winX_, winY_, w, h, 0);
+    }
+    fullscreen_ = on;
+    framebufferResized_ = true; // rebuild the swapchain at the new size
+}
+
 void Window::waitWhileMinimized() const {
     int w = 0, h = 0;
     glfwGetFramebufferSize(window_, &w, &h);

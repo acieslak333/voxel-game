@@ -258,6 +258,22 @@ void TerrainGenerator::loadConfig(const std::string& assetDir, const BlockRegist
             b.snow        = bn["snow"] ? bn["snow"].as<bool>() : false;
             b.treeDensity = bn["trees"] ? bn["trees"].as<float>() : 0.0f;
             b.bushDensity = bn["bushes"] ? bn["bushes"].as<float>() : 0.0f;
+            if (bn["plant"]) {
+                const std::string p = bn["plant"].as<std::string>();
+                b.plant = p == "none"   ? FloraKind::None
+                        : p == "grass"  ? FloraKind::GrassFlower
+                        : p == "forest" ? FloraKind::Forest
+                        : p == "desert" ? FloraKind::Desert
+                        : FloraKind::Bush;
+            }
+            if (bn["tree"]) {
+                const std::string t = bn["tree"].as<std::string>();
+                b.tree = t == "birch"  ? TreeKind::Birch
+                       : t == "pine"   ? TreeKind::Pine
+                       : t == "maple"  ? TreeKind::Maple
+                       : t == "willow" ? TreeKind::Willow
+                       : TreeKind::Oak;
+            }
             loaded.push_back(b);
         }
         if (!loaded.empty()) {
@@ -456,6 +472,8 @@ ColumnInfo TerrainGenerator::columnInfo(int wx, int wz) const {
     ci.fillerId = b.fillerId;
     ci.treeDensity = b.treeDensity;
     ci.bushDensity = b.bushDensity;
+    ci.plantKind   = b.plant;
+    ci.treeKind    = b.tree;
 
     if (ci.height < ci.waterLevel) {
         // Submerged (ocean or under a perched lake): floor block, nothing grows.
@@ -463,6 +481,7 @@ ColumnInfo TerrainGenerator::columnInfo(int wx, int wz) const {
         ci.fillerId = oceanFillerId_;
         ci.treeDensity = 0.0f;
         ci.bushDensity = 0.0f;
+        ci.plantKind   = FloraKind::None;
     } else if (b.snow || rel > snowLineRel_) {
         ci.topId = snowId_; // cold biome, or above the snow line on any peak
     }

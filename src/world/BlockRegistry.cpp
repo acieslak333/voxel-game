@@ -21,37 +21,48 @@ T valueOr(const YAML::Node& node, const char* key, T fallback) {
 //   all     -> every face
 //   top     -> +Y     bottom -> -Y     side -> the four horizontal faces
 //   <face>  -> an explicit single face: negx/posx/negy/posy/negz/posz
-// Returns through `intern` so the registry can dedup across blocks.
+// A key's value is either a single filename or a SEQUENCE of filenames; a
+// sequence makes that face a random-variant face (the mesher picks one variant
+// per block position). Returns through `intern` so the registry can dedup.
 template <typename InternFn>
 void applyTextures(const YAML::Node& tex, BlockProperties& props, InternFn intern) {
     if (!tex || !tex.IsMap()) {
         return; // no textures (e.g. air)
     }
-    auto setFace = [&](Face f, const std::string& file) {
-        props.faceLayers[static_cast<size_t>(f)] = intern(file);
+    // A face value -> the list of texture-array layers it maps to (one per variant).
+    auto layersOf = [&](const YAML::Node& n) -> std::vector<uint32_t> {
+        std::vector<uint32_t> layers;
+        if (n.IsSequence()) {
+            for (const YAML::Node& e : n) layers.push_back(intern(e.as<std::string>()));
+        } else {
+            layers.push_back(intern(n.as<std::string>()));
+        }
+        return layers;
+    };
+    auto setFace = [&](Face f, const YAML::Node& n) {
+        props.faceLayers[static_cast<size_t>(f)] = layersOf(n);
     };
 
     if (tex["all"]) {
-        const uint32_t layer = intern(tex["all"].as<std::string>());
-        props.faceLayers.fill(layer);
+        props.faceLayers.fill(layersOf(tex["all"]));
     }
     if (tex["side"]) {
-        const uint32_t layer = intern(tex["side"].as<std::string>());
-        props.faceLayers[FaceNegX] = layer;
-        props.faceLayers[FacePosX] = layer;
-        props.faceLayers[FaceNegZ] = layer;
-        props.faceLayers[FacePosZ] = layer;
+        const std::vector<uint32_t> layers = layersOf(tex["side"]);
+        props.faceLayers[FaceNegX] = layers;
+        props.faceLayers[FacePosX] = layers;
+        props.faceLayers[FaceNegZ] = layers;
+        props.faceLayers[FacePosZ] = layers;
     }
-    if (tex["top"])    setFace(FacePosY, tex["top"].as<std::string>());
-    if (tex["bottom"]) setFace(FaceNegY, tex["bottom"].as<std::string>());
+    if (tex["top"])    setFace(FacePosY, tex["top"]);
+    if (tex["bottom"]) setFace(FaceNegY, tex["bottom"]);
 
     // Explicit single-face overrides for anything irregular.
-    if (tex["negx"]) setFace(FaceNegX, tex["negx"].as<std::string>());
-    if (tex["posx"]) setFace(FacePosX, tex["posx"].as<std::string>());
-    if (tex["negy"]) setFace(FaceNegY, tex["negy"].as<std::string>());
-    if (tex["posy"]) setFace(FacePosY, tex["posy"].as<std::string>());
-    if (tex["negz"]) setFace(FaceNegZ, tex["negz"].as<std::string>());
-    if (tex["posz"]) setFace(FacePosZ, tex["posz"].as<std::string>());
+    if (tex["negx"]) setFace(FaceNegX, tex["negx"]);
+    if (tex["posx"]) setFace(FacePosX, tex["posx"]);
+    if (tex["negy"]) setFace(FaceNegY, tex["negy"]);
+    if (tex["posy"]) setFace(FacePosY, tex["posy"]);
+    if (tex["negz"]) setFace(FaceNegZ, tex["negz"]);
+    if (tex["posz"]) setFace(FacePosZ, tex["posz"]);
 }
 
 // Parse an [r, g, b] colour sequence (0..1 floats); absent/malformed -> fallback.
@@ -160,8 +171,22 @@ BlockRegistry::BlockRegistry(const std::string& blocksFile) {
                                      "' (expected cube/cross/leafcube/model)");
         }
 
-        applyTextures(entry["textures"], props,
-                      [this](const std::string& f) { return internTexture(f); });
+        // Shapeable: can the hammer reshape this into a slab/stairs/post/wall?
+        // Only full solid opaque cubes by default — liquids, foliage (cross/
+        // leafcube) and thin models are excluded. Override with `shapeable:`.
+        props.shapeable = valueOr(entry, "shapeable",
+                                  props.solid && props.opaque &&
+                                  props.renderType == RenderType::Cube);
+
+        // Textures. With an explicit `textures:` map, faces are assigned from it.
+        // Otherwise the block falls back to the naming convention ${name}.block.png
+        // on every face (so simple single-texture blocks need no `textures:` block).
+        if (entry["textures"]) {
+            applyTextures(entry["textures"], props,
+                          [this](const std::string& f) { return internTexture(f); });
+        } else if (props.name != "air") {
+            props.faceLayers.fill({internTexture(props.name + ".block.png")});
+        }
 
         const auto id = static_cast<uint16_t>(blocks_.size());
         if (nameToId_.count(props.name)) {
@@ -178,6 +203,25 @@ BlockRegistry::BlockRegistry(const std::string& blocksFile) {
         throw std::runtime_error("BlockRegistry: the first block in '" + blocksFile +
                                  "' must be a non-solid, non-opaque block named 'air'");
     }
+
+    // Block-break crack overlays: extra texture-array layers not owned by any block.
+    // The mining feedback draws the matching stage over the targeted block (ISSUES
+    // #13M). Interned after the blocks so they sit at the end of the array.
+    crackBaseLayer_ = static_cast<int>(texturePaths_.size());
+    for (int s = 0; s < kCrackStages; ++s) {
+        internTexture("crack_" + std::to_string(s) + ".block.png");
+    }
+
+    // 9-patch UI sprites (ISSUES #15 UI overhaul): more extra array layers, drawn
+    // sliced by the UI. Interned by name -> their layers exposed via uiSprites().
+    uiSprites_.border   = internTexture("ui_border.block.png");
+    uiSprites_.eq       = internTexture("ui_eq.block.png");
+    uiSprites_.bg       = internTexture("ui_bg.block.png");
+    uiSprites_.bg2      = internTexture("ui_bg2.block.png");
+    uiSprites_.bg3      = internTexture("ui_bg3.block.png");
+    uiSprites_.button   = internTexture("ui_button.block.png");
+    uiSprites_.slider   = internTexture("ui_slider.block.png");
+    uiSprites_.sliderBg = internTexture("ui_slider_bg.block.png");
 }
 
 const BlockProperties& BlockRegistry::get(uint16_t id) const {

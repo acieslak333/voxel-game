@@ -59,11 +59,15 @@ public:
     // smoothLighting: true folds per-corner ambient occlusion + averaged sky
     // light into each vertex (soft, modern look); false uses only the flat
     // directional top/side/bottom shade (the simpler original look).
+    // worldOrigin: this chunk's minimum-corner block coordinate in world space
+    // (chunkCoord * kChunkSize). Used to seed the per-block texture-variant hash
+    // so the choice is stable and seamless across chunk boundaries.
     [[nodiscard]] static MeshData greedyMesh(const Chunk& chunk,
                                              const BlockRegistry& registry,
                                              const NeighborSampler& neighbor,
                                              const LightSampler& light,
-                                             bool smoothLighting);
+                                             bool smoothLighting,
+                                             const glm::ivec3& worldOrigin);
 };
 
 } // namespace vg

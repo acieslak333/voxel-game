@@ -20,7 +20,9 @@ struct InputState {
 
     bool breakBlock = false;    // left mouse: destroy the looked-at block (edge)
     bool breakHeld  = false;    // left mouse held (hold-to-break mining; level)
-    bool placeBlock = false;    // right mouse: place against it (edge)
+    bool placeBlock = false;    // right mouse: place against it (edge — press)
+    bool placeHeld  = false;    // right mouse held (level — drives the hammer radial)
+    bool placeReleased = false; // right mouse released this frame (edge — commits the radial)
     int  selectSlot = 0;        // number key 1..9 held this frame (0 = none)
     int  hotbarScroll = 0;      // mouse wheel: hotbar slots to advance (+ = next,
                                 // - = previous); 0 if the wheel didn't move
@@ -29,6 +31,8 @@ struct InputState {
     bool toggleInventory = false; // E pressed this frame (open/close the inventory)
     bool toggleGameMode = false;  // G pressed this frame (creative <-> survival)
     bool toggleDebug = false;   // F1 pressed this frame (show/hide debug overlay)
+    bool toggleFullscreen = false; // F11 pressed this frame
+    bool ctrl = false;          // LeftCtrl held (hammer: rotate-on-click instead of face-from-look)
     glm::vec2 cursor{0.0f};     // absolute cursor position in window pixels
     bool pointerDown    = false; // left mouse held (UI dragging)
     bool pointerPressed = false; // left mouse pressed this frame (UI click)
@@ -65,6 +69,7 @@ private:
     bool   prevInvKey_      = false; // E (inventory), for edge detection
     bool   prevGKey_        = false; // G (game mode), for edge detection
     bool   prevF1Key_       = false; // F1, for edge detection
+    bool   prevF11Key_      = false; // F11, for edge detection
 };
 
 } // namespace vg

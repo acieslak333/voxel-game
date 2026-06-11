@@ -2,6 +2,7 @@
 
 #include "world/BlockRegistry.h"
 #include "world/Chunk.h"
+#include "world/Shape.h"
 
 #include <algorithm>
 #include <array>
@@ -24,6 +25,39 @@ float faceShade(int axis, bool positive) {
 // Map (axis, sign) to the Face enum used by the block registry.
 int faceIndex(int axis, bool positive) {
     return axis * 2 + (positive ? 1 : 0);
+}
+
+// Deterministic spatial hash of a world block position -> a 32-bit value used to
+// pick a texture variant for a multi-texture face. Pure function of position, so
+// the choice is stable across re-meshes and identical in neighbouring chunks (no
+// seam at chunk borders). Standard xor-of-large-primes mix + an avalanche finalizer
+// so adjacent cells land on different variants instead of striping.
+uint32_t variantHash(int x, int y, int z) {
+    uint32_t h = static_cast<uint32_t>(x) * 73856093u ^
+                 static_cast<uint32_t>(y) * 19349663u ^
+                 static_cast<uint32_t>(z) * 83492791u;
+    h ^= h >> 13;
+    h *= 0x85ebca6bu;
+    h ^= h >> 16;
+    return h;
+}
+
+// Texture coordinates for an axis-aligned face, in *block units* (the REPEAT
+// sampler shows one full texel-square per block instead of stretching the image
+// across the whole quad). axis: 0 = X-face, 1 = Y-face (top/bottom), 2 = Z-face.
+// V follows world-Y *negated* so the image is upright (row 0 at the block's top);
+// U follows whichever horizontal axis lies in the face's plane. This is the crux
+// of combining textures with greedy meshing AND with partial shapes: a half-block
+// slab face shows the bottom half of the image, a quarter-block post shows its
+// centred slice — always at a true 16-px-per-block density. Used by the cube
+// greedy pass and by every axis-aligned non-cube box face (posts, slabs, stairs,
+// walls, leaf-cube faces, the liquid surface).
+glm::vec2 faceUV(const glm::vec3& p, int axis) {
+    if (axis == 1) {
+        return glm::vec2(p.x, p.z); // top / bottom: flat on X-Z
+    }
+    const float horiz = (axis == 0) ? p.z : p.x; // X-faces use Z, Z-faces use X
+    return glm::vec2(horiz, -p.y);
 }
 
 // Ambient-occlusion brightness for each of the four occlusion levels (0 = corner
@@ -62,7 +96,8 @@ struct Mask {
 
 MeshData ChunkMesher::greedyMesh(const Chunk& chunk, const BlockRegistry& reg,
                                  const NeighborSampler& neighbor,
-                                 const LightSampler& light, bool smoothLighting) {
+                                 const LightSampler& light, bool smoothLighting,
+                                 const glm::ivec3& worldOrigin) {
     MeshData mesh;
 
     // In-bounds blocks come straight from the chunk; the boundary sweep below
@@ -86,12 +121,23 @@ MeshData ChunkMesher::greedyMesh(const Chunk& chunk, const BlockRegistry& reg,
     auto isLiquid  = [&](uint16_t id) { return id == waterId || id == lavaId; };
     auto isFlowing = [&](const Block& b) { return isLiquid(b.id) && b.metadata > 0; };
 
-    // OPAQUE sweep "solid" test: a real opaque block that is NOT water and NOT a
-    // flowing liquid, so water (any) and flowing liquids are see-through here and a
-    // source-water cube drops out of this pass into the water sweep below.
+    // The shape a cell renders as: only shapeable blocks read Block::metadata as a
+    // shape; everything else is a full Cube. A reshaped cube (slab/stairs/...) is
+    // NOT a full opaque cube — it emits its own box geometry in the second pass and
+    // must not be greedy-meshed nor cull a neighbour's face.
+    auto cellShape = [&](const Block& b) -> ShapeKind {
+        return reg.shapeable(b.id) ? shapeKindOf(b.metadata) : ShapeKind::Cube;
+    };
+
+    // OPAQUE sweep "solid" test: a real opaque FULL-CUBE block that is NOT water,
+    // NOT a flowing liquid and NOT reshaped — so water/flowing liquids and any
+    // shaped block are see-through here (they drop out into a later pass), and this
+    // doubles as the "is the neighbour a solid full cube?" test used to cull the
+    // boundary faces of shaped boxes.
     auto fillOpaque = [&](int x, int y, int z) {
         const Block b = sample(x, y, z);
-        return reg.isOpaque(b.id) && !isWater(b.id) && !isFlowing(b);
+        return reg.isOpaque(b.id) && !isWater(b.id) && !isFlowing(b) &&
+               cellShape(b) == ShapeKind::Cube;
     };
     // WATER sweep "solid" test: any water is part of the body, plus opaque terrain
     // and (opaque) lava as the solids it culls against — so only the water-vs-air
@@ -101,7 +147,8 @@ MeshData ChunkMesher::greedyMesh(const Chunk& chunk, const BlockRegistry& reg,
     // flowing pass below), so there is no gap to fill.
     auto fillWater = [&](int x, int y, int z) {
         const Block b = sample(x, y, z);
-        return isWater(b.id) || (reg.isOpaque(b.id) && !isFlowing(b));
+        return isWater(b.id) ||
+               (reg.isOpaque(b.id) && !isFlowing(b) && cellShape(b) == ShapeKind::Cube);
     };
     auto emitAny   = [&](const Block&) { return true; };
     // Only emit faces owned by a SOURCE water cell; flowing water is drawn as a
@@ -147,13 +194,7 @@ MeshData ChunkMesher::greedyMesh(const Chunk& chunk, const BlockRegistry& reg,
         // Top/bottom faces (d == 1) have no vertical component, so they lie flat
         // on the X/Z plane. Block-aligned corners keep every tile boundary on a
         // block boundary.
-        auto uvFor = [&](const glm::vec3& p) -> glm::vec2 {
-            if (d == 1) {
-                return glm::vec2(p[0], p[2]); // top / bottom: flat on X-Z
-            }
-            const float horiz = (d == 0) ? p[2] : p[0]; // X-faces use Z, Z-faces use X
-            return glm::vec2(horiz, -p[1]);
-        };
+        auto uvFor = [&](const glm::vec3& p) -> glm::vec2 { return faceUV(p, d); };
 
         // Per-vertex light, split into sky and block terms (0..15 -> 0..1), each
         // with the corner AO folded in. The *sky* term carries no directional
@@ -274,7 +315,18 @@ MeshData ChunkMesher::greedyMesh(const Chunk& chunk, const BlockRegistry& reg,
             m.present   = true;
             m.block     = blk;
             m.positive  = positive;
-            m.layer     = reg.faceLayer(blk, faceIndex(d, positive));
+            // The solid cell owning this face: its d-coord is one step back from the
+            // air-side plane L (L-1 for a +d face, L+1 for a -d face); u/v are cu/cv.
+            // Hash its WORLD position to pick the texture variant, so a multi-texture
+            // face (grass/stone) varies per block and merges only with like variants.
+            int cell[3];
+            cell[d] = positive ? L - 1 : L + 1;
+            cell[u] = cu;
+            cell[v] = cv;
+            m.layer     = reg.faceLayer(blk, faceIndex(d, positive),
+                                        variantHash(worldOrigin.x + cell[0],
+                                                    worldOrigin.y + cell[1],
+                                                    worldOrigin.z + cell[2]));
             m.baseShade = faceShade(d, positive);
             if (!smoothLighting) {
                 // Simple mode: flat directional shade only (no AO, full sky light).
@@ -400,26 +452,51 @@ MeshData ChunkMesher::greedyMesh(const Chunk& chunk, const BlockRegistry& reg,
     // -------------------------------------------------------------------------
     // Append one double-sided quad (front + back winding, so it shows under
     // back-face culling). Corners go bottom-left, bottom-right, top-right,
-    // top-left; the texture maps 0..1 across it (one tile per quad, V up).
+    // top-left. Two UV modes:
+    //   * FIT  — the texture maps 0..1 across the whole quad (one tile per quad).
+    //            For sprite-like CROSS foliage planes (diagonal/vertical quads
+    //            whose extent isn't a clean block axis); the sprite is authored
+    //            to fill the quad.
+    //   * TILED — block-unit faceUV() per corner, so the image keeps a true
+    //            16-px-per-block density regardless of the quad's size (posts,
+    //            slabs, stairs, walls, leaf-cube faces, the liquid surface).
     auto pushQuad = [&](std::vector<Vertex>& outV, std::vector<uint32_t>& outI,
                         const glm::vec3& p0, const glm::vec3& p1, const glm::vec3& p2,
                         const glm::vec3& p3, uint32_t layer, const glm::vec2& lv,
-                        uint32_t normal, uint32_t blockCol = 0) {
+                        uint32_t normal, uint32_t blockCol, bool tiled) {
         const auto b = static_cast<uint32_t>(outV.size());
-        outV.push_back({p0, {0.0f, 1.0f}, layer, lv, normal, blockCol});
-        outV.push_back({p1, {1.0f, 1.0f}, layer, lv, normal, blockCol});
-        outV.push_back({p2, {1.0f, 0.0f}, layer, lv, normal, blockCol});
-        outV.push_back({p3, {0.0f, 0.0f}, layer, lv, normal, blockCol});
+        if (tiled) {
+            const int axis = static_cast<int>(normal) / 2; // Face -> axis (0/1/2)
+            outV.push_back({p0, faceUV(p0, axis), layer, lv, normal, blockCol});
+            outV.push_back({p1, faceUV(p1, axis), layer, lv, normal, blockCol});
+            outV.push_back({p2, faceUV(p2, axis), layer, lv, normal, blockCol});
+            outV.push_back({p3, faceUV(p3, axis), layer, lv, normal, blockCol});
+        } else {
+            outV.push_back({p0, {0.0f, 1.0f}, layer, lv, normal, blockCol});
+            outV.push_back({p1, {1.0f, 1.0f}, layer, lv, normal, blockCol});
+            outV.push_back({p2, {1.0f, 0.0f}, layer, lv, normal, blockCol});
+            outV.push_back({p3, {0.0f, 0.0f}, layer, lv, normal, blockCol});
+        }
         outI.insert(outI.end(),
                     {b + 0, b + 1, b + 2, b + 0, b + 2, b + 3,    // front
                      b + 0, b + 2, b + 1, b + 0, b + 3, b + 2});  // back
     };
-    // Opaque non-cube geometry (plants, posts, leaf cubes, flowing lava).
+    // Sprite-fit quad: CROSS foliage planes (texture stretched 0..1 to fill).
     auto addNonCubeQuad = [&](const glm::vec3& p0, const glm::vec3& p1,
                               const glm::vec3& p2, const glm::vec3& p3,
                               uint32_t layer, const glm::vec2& lv, uint32_t normal,
                               uint32_t blockCol = 0) {
-        pushQuad(mesh.vertices, mesh.indices, p0, p1, p2, p3, layer, lv, normal, blockCol);
+        pushQuad(mesh.vertices, mesh.indices, p0, p1, p2, p3, layer, lv, normal,
+                 blockCol, /*tiled=*/false);
+    };
+    // Axis-aligned box face: posts, slabs, stairs, walls, leaf-cube faces. The
+    // texture tiles at 16 px/block so partial-size faces show the matching slice.
+    auto addBoxQuad = [&](const glm::vec3& p0, const glm::vec3& p1,
+                          const glm::vec3& p2, const glm::vec3& p3,
+                          uint32_t layer, const glm::vec2& lv, uint32_t normal,
+                          uint32_t blockCol = 0) {
+        pushQuad(mesh.vertices, mesh.indices, p0, p1, p2, p3, layer, lv, normal,
+                 blockCol, /*tiled=*/true);
     };
 
     for (int z = 0; z < N; ++z) {
@@ -430,9 +507,12 @@ MeshData ChunkMesher::greedyMesh(const Chunk& chunk, const BlockRegistry& reg,
                 if (id == 0) continue;
                 const RenderType rt = reg.renderType(id);
                 // Flowing liquid (metadata > 0) is a Cube-type block but renders here
-                // as a partial-height box; everything else Cube is greedy-meshed.
+                // as a partial-height box; a reshaped cube (slab/stairs/post/wall)
+                // likewise emits its own boxes here; everything else Cube is greedy.
                 const bool flowing = isFlowing(cell);
-                if (rt == RenderType::Cube && !flowing) continue;
+                const ShapeKind shape = cellShape(cell);
+                const bool shaped = shape != ShapeKind::Cube;
+                if (rt == RenderType::Cube && !flowing && !shaped) continue;
 
                 // Flat per-cell light (no AO). Sky term is lit dynamically in the
                 // shader against the sun direction (via the vertex normal); the
@@ -443,6 +523,14 @@ MeshData ChunkMesher::greedyMesh(const Chunk& chunk, const BlockRegistry& reg,
                 const uint32_t col = packColorRGBA8(ls.blockColor); // emitter hue for this cell
                 const glm::vec3 o(static_cast<float>(x), static_cast<float>(y),
                                   static_cast<float>(z));
+                // One texture-variant choice for the whole cell (a hash of its world
+                // position), so a multi-texture non-cube block — foliage cross/leaf
+                // cubes — varies per block. `fl` resolves a face to its variant layer;
+                // single-variant faces ignore the selector, so this is a no-op there.
+                const uint32_t cellVariant = variantHash(worldOrigin.x + x,
+                                                         worldOrigin.y + y,
+                                                         worldOrigin.z + z);
+                auto fl = [&](Face f) { return reg.faceLayer(id, f, cellVariant); };
 
                 if (flowing) {
                     // Corner-connected liquid surface (issue: invisible sides /
@@ -492,9 +580,9 @@ MeshData ChunkMesher::greedyMesh(const Chunk& chunk, const BlockRegistry& reg,
                     auto emitFace = [&](const glm::vec3& a, const glm::vec3& b,
                                         const glm::vec3& c, const glm::vec3& d,
                                         int axis, bool pos, Face f) {
-                        pushQuad(tv, ti, o + a, o + b, o + c, o + d, reg.faceLayer(id, f),
+                        pushQuad(tv, ti, o + a, o + b, o + c, o + d, fl(f),
                                  glm::vec2(lsky, faceShade(axis, pos) * lblk),
-                                 static_cast<uint32_t>(f), lcol);
+                                 static_cast<uint32_t>(f), lcol, /*tiled=*/true);
                     };
                     // A face is hidden where it meets another liquid (surfaces connect)
                     // or an opaque block (terrain); only water-vs-air shows.
@@ -518,22 +606,93 @@ MeshData ChunkMesher::greedyMesh(const Chunk& chunk, const BlockRegistry& reg,
                     // Bottom — only when the cell below is open (water hanging in air).
                     if (open(0, -1, 0))
                         emitFace({0, 0, 0}, {1, 0, 0}, {1, 0, 1}, {0, 0, 1}, 1, false, FaceNegY);
+                } else if (shaped) {
+                    // A reshaped cube (slab/stairs/post/wall): build the shape's box
+                    // union (the SAME boxes collision uses) and emit each box's faces.
+                    // A face flush on the cell boundary is culled only when the
+                    // neighbour there is a solid full cube; interior faces always draw.
+                    uint8_t wallMask = 0;
+                    if (shape == ShapeKind::Wall) {
+                        auto conn = [&](int nx, int ny, int nz) {
+                            const Block nb = sample(x + nx, y + ny, z + nz);
+                            return fillOpaque(x + nx, y + ny, z + nz) ||
+                                   (reg.shapeable(nb.id) &&
+                                    shapeKindOf(nb.metadata) == ShapeKind::Wall);
+                        };
+                        if (conn(0, 0, -1)) wallMask |= 0x1;
+                        if (conn(1, 0, 0))  wallMask |= 0x2;
+                        if (conn(0, 0, 1))  wallMask |= 0x4;
+                        if (conn(-1, 0, 0)) wallMask |= 0x8;
+                    }
+                    // An opaque shaped block holds no light in its own cell, so light
+                    // it by the brightest open neighbour (like cube faces / the liquid
+                    // surface) instead of its dark own-cell value.
+                    LightSample sl = ls;
+                    const int sndx[6] = {0, 0, 1, -1, 0, 0};
+                    const int sndy[6] = {1, -1, 0, 0, 0, 0};
+                    const int sndz[6] = {0, 0, 0, 0, 1, -1};
+                    for (int k = 0; k < 6; ++k) {
+                        const LightSample n = light(x + sndx[k], y + sndy[k], z + sndz[k]);
+                        if (n.sky > sl.sky) sl.sky = n.sky;
+                        if (n.block > sl.block) { sl.block = n.block; sl.blockColor = n.blockColor; }
+                    }
+                    const float ssky = static_cast<float>(sl.sky) / 15.0f;
+                    const float sblk = static_cast<float>(sl.block) / 15.0f;
+                    const uint32_t scol = packColorRGBA8(sl.blockColor);
+
+                    std::vector<ShapeBox> boxes;
+                    shapeBoxes(shape, shapeOrientOf(cell.metadata), wallMask, boxes);
+                    auto faceLv = [&](int axis, bool pos) {
+                        return glm::vec2(ssky, faceShade(axis, pos) * sblk);
+                    };
+                    for (const ShapeBox& bx : boxes) {
+                        const glm::vec3 lo = bx.lo, hi = bx.hi;
+                        if (!(lo.x == 0.0f && fillOpaque(x - 1, y, z)))
+                            addBoxQuad(o + glm::vec3(lo.x, lo.y, lo.z), o + glm::vec3(lo.x, lo.y, hi.z),
+                                       o + glm::vec3(lo.x, hi.y, hi.z), o + glm::vec3(lo.x, hi.y, lo.z),
+                                       fl(FaceNegX), faceLv(0, false),
+                                       static_cast<uint32_t>(FaceNegX), scol);
+                        if (!(hi.x == 1.0f && fillOpaque(x + 1, y, z)))
+                            addBoxQuad(o + glm::vec3(hi.x, lo.y, hi.z), o + glm::vec3(hi.x, lo.y, lo.z),
+                                       o + glm::vec3(hi.x, hi.y, lo.z), o + glm::vec3(hi.x, hi.y, hi.z),
+                                       fl(FacePosX), faceLv(0, true),
+                                       static_cast<uint32_t>(FacePosX), scol);
+                        if (!(lo.z == 0.0f && fillOpaque(x, y, z - 1)))
+                            addBoxQuad(o + glm::vec3(hi.x, lo.y, lo.z), o + glm::vec3(lo.x, lo.y, lo.z),
+                                       o + glm::vec3(lo.x, hi.y, lo.z), o + glm::vec3(hi.x, hi.y, lo.z),
+                                       fl(FaceNegZ), faceLv(2, false),
+                                       static_cast<uint32_t>(FaceNegZ), scol);
+                        if (!(hi.z == 1.0f && fillOpaque(x, y, z + 1)))
+                            addBoxQuad(o + glm::vec3(lo.x, lo.y, hi.z), o + glm::vec3(hi.x, lo.y, hi.z),
+                                       o + glm::vec3(hi.x, hi.y, hi.z), o + glm::vec3(lo.x, hi.y, hi.z),
+                                       fl(FacePosZ), faceLv(2, true),
+                                       static_cast<uint32_t>(FacePosZ), scol);
+                        if (!(hi.y == 1.0f && fillOpaque(x, y + 1, z)))
+                            addBoxQuad(o + glm::vec3(lo.x, hi.y, lo.z), o + glm::vec3(lo.x, hi.y, hi.z),
+                                       o + glm::vec3(hi.x, hi.y, hi.z), o + glm::vec3(hi.x, hi.y, lo.z),
+                                       fl(FacePosY), faceLv(1, true),
+                                       static_cast<uint32_t>(FacePosY), scol);
+                        if (!(lo.y == 0.0f && fillOpaque(x, y - 1, z)))
+                            addBoxQuad(o + glm::vec3(lo.x, lo.y, lo.z), o + glm::vec3(hi.x, lo.y, lo.z),
+                                       o + glm::vec3(hi.x, lo.y, hi.z), o + glm::vec3(lo.x, lo.y, hi.z),
+                                       fl(FaceNegY), faceLv(1, false),
+                                       static_cast<uint32_t>(FaceNegY), scol);
+                    }
                 } else if (rt == RenderType::Cross || rt == RenderType::LeafCube) {
                     // Two diagonal quads forming an X across the cell. Lit as if
                     // top-facing (FacePosY) so foliage tracks the sun's elevation.
-                    const uint32_t layer = reg.faceLayer(id, FacePosX);
+                    const uint32_t layer = fl(FacePosX);
                     const glm::vec2 lv(sky, blk); // baseShade 1.0 for foliage
                     const uint32_t nrm = static_cast<uint32_t>(FacePosY);
-                    // The X planes spill past the cell so foliage looks fuller and
-                    // bushier than the block it sits in. Leaves push out much
-                    // further and on ALL sides (incl. below) for a big bushy crown;
-                    // ground plants (grass/bush) get a modest side+top overhang and
-                    // stay rooted at y=0 (no spilling into the ground).
+                    // Ground plants (grass/bush/torch) fill exactly the cell, so the
+                    // sprite reads at its native size instead of being blown up and
+                    // blurry. Leaves keep a modest crown spilling past the cube faces
+                    // (incl. below) so the canopy still looks full and bushy.
                     const bool leaf = (rt == RenderType::LeafCube);
-                    const float e  = leaf ? 0.42f : 0.18f;        // horizontal overhang
+                    const float e  = leaf ? 0.22f : 0.0f;         // horizontal overhang
                     const float p0 = -e, p1 = 1.0f + e;
                     const float pb = leaf ? -e : 0.0f;            // bottom (leaves spill down)
-                    const float pt = 1.0f + e;                    // top overhang
+                    const float pt = leaf ? 1.0f + e : 1.0f;      // top overhang (plants flush)
                     addNonCubeQuad(o + glm::vec3(p0, pb, p0), o + glm::vec3(p1, pb, p1),
                                    o + glm::vec3(p1, pt, p1), o + glm::vec3(p0, pt, p0),
                                    layer, lv, nrm, col);
@@ -550,9 +709,9 @@ MeshData ChunkMesher::greedyMesh(const Chunk& chunk, const BlockRegistry& reg,
                                             const glm::vec3& dd, int axis, bool pos, Face f) {
                             const uint16_t nb = sample(x + nx, y + ny, z + nz).id;
                             if (nb == id || reg.isOpaque(nb)) return;
-                            addNonCubeQuad(o + a, o + b, o + c, o + dd, reg.faceLayer(id, f),
-                                           glm::vec2(sky, faceShade(axis, pos) * blk),
-                                           static_cast<uint32_t>(f), col);
+                            addBoxQuad(o + a, o + b, o + c, o + dd, fl(f),
+                                       glm::vec2(sky, faceShade(axis, pos) * blk),
+                                       static_cast<uint32_t>(f), col);
                         };
                         leafFace(-1, 0, 0, glm::vec3(0, 0, 0), glm::vec3(0, 0, 1),
                                  glm::vec3(0, 1, 1), glm::vec3(0, 1, 0), 0, false, FaceNegX);
@@ -574,22 +733,22 @@ MeshData ChunkMesher::greedyMesh(const Chunk& chunk, const BlockRegistry& reg,
                         return glm::vec2(sky, faceShade(axis, pos) * blk);
                     };
                     // Side faces (always visible — the box is thinner than the cell).
-                    addNonCubeQuad(o + glm::vec3(lo, 0, lo), o + glm::vec3(lo, 0, hi),
-                                   o + glm::vec3(lo, 1, hi), o + glm::vec3(lo, 1, lo),
-                                   reg.faceLayer(id, FaceNegX), faceLv(0, false),
-                                   static_cast<uint32_t>(FaceNegX), col);
-                    addNonCubeQuad(o + glm::vec3(hi, 0, hi), o + glm::vec3(hi, 0, lo),
-                                   o + glm::vec3(hi, 1, lo), o + glm::vec3(hi, 1, hi),
-                                   reg.faceLayer(id, FacePosX), faceLv(0, true),
-                                   static_cast<uint32_t>(FacePosX), col);
-                    addNonCubeQuad(o + glm::vec3(hi, 0, lo), o + glm::vec3(lo, 0, lo),
-                                   o + glm::vec3(lo, 1, lo), o + glm::vec3(hi, 1, lo),
-                                   reg.faceLayer(id, FaceNegZ), faceLv(2, false),
-                                   static_cast<uint32_t>(FaceNegZ), col);
-                    addNonCubeQuad(o + glm::vec3(lo, 0, hi), o + glm::vec3(hi, 0, hi),
-                                   o + glm::vec3(hi, 1, hi), o + glm::vec3(lo, 1, hi),
-                                   reg.faceLayer(id, FacePosZ), faceLv(2, true),
-                                   static_cast<uint32_t>(FacePosZ), col);
+                    addBoxQuad(o + glm::vec3(lo, 0, lo), o + glm::vec3(lo, 0, hi),
+                               o + glm::vec3(lo, 1, hi), o + glm::vec3(lo, 1, lo),
+                               fl(FaceNegX), faceLv(0, false),
+                               static_cast<uint32_t>(FaceNegX), col);
+                    addBoxQuad(o + glm::vec3(hi, 0, hi), o + glm::vec3(hi, 0, lo),
+                               o + glm::vec3(hi, 1, lo), o + glm::vec3(hi, 1, hi),
+                               fl(FacePosX), faceLv(0, true),
+                               static_cast<uint32_t>(FacePosX), col);
+                    addBoxQuad(o + glm::vec3(hi, 0, lo), o + glm::vec3(lo, 0, lo),
+                               o + glm::vec3(lo, 1, lo), o + glm::vec3(hi, 1, lo),
+                               fl(FaceNegZ), faceLv(2, false),
+                               static_cast<uint32_t>(FaceNegZ), col);
+                    addBoxQuad(o + glm::vec3(lo, 0, hi), o + glm::vec3(hi, 0, hi),
+                               o + glm::vec3(hi, 1, hi), o + glm::vec3(lo, 1, hi),
+                               fl(FacePosZ), faceLv(2, true),
+                               static_cast<uint32_t>(FacePosZ), col);
                     // Top/bottom caps only where the neighbour isn't the same post
                     // (so a stacked trunk has no internal caps) and isn't opaque.
                     const bool capAbove = sample(x, y + 1, z).id != id &&
@@ -597,16 +756,16 @@ MeshData ChunkMesher::greedyMesh(const Chunk& chunk, const BlockRegistry& reg,
                     const bool capBelow = sample(x, y - 1, z).id != id &&
                                           !reg.isOpaque(sample(x, y - 1, z).id);
                     if (capAbove) {
-                        addNonCubeQuad(o + glm::vec3(lo, 1, lo), o + glm::vec3(lo, 1, hi),
-                                       o + glm::vec3(hi, 1, hi), o + glm::vec3(hi, 1, lo),
-                                       reg.faceLayer(id, FacePosY), faceLv(1, true),
-                                       static_cast<uint32_t>(FacePosY), col);
+                        addBoxQuad(o + glm::vec3(lo, 1, lo), o + glm::vec3(lo, 1, hi),
+                                   o + glm::vec3(hi, 1, hi), o + glm::vec3(hi, 1, lo),
+                                   fl(FacePosY), faceLv(1, true),
+                                   static_cast<uint32_t>(FacePosY), col);
                     }
                     if (capBelow) {
-                        addNonCubeQuad(o + glm::vec3(lo, 0, lo), o + glm::vec3(hi, 0, lo),
-                                       o + glm::vec3(hi, 0, hi), o + glm::vec3(lo, 0, hi),
-                                       reg.faceLayer(id, FaceNegY), faceLv(1, false),
-                                       static_cast<uint32_t>(FaceNegY), col);
+                        addBoxQuad(o + glm::vec3(lo, 0, lo), o + glm::vec3(hi, 0, lo),
+                                   o + glm::vec3(hi, 0, hi), o + glm::vec3(lo, 0, hi),
+                                   fl(FaceNegY), faceLv(1, false),
+                                   static_cast<uint32_t>(FaceNegY), col);
                     }
                 }
             }

@@ -61,6 +61,11 @@ public:
     void blockFace(const glm::vec2& c0, const glm::vec2& c1, const glm::vec2& c2,
                    const glm::vec2& c3, uint32_t layer, const glm::vec4& shade);
 
+    // An axis-aligned textured quad sampling a sub-rect [u0,v0..u1,v1] of block-array
+    // `layer`, tinted by `tint`. The building block of the 9-patch UI (Ui::ninePatch).
+    void sprite(float x, float y, float w, float h, uint32_t layer,
+                float u0, float v0, float u1, float v1, const glm::vec4& tint);
+
     // Draw a string with its top-left at (x,y); `scale` multiplies the baked font
     // size. Returns the advance width in pixels.
     float text(float x, float y, const std::string& s, const glm::vec4& color,

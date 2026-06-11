@@ -34,6 +34,7 @@ Settings Settings::load(const std::string& path) {
     get("flySpeed", s.flySpeed);
     get("dayLengthMinutes", s.dayLengthMinutes);
     get("timeRunning", s.timeRunning);
+    get("fullscreen", s.fullscreen);
     get("skyColor", s.skyColor);
     get("font", s.font);
     return s;
@@ -49,6 +50,7 @@ void Settings::save(const std::string& path) const {
     root["flySpeed"]       = flySpeed;
     root["dayLengthMinutes"] = dayLengthMinutes;
     root["timeRunning"]    = timeRunning;
+    root["fullscreen"]     = fullscreen;
     root["skyColor"]       = skyColor;
     root["font"]           = font;
 

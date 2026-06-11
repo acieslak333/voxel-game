@@ -48,6 +48,12 @@ public:
     // platform supports it). Passing false restores the normal cursor.
     void setCursorDisabled(bool disabled) const;
 
+    // Switch between borderless-fullscreen (primary monitor's video mode) and the
+    // previous windowed rect. No-op if already in the requested state. Flags a
+    // framebuffer resize so the renderer rebuilds the swapchain.
+    void setFullscreen(bool on);
+    [[nodiscard]] bool isFullscreen() const { return fullscreen_; }
+
     // Set true by the resize callback; the renderer polls + clears this so it
     // knows to rebuild the swapchain.
     [[nodiscard]] bool framebufferResized() const { return framebufferResized_; }
@@ -67,6 +73,8 @@ private:
     GLFWwindow* window_ = nullptr;
     bool framebufferResized_ = false;
     double scrollAccum_ = 0.0; // wheel notches since the last takeScrollDelta()
+    bool fullscreen_ = false;
+    int  winX_ = 0, winY_ = 0, winW_ = 0, winH_ = 0; // saved windowed rect (to restore)
 };
 
 } // namespace vg

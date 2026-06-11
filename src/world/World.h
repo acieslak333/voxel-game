@@ -3,6 +3,7 @@
 #include "world/BlockRegistry.h"
 #include "world/Chunk.h"
 #include "world/Noise.h"
+#include "world/Shape.h"
 #include "world/TerrainGenerator.h"
 #include "world/WorldConfig.h"
 
@@ -77,6 +78,13 @@ public:
     // X/Z inset of a thin (Model) block's box here (0 for full-cell blocks). Lets
     // the raycast and player collision treat a slender trunk as its real column.
     [[nodiscard]] float modelInsetAt(int wx, int wy, int wz) const;
+
+    // Collision/raycast boxes for the block here, in WORLD coordinates (already
+    // offset by the cell). Returns the count (0 = not solid); writes up to
+    // kMaxShapeBoxes boxes. Full cubes -> one box; thin Model posts and reshaped
+    // blocks (slab/stairs/post/wall) -> their shape's box union. The single source
+    // of truth shared with the mesher (vg::shapeBoxes).
+    [[nodiscard]] int collisionBoxesAt(int wx, int wy, int wz, ShapeBox out[]) const;
 
     // Y to stand on at world column (wx, wz): one above the topmost solid block.
     [[nodiscard]] int surfaceHeight(int wx, int wz) const;
@@ -234,7 +242,13 @@ private:
     uint16_t glowId_;   // lantern caps + buried geodes
     uint16_t trunkId_;  // oak tree trunk (thin model block)
     uint16_t leavesId_; // oak tree canopy (cross block)
+    // Flora expansion: other tree species (trunk + leafcube canopy each).
+    uint16_t birchTrunkId_, birchLeavesId_, pineTrunkId_, pineLeavesId_,
+             mapleTrunkId_, mapleLeavesId_, willowTrunkId_, willowLeavesId_;
     uint16_t bushId_;   // ground shrub (cross block)
+    // Flora expansion: extra ground plants, scattered by biome `plant:` theme.
+    uint16_t tallGrassId_, fernId_, flowerRedId_, flowerYellowId_,
+             redMushroomId_, cactusId_;
     uint16_t waterId_;  // sea-level liquid fill
     uint16_t lavaId_;   // deep lava
     // Ores (replace stone in veins; see assets/world.yaml `ores`).

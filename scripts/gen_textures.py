@@ -116,6 +116,11 @@ def make_texture(spec, size, patterns, flat=False):
     leaves = spec.get("leaves", False)    # alpha-cutout foliage (transparent gaps)
     dither = spec.get("dither", 0.0)      # screen-door alpha: punch a fixed checkerboard of pixels fully transparent so liquids read as see-through through the chunk.frag cutout
     ore_color = spec.get("ore_color")     # if set, scatter coloured mineral flecks over the base
+    # Sprite plants (ground flora, drawn on CROSS quads): mostly-transparent tiles
+    # whose only opaque pixels are the plant shape. Each is its own little sprite.
+    blades = spec.get("blades", False)    # a tuft of vertical grass/fern blades
+    flower = spec.get("flower")           # {petal, center}: green stem + a blossom
+    mushroom = spec.get("mushroom")       # {cap, stem, spots}: short stem + domed cap
 
     band_jitter = patterns["band_jitter"]
     streak_cols = set(patterns["streak"]["columns"]) if streaks else set()
@@ -131,6 +136,8 @@ def make_texture(spec, size, patterns, flat=False):
     ore_cfg = patterns.get("ore", {})
     ore_chance = ore_cfg.get("fleck_chance", 0.0) # fraction of pixels turned into ore flecks
     ore_jitter = ore_cfg.get("fleck_jitter", 0.0) # per-fleck brightness variation
+    blade_cfg = patterns.get("blades", {})
+    cx = size // 2                                # sprite centre column
     center = (size - 1) / 2.0
 
     # An uneven top band (grass over dirt): jitter the band's lower edge per column
@@ -139,6 +146,17 @@ def make_texture(spec, size, patterns, flat=False):
     band_h = None
     if top_band:
         band_h = [max(0, top_band[1] + rng.choice(band_jitter)) for _ in range(size)]
+
+    # Grass/fern tuft: pick a handful of columns, each a blade rising to a random
+    # height from the bottom. Precomputed so the pixel loop just tests membership
+    # (mirrors band_h above; keeps the per-pixel loop branch-light).
+    blade_h = {}
+    if blades:
+        margin = blade_cfg.get("margin", 2)
+        for _ in range(blade_cfg.get("count", 9)):
+            bx = rng.randrange(margin, size - margin)
+            bh = rng.randint(blade_cfg.get("h_min", 7), blade_cfg.get("h_max", 14))
+            blade_h[bx] = max(blade_h.get(bx, 0), bh)
 
     px = []
     for y in range(size):
@@ -172,6 +190,36 @@ def make_texture(spec, size, patterns, flat=False):
                                   1.0 + rng.uniform(-ore_jitter, ore_jitter))
 
             alpha = 255
+            # Sprite plants: start fully transparent and paint only the plant shape.
+            # yy is the row counted from the BOTTOM, so plants grow up from y=0.
+            if blades or flower or mushroom:
+                alpha = 0
+                yy = size - 1 - y
+                if blades and x in blade_h and yy < blade_h[x]:
+                    color = shade(base, 1.0 + rng.uniform(-0.14, 0.14))
+                    alpha = 255
+                if flower:
+                    stem_h = size - 6
+                    stem = "#3F6B2A"  # leaf-green stem/leaves
+                    if x == cx and yy < stem_h:                  # stem
+                        color = resolve(stem); alpha = 255
+                    if yy == 4 and (x == cx - 2 or x == cx + 2): # a pair of leaves
+                        color = resolve(stem); alpha = 255
+                    by = stem_h + 1                              # blossom centre
+                    if abs(x - cx) + abs(yy - by) <= 2:          # petal diamond
+                        color = resolve(flower["petal"]); alpha = 255
+                    if x == cx and yy == by:                     # blossom centre dot
+                        color = resolve(flower["center"]); alpha = 255
+                if mushroom:
+                    if (x == cx or x == cx - 1) and yy < 4:       # short stem
+                        color = resolve(mushroom.get("stem", "#EDE3D0")); alpha = 255
+                    cap_lo, cap_hi = 4, 7                         # domed cap above the stem
+                    if cap_lo <= yy <= cap_hi:
+                        w = cap_hi - yy + 1
+                        if abs(x - cx) <= w:
+                            color = resolve(mushroom["cap"]); alpha = 255
+                            if rng.random() < 0.18:               # speckled cap spots
+                                color = resolve(mushroom.get("spots", "#F4ECD8"))
             if leaves:
                 # Round the corners into a roughly circular leaf mass, then punch
                 # a few random gaps so the canopy reads as broken foliage rather
@@ -225,11 +273,23 @@ def main():
     flat = bool(cfg.get("flat", False))  # solid-colour blocks; keep noise for later
 
     os.makedirs(OUT_DIR, exist_ok=True)
+    suffix = ".block.png"
     for name, spec in cfg["textures"].items():
         spec.setdefault("_seed", name)  # stable per-texture grain, keyed by filename
-        path = os.path.join(OUT_DIR, name)
-        write_png(path, make_texture(spec, size, patterns, flat), size)
-        print("wrote", os.path.normpath(path))
+        # `variants: N` emits N differently-grained copies of the same texture so a
+        # block can pick one at random per world position (see blocks.yaml lists +
+        # ChunkMesher's per-cell variant hash). Variant 0 keeps the base filename and
+        # seed (so it is byte-identical to a no-variants texture); variants 1..N-1 get
+        # an index suffix and a distinct seed, so only the per-pixel grain/gaps differ.
+        variants = max(1, int(spec.get("variants", 1)))
+        stem = name[:-len(suffix)] if name.endswith(suffix) else name
+        for i in range(variants):
+            fname = name if i == 0 else "%s%d%s" % (stem, i, suffix)
+            seeded = dict(spec)
+            seeded["_seed"] = spec["_seed"] if i == 0 else "%s%d" % (stem, i)
+            path = os.path.join(OUT_DIR, fname)
+            write_png(path, make_texture(seeded, size, patterns, flat), size)
+            print("wrote", os.path.normpath(path))
     if flat:
         print("(flat mode: solid base colours; set flat:false in textures.yaml to restore detail)")
 

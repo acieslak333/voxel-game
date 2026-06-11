@@ -431,6 +431,24 @@ void UiRenderer::blockFace(const glm::vec2& c0, const glm::vec2& c1, const glm::
     verts_.push_back(v3);
 }
 
+void UiRenderer::sprite(float x, float y, float w, float h, uint32_t layer,
+                        float u0, float v0, float u1, float v1, const glm::vec4& tint) {
+    if (verts_.size() + 6 > kMaxVerts) {
+        return; // batch full; drop further geometry this frame
+    }
+    const float L = static_cast<float>(layer); // layer >= 0 -> block array sampler
+    const UiVertex tl{{x, y},         {u0, v0}, tint, L};
+    const UiVertex tr{{x + w, y},     {u1, v0}, tint, L};
+    const UiVertex br{{x + w, y + h}, {u1, v1}, tint, L};
+    const UiVertex bl{{x, y + h},     {u0, v1}, tint, L};
+    verts_.push_back(tl);
+    verts_.push_back(tr);
+    verts_.push_back(br);
+    verts_.push_back(tl);
+    verts_.push_back(br);
+    verts_.push_back(bl);
+}
+
 float UiRenderer::text(float x, float y, const std::string& s, const glm::vec4& color,
                        float scale) {
     float penX = x;

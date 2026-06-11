@@ -77,9 +77,10 @@ int runWorldGenSelfTest(const std::string& assetDir) {
 
     // Recorded golden. NOTE: the selftest reads assets/biomes.yaml, so TUNING the
     // generation (e.g. via tools/genmap_tool.py) intentionally changes this hash —
-    // rebaseline when the config settles. Last set for single-island mode. Bump ONLY
-    // for an intentional worldgen change (per WORLD_GEN_AGENT_TIPS §6).
-    constexpr uint64_t kGolden = 0x3ca4dfb49ca7f61eull;
+    // rebaseline when the config settles. Last set for flora-expansion tree species
+    // (biome `tree:` -> oak/birch/pine/maple/willow with per-species crowns, plus a
+    // new swamp biome). Bump ONLY for an intentional worldgen change (per WORLD_GEN_AGENT_TIPS §6).
+    constexpr uint64_t kGolden = 0xc5be57f810811b1dull;
 
     uint64_t h1 = 0, h2 = 0;
     try {
@@ -604,24 +605,23 @@ int runLogicTest(const std::string& assetDir) {
         const uint8_t cjunk[6] = {9, 9, 9, 9, 9, 9};
         check(!cbad.deserialize(cjunk, sizeof cjunk), "corrupt chest store is rejected");
 
-        // Equipment: slot validation + aggregated stats + armour damage reduction.
-        const uint16_t helmet = reg.idByName("iron_helmet");
-        const uint16_t chestplate = reg.idByName("iron_chestplate");
+        // Equipment (ISSUES #15: armour trimmed to a single boots slot + trinkets).
+        const uint16_t boots = reg.idByName("iron_boots");
         const uint16_t swift = reg.idByName("swift_charm");
         const uint16_t life = reg.idByName("life_charm");
-        check(vg::Equipment::accepts(0) == vg::EquipSlot::Head, "slot 0 is the head slot");
-        check(vg::Equipment::fits(reg, 0, helmet), "helmet fits the head slot");
-        check(!vg::Equipment::fits(reg, 0, swift), "a trinket doesn't fit the head slot");
-        check(vg::Equipment::fits(reg, 4, swift), "trinket fits a trinket slot");
-        check(!vg::Equipment::fits(reg, 1, helmet), "helmet doesn't fit the chest slot");
+        check(vg::Equipment::accepts(0) == vg::EquipSlot::Feet,    "slot 0 is the boots slot");
+        check(vg::Equipment::accepts(1) == vg::EquipSlot::Trinket, "slot 1 is a trinket slot");
+        check(vg::Equipment::fits(reg, 0, boots),  "boots fit the boots slot");
+        check(!vg::Equipment::fits(reg, 0, swift), "a trinket doesn't fit the boots slot");
+        check(vg::Equipment::fits(reg, 1, swift),  "trinket fits a trinket slot");
+        check(!vg::Equipment::fits(reg, 1, boots), "boots don't fit a trinket slot");
 
         vg::Equipment eq;
-        eq.slots[0] = vg::ItemStack{helmet, 1};       // 8 armour
-        eq.slots[1] = vg::ItemStack{chestplate, 1};   // 16 armour -> 24% reduction
-        eq.slots[4] = vg::ItemStack{swift, 1};        // x1.35 speed
-        eq.slots[5] = vg::ItemStack{life, 1};         // +3 regen
+        eq.slots[0] = vg::ItemStack{boots, 1};        // 6 armour -> 6% reduction
+        eq.slots[1] = vg::ItemStack{swift, 1};        // x1.35 speed
+        eq.slots[2] = vg::ItemStack{life, 1};         // +3 regen
         const vg::Equipment::Stats st = eq.computeStats(reg);
-        check(near(st.armorReduction, 0.24f), "8+16 armour = 24% reduction");
+        check(near(st.armorReduction, 0.06f), "6 armour = 6% reduction");
         check(near(st.speedMul, 1.35f), "swift charm = 1.35x speed");
         check(near(st.regenBonus, 3.0f), "life charm = +3 regen");
 
@@ -651,6 +651,75 @@ int runLogicTest(const std::string& assetDir) {
             check(items.size() == 1 && inv4.count(stone) == 0, "no pickup before the delay");
             for (int s = 0; s < 40; ++s) items.update(0.05f, floorAt0, glm::vec3(0, 0, 0), inv4);
             check(items.size() == 0 && inv4.count(stone) == 5, "nearby item is collected");
+        }
+
+        // Block shapes (ISSUES #16): shapeable flags, metadata pack/unpack, the box
+        // union shared by mesher + collision, and that the player stands on a slab.
+        {
+            const uint16_t water = reg.idByName("water");
+            const uint16_t glow  = reg.idByName("glowstone");
+            const uint16_t hammer = reg.idByName("hammer");
+            check(reg.shapeable(stone),   "stone (solid opaque cube) is shapeable");
+            check(reg.shapeable(glow),    "glowstone is shapeable");
+            check(!reg.shapeable(water),  "water is NOT shapeable");
+            check(!reg.shapeable(bush),   "foliage is NOT shapeable");
+            check(!reg.placeable(hammer), "hammer is NOT placeable (a held tool)");
+
+            // metadata pack/unpack round-trip + default (0) == Cube.
+            check(vg::shapeKindOf(0) == vg::ShapeKind::Cube, "metadata 0 decodes to Cube");
+            const uint8_t m = vg::packShape(vg::ShapeKind::Stairs, 5);
+            check(vg::shapeKindOf(m) == vg::ShapeKind::Stairs && vg::shapeOrientOf(m) == 5,
+                  "shape+orient packs and unpacks");
+
+            vg::ShapeBox bx[vg::kMaxShapeBoxes];
+            check(vg::shapeBoxes(vg::ShapeKind::Cube, 0, 0, bx) == 1 &&
+                  near(bx[0].lo.y, 0.0f) && near(bx[0].hi.y, 1.0f), "cube = one full box");
+            vg::shapeBoxes(vg::ShapeKind::Slab, 0, 0, bx);  // bottom
+            check(near(bx[0].hi.y, 0.5f) && near(bx[0].lo.y, 0.0f), "bottom slab = lower half");
+            vg::shapeBoxes(vg::ShapeKind::Slab, 1, 0, bx);  // top
+            check(near(bx[0].lo.y, 0.5f) && near(bx[0].hi.y, 1.0f), "top slab = upper half");
+            check(vg::shapeBoxes(vg::ShapeKind::Stairs, 0, 0, bx) == 2, "stairs = two boxes");
+            vg::shapeBoxes(vg::ShapeKind::Post, 1, 0, bx);  // Y axis
+            check(bx[0].lo.x > 0.0f && bx[0].hi.x < 1.0f && near(bx[0].lo.y, 0.0f) &&
+                  near(bx[0].hi.y, 1.0f), "Y post = centred full-height column");
+            check(vg::shapeBoxes(vg::ShapeKind::Wall, 0, 0, bx) == 1, "wall, no neighbours = post only");
+            check(vg::shapeBoxes(vg::ShapeKind::Wall, 0, 0xF, bx) == 5,
+                  "wall with four connections = post + 4 arms");
+
+            // Collision: a floor of bottom-slabs at y=0 stops the player at y=0.5,
+            // half a block lower than a full-cube floor would.
+            auto stepFor = [](vg::PlayerController& p, const vg::InputState& in, float secs) {
+                for (float t = 0.0f; t < secs; t += 1.0f / 60.0f) p.update(1.0f / 60.0f, in);
+            };
+            const vg::InputState idle{};
+            vg::PlayerController onSlab(glm::vec3(0.5f, 5.0f, 0.5f));
+            onSlab.setSolidFn([](int, int y, int) { return y <= 0; });
+            onSlab.setCollisionBoxesFn([](int x, int y, int z, vg::ShapeBox out[]) {
+                if (y > 0) return 0;
+                out[0] = {glm::vec3(x, y, z), glm::vec3(x + 1, y + 0.5f, z + 1)};
+                return 1;
+            });
+            stepFor(onSlab, idle, 2.0f);
+            check(near(onSlab.feetPosition().y, 0.5f), "player rests on a bottom-slab floor at y=0.5");
+
+            // Auto-step: full cubes below y=0, and the whole y=0 layer is bottom-slabs
+            // except the start cell. Walking forward bumps a slab side and should climb
+            // onto it (~y=0.5) instead of stopping dead.
+            vg::PlayerController climb(glm::vec3(0.5f, 0.0f, 0.5f));
+            climb.setSolidFn([](int x, int y, int z) {
+                return y < 0 || (y == 0 && !(x == 0 && z == 0));
+            });
+            climb.setCollisionBoxesFn([](int x, int y, int z, vg::ShapeBox out[]) {
+                if (y < 0) { out[0] = {glm::vec3(x, y, z), glm::vec3(x + 1, y + 1, z + 1)}; return 1; }
+                if (y == 0 && !(x == 0 && z == 0)) {
+                    out[0] = {glm::vec3(x, 0, z), glm::vec3(x + 1, 0.5f, z + 1)};
+                    return 1;
+                }
+                return 0;
+            });
+            vg::InputState walkFwd{}; walkFwd.move = {0.0f, 1.0f};
+            stepFor(climb, walkFwd, 1.0f);
+            check(climb.feetPosition().y > 0.4f, "auto-step climbs onto a half-slab while walking");
         }
     } catch (const std::exception& e) {
         std::cerr << "[logic] FAIL: exception: " << e.what() << '\n';

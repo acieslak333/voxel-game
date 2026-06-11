@@ -84,6 +84,14 @@ patterns:
     fleck_chance: 0.22 # fraction of pixels recoloured to the mineral colour
     fleck_jitter: 0.28 # per-fleck brightness variation (glint)
 
+  # Grass/fern tufts (sprite plants with `blades: true`). A handful of vertical
+  # blades rising from the bottom of the tile; the rest stays transparent.
+  blades:
+    count: 9           # number of blades scattered across the tile
+    margin: 2          # keep blades this many px in from the left/right edges
+    h_min: 7           # shortest blade height (px from the bottom)
+    h_max: 14          # tallest blade height
+
 # -----------------------------------------------------------------------------
 #  textures: one entry per output PNG. The key is the file written to
 #  assets/textures/. ADD A BLOCK FACE HERE, then reference the PNG from
@@ -95,93 +103,178 @@ patterns:
 #                `height` rows (its lower edge is jittered by patterns.band_jitter).
 #     planks / streaks / rings  optional bool. Turn on that pattern (constants
 #                above). Omit or false to leave it off.
+#     variants   optional int N (default 1). Emit N differently-grained copies of
+#                this texture: <name>.block.png plus <name>1.block.png ..
+#                <name>(N-1).block.png. Each variant re-rolls the per-pixel grain
+#                (speckle / leaf gaps / band edge) from a different seed, so they
+#                share the palette but read distinct. List the copies in a block's
+#                face in assets/blocks.yaml (e.g. all: [stone.block.png,
+#                stone1.block.png, stone2.block.png]) and the mesher picks one per
+#                block position — the classic non-repeating grass/stone look.
 #  Keys combine; speckle is always applied last so grain shows over any pattern.
 # -----------------------------------------------------------------------------
 textures:
-  grass_top.png:
+  grass_top.block.png:
     base: lime
     speckle: 0.05
+    variants: 3        # per-block random grass tops (non-repeating ground)
   # Grass side: dirt with a ragged green band along the top edge.
-  grass_side.png:
+  grass_side.block.png:
     base: brown
     top_band: [lime, 8]
     speckle: 0.08
-  dirt.png:
+    variants: 3        # the green fringe edge varies per block, matching the top
+  dirt.block.png:
     base: brown
     speckle: 0.07
-  stone.png:
+  stone.block.png:
     base: stone_gray
     speckle: 0.11
-  sand.png:
+    variants: 3        # per-block random stone grain (non-repeating walls/caves)
+  sand.block.png:
     base: cream
     speckle: 0.07
-  gravel.png:
+  gravel.block.png:
     base: stone_gray
     speckle: 0.20
-  cobblestone.png:
+  cobblestone.block.png:
     base: taupe
     speckle: 0.16
-  planks.png:
+  planks.block.png:
     base: rust
     planks: true
     speckle: 0.04
-  oak_log_side.png:
+  oak_log_side.block.png:
     base: cocoa
     streaks: true
-  oak_log_top.png:
+  oak_log_top.block.png:
     base: brown
     rings: true
-  glowstone.png:
+  glowstone.block.png:
     base: gold
     speckle: 0.14
   # Foliage (alpha cutout) for CROSS blocks — see the `leaves` pattern above.
   # Canopy leaves: deep oak green with broken gaps.
-  oak_leaves.png:
+  oak_leaves.block.png:
     base: "#3F6B2A"
     speckle: 0.18
     leaves: true
+    variants: 3        # per-block random leaf gaps so canopies don't tile
   # Ground bush: a slightly lighter, brighter green so shrubs read apart from canopy.
-  bush.png:
+  bush.block.png:
     base: "#4F7E33"
     speckle: 0.20
     leaves: true
+    variants: 3        # per-block random foliage so shrubs differ from each other
   # Liquids (issue: water & lava). Water is a cool blue drawn in the renderer's
   # translucent pass (alpha-blended over the terrain/seabed behind it), so the
   # texture itself stays solid. Lava is a hot orange that also emits block light
   # (glows) and stays opaque — molten rock you can't see through.
-  water.png:
+  water.block.png:
     base: "#2E6EB5"
     speckle: 0.06
-  lava.png:
+  lava.block.png:
     base: "#E2531E"
     speckle: 0.13
   # Ores: stone base (matches stone.png) sprinkled with a mineral colour. See the
   # `ore` pattern above; `ore_color` is the fleck tint.
-  coal_ore.png:
+  coal_ore.block.png:
     base: stone_gray
     speckle: 0.11
     ore_color: "#1A1A1A"
-  iron_ore.png:
+  iron_ore.block.png:
     base: stone_gray
     speckle: 0.11
     ore_color: "#C8A883"
-  gold_ore.png:
+  gold_ore.block.png:
     base: stone_gray
     speckle: 0.11
     ore_color: "#F2C94C"
-  ruby_ore.png:
+  ruby_ore.block.png:
     base: stone_gray
     speckle: 0.11
     ore_color: "#D7263D"
-  emerald_ore.png:
+  emerald_ore.block.png:
     base: stone_gray
     speckle: 0.11
     ore_color: "#27C26E"
-  mythril_ore.png:
+  mythril_ore.block.png:
     base: stone_gray
     speckle: 0.11
     ore_color: "#7FD7E8"
   # Snow: the cold-biome / mountain-peak surface coat.
-  snow.png:
+  snow.block.png:
     base: "#EAF2FA"
     speckle: 0.05
+
+  # --- Flora expansion: ground plants (CROSS sprites + a model cactus) ---------
+  # tall_grass / fern: tufts of vertical blades (see the `blades` pattern above).
+  tall_grass.block.png:
+    base: lime
+    blades: true
+  fern.block.png:
+    base: forest          # darker, woodland green
+    blades: true
+  # Flowers: a green stem with a coloured blossom (petal + centre dot) near the top.
+  flower_red.block.png:
+    base: forest
+    flower: {petal: "#C9384A", center: "#F2C94C"}
+  flower_yellow.block.png:
+    base: forest
+    flower: {petal: "#E8C038", center: "#E2531E"}
+  # Mushroom: a short pale stem under a domed, speckled cap.
+  red_mushroom.block.png:
+    base: forest
+    mushroom: {cap: "#C0392B", stem: "#EDE3D0", spots: "#F4ECD8"}
+  # Cactus: a solid green column (render: model) with vertical ribs (streaks) + grain.
+  cactus.block.png:
+    base: "#3C7A4A"
+    streaks: true
+    speckle: 0.06
+
+  # --- Flora expansion: tree species (logs reuse streaks/rings; leaves reuse the
+  #     `leaves` cutout — only the base colour changes per species) --------------
+  # Birch: pale papery bark with dark streaks; light, airy green canopy.
+  birch_log_side.block.png:
+    base: "#D8D2C0"
+    streaks: true
+  birch_log_top.block.png:
+    base: "#E2DCC8"
+    rings: true
+  birch_leaves.block.png:
+    base: "#7BAE54"
+    speckle: 0.16
+    leaves: true
+  # Pine: reddish bark; dark blue-green needles.
+  pine_log_side.block.png:
+    base: "#6E4326"
+    streaks: true
+  pine_log_top.block.png:
+    base: "#7A5030"
+    rings: true
+  pine_leaves.block.png:
+    base: "#2E5A40"
+    speckle: 0.15
+    leaves: true
+  # Maple: grey-brown bark; warm autumn-orange canopy.
+  maple_log_side.block.png:
+    base: "#5A4636"
+    streaks: true
+  maple_log_top.block.png:
+    base: "#6A5440"
+    rings: true
+  maple_leaves.block.png:
+    base: "#C8642A"
+    speckle: 0.18
+    leaves: true
+  # Willow: grey bark; pale yellow-green drooping canopy.
+  willow_log_side.block.png:
+    base: "#5C5142"
+    streaks: true
+  willow_log_top.block.png:
+    base: "#6A5F4E"
+    rings: true
+  willow_leaves.block.png:
+    base: "#8FAE4A"
+    speckle: 0.16
+    leaves: true

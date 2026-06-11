@@ -4,6 +4,7 @@
 #include "core/DayNight.h"
 #include "entity/Armature.h"
 #include "entity/ItemEntity.h"
+#include "entity/Particles.h"
 #include "core/Input.h"
 #include "core/Palette.h"
 #include "core/Settings.h"
@@ -55,7 +56,10 @@ private:
     // Destroy the block at world coords (drops it to the inventory in survival) /
     // place `id` there; both sync with streaming, remesh and reseed liquid flow.
     void breakBlockAt(const glm::ivec3& b);
-    void placeBlockAt(const glm::ivec3& t, uint16_t id);
+    void placeBlockAt(const glm::ivec3& t, uint16_t id, uint8_t metadata = 0);
+    // Change only a block's shape metadata in place (keeps its id; no inventory
+    // cost) — the hammer's reshape/rotate. Same streaming/relight/remesh path.
+    void reshapeBlockAt(const glm::ivec3& b, uint16_t id, uint8_t metadata);
 
     // Survival per-frame upkeep: environmental damage (lava) and death/respawn.
     // No-op in creative. Health regen/fall damage live in PlayerController.
@@ -84,6 +88,10 @@ private:
     // Full inventory screen (E): the backpack grid + hotbar row, with click-to-move
     // between slots via a mouse-held cursor stack.
     void buildInventory(class Ui& ui, float w, float h, const InputState& in);
+    // Hammer shape picker: a hold-to-open radial. Holding right-click (with the
+    // hammer) shows the row of shapes; the mouse slides the selector; release sets
+    // the highlighted shape as the active build shape.
+    void buildShapePicker(class Ui& ui, float w, float h, const InputState& in);
     // Terraria-style crafting list beside the inventory: the recipes craftable from
     // the current inventory, click an output to craft one. (ISSUES #13B)
     void buildCrafting(class Ui& ui, float x, float y, float w, const InputState& in);
@@ -154,6 +162,8 @@ private:
     ChestStore        chests_;   // per-position chest contents (persisted to disk)
     Equipment         equipment_; // worn armour + trinkets (persisted with the player)
     ItemEntities      droppedItems_; // dropped-item entities (physics + walk-over pickup)
+    Particles         particles_;    // block-break chip particles (ISSUES #13M)
+    ParticleEffect    breakEffect_;  // data-driven break burst (assets/particles/break.prtcl)
 
     // Test entity (ISSUES #13E E4): a procedural animated biped proving the rig +
     // EntityRenderer pipeline end to end. Built once; animated by entityAnimTime_.
@@ -171,6 +181,7 @@ private:
     bool             creativeMode_ = true;   // creative: every block, infinite, no depletion (G toggles)
     ItemStack        cursorStack_;           // item held by the mouse in the inventory screen
     bool             debugOverlay_ = false;  // F1 info overlay visible
+    int              craftScroll_ = 0;       // first visible row of the (scrollable) crafting list
 
     // Hold-to-break mining state. While the left button is held on one block, time
     // accumulates until it reaches the block's break time (hardness / tool speed);
@@ -183,6 +194,16 @@ private:
 
     glm::vec3  spawnFeet_{0.0f}; // respawn point (world spawn; player save comes later)
     uint16_t   chestId_ = 0;     // resolved id of the chest block (0 if undefined)
+
+    // Hammer / block shapes (ISSUES #16). The hammer is a held tool that reshapes
+    // shapeable blocks. buildShape_ is the active shape (set via the B picker); a
+    // shapeable block placed while the hammer is in the hotbar is placed in this
+    // shape, and right-clicking a block with the hammer sets/rotates it.
+    uint16_t   hammerId_     = 0;                   // resolved id of the hammer item (0 if none)
+    ShapeKind  buildShape_   = ShapeKind::Slab;     // active shape the hammer applies/places
+    bool       shapePickerOpen_ = false;            // the hold-to-open shape radial is showing
+    ShapeKind  shapePickerSel_  = ShapeKind::Slab;  // shape currently highlighted in the radial
+    float      pickerSelPos_    = 0.0f;             // selector position (cell units) the mouse slides
     float            smoothedDt_ = 1.0f / 60.0f; // EMA of frame time, for the overlay's FPS
 
     // Atmosphere tuning panel (ephemeral 2nd menu column; not persisted).

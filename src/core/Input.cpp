@@ -21,8 +21,8 @@ InputState Input::poll() {
     in.jump    = down(GLFW_KEY_SPACE);            // walking: jump
     in.ascend  = down(GLFW_KEY_SPACE);            // free-fly: rise
     in.descend = down(GLFW_KEY_LEFT_CONTROL);     // free-fly: descend
-    in.sneak   = down(GLFW_KEY_LEFT_SHIFT);       // walking: crouch; free-fly: fast
-    in.sprint  = down(GLFW_KEY_LEFT_CONTROL);     // walking: run faster
+    in.sprint  = down(GLFW_KEY_LEFT_SHIFT);       // walking: run faster; free-fly: fast
+    in.sneak   = down(GLFW_KEY_C);                // walking: crouch (sneak)
 
     // Esc toggles the pause menu (edge-triggered). Quitting is the menu's job.
     const bool escKey = down(GLFW_KEY_ESCAPE);
@@ -44,6 +44,13 @@ InputState Input::poll() {
     in.toggleDebug = f1Key && !prevF1Key_;
     prevF1Key_ = f1Key;
 
+    // F11 toggles fullscreen (edge-triggered).
+    const bool f11Key = down(GLFW_KEY_F11);
+    in.toggleFullscreen = f11Key && !prevF11Key_;
+    prevF11Key_ = f11Key;
+
+    in.ctrl = down(GLFW_KEY_LEFT_CONTROL); // hammer modifier: rotate-on-click
+
     // F toggles free-fly, edge-triggered so holding it doesn't flip every frame.
     const bool freeFlyKey = down(GLFW_KEY_F);
     in.toggleFreeFly = freeFlyKey && !prevFreeFlyKey_;
@@ -59,7 +66,9 @@ InputState Input::poll() {
     prevBreakBtn_ = breakBtn;
 
     const bool placeBtn = glfwGetMouseButton(w, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS;
-    in.placeBlock = placeBtn && !prevPlaceBtn_;
+    in.placeBlock    = placeBtn && !prevPlaceBtn_;  // press edge
+    in.placeHeld     = placeBtn;                    // held (radial)
+    in.placeReleased = !placeBtn && prevPlaceBtn_;  // release edge (radial commit)
     prevPlaceBtn_ = placeBtn;
 
     // Number keys 1..9 pick the block type to place (held, not edge-triggered).

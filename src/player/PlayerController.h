@@ -2,6 +2,7 @@
 
 #include "player/Camera.h"
 #include "player/Inventory.h"
+#include "world/Shape.h"
 
 #include <glm/glm.hpp>
 
@@ -29,9 +30,12 @@ public:
 
     // Returns true if the block at integer coords (x,y,z) is solid.
     using SolidFn = std::function<bool(int x, int y, int z)>;
-    // For a solid block, its collision-box X/Z inset (0 = full cell; >0 = a centred
-    // column, e.g. the thin tree trunk). Y always spans the full cell. Optional.
-    using InsetFn = std::function<float(int x, int y, int z)>;
+    // The collision boxes of the cell at (x,y,z), in WORLD coordinates; returns
+    // the count (0 = not solid), writing up to kMaxShapeBoxes boxes. A full cube
+    // is one box; slabs/stairs/posts/walls return their shape's box union. This is
+    // what lets the player stand on a slab and step onto a stair. Optional (absent
+    // = every solid cell is treated as a full cube).
+    using BoxesFn = std::function<int(int x, int y, int z, ShapeBox out[])>;
     // Returns true if the cell at (x,y,z) is swimmable liquid (water). Drives the
     // buoyant swim physics + drowning. Optional; absent = no water anywhere.
     using WaterFn = std::function<bool(int x, int y, int z)>;
@@ -39,7 +43,7 @@ public:
     explicit PlayerController(glm::vec3 feetPosition);
 
     void setSolidFn(SolidFn fn) { isSolid_ = std::move(fn); }
-    void setCollisionInsetFn(InsetFn fn) { collisionInset_ = std::move(fn); }
+    void setCollisionBoxesFn(BoxesFn fn) { boxesFn_ = std::move(fn); }
     void setWaterFn(WaterFn fn) { isWater_ = std::move(fn); }
 
     // Advance one frame given elapsed time and this frame's input.
@@ -152,7 +156,7 @@ private:
     float     flySpeed_    = 12.0f; // free-fly base speed (kFlySpeed)
 
     SolidFn isSolid_;
-    InsetFn collisionInset_; // optional: thin-block X/Z inset (tree trunk)
+    BoxesFn boxesFn_;        // optional: per-cell collision boxes (slab/stairs/post/wall)
     WaterFn isWater_;        // optional: swimmable-liquid query (swim + drowning)
 };
 

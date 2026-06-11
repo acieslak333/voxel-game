@@ -239,6 +239,7 @@ add_executable(voxelgame
     src/world/Noise.cpp
     src/world/NoiseStack.cpp
     src/world/Raycast.cpp
+    src/world/Shape.cpp
     src/world/TerrainGenerator.cpp
     src/world/World.cpp
     src/world/WorldConfig.cpp
@@ -249,6 +250,7 @@ add_executable(voxelgame
     src/player/ChestStore.cpp
     src/entity/ItemEntity.cpp
     src/entity/Armature.cpp
+    src/entity/Particles.cpp
 )
 add_dependencies(voxelgame shaders)
 

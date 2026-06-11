@@ -169,7 +169,8 @@ void WorldRenderer::uploadChunkMesh(int cx, int cy, int cz) {
     // buffers immediately (callers issue a device-idle wait first).
     MeshData mesh = ChunkMesher::greedyMesh(world_.chunk(cx, cy, cz), world_.registry(),
                                             makeSampler(cx, cy, cz),
-                                            makeLightSampler(cx, cy, cz), true);
+                                            makeLightSampler(cx, cy, cz), true,
+                                            glm::ivec3(cx, cy, cz) * kChunkSize);
     installMesh(cx, cy, cz, std::move(mesh), /*deferOldBuffers=*/false);
 }
 
@@ -325,7 +326,8 @@ void WorldRenderer::buildMeshes() {
                    [this](const glm::ivec3& c) {
                        return ChunkMesher::greedyMesh(
                            world_.chunk(c.x, c.y, c.z), world_.registry(),
-                           makeSampler(c.x, c.y, c.z), makeLightSampler(c.x, c.y, c.z), true);
+                           makeSampler(c.x, c.y, c.z), makeLightSampler(c.x, c.y, c.z), true,
+                           c * kChunkSize);
                    });
 
     // Upload in slices: record every chunk's staging->device copy into ONE command
@@ -480,7 +482,8 @@ void WorldRenderer::workerLoop() {
         MeshData md = ChunkMesher::greedyMesh(world_.chunk(job.cx, job.cy, job.cz),
                                               world_.registry(),
                                               makeSampler(job.cx, job.cy, job.cz),
-                                              makeLightSampler(job.cx, job.cy, job.cz), true);
+                                              makeLightSampler(job.cx, job.cy, job.cz), true,
+                                              glm::ivec3(job.cx, job.cy, job.cz) * kChunkSize);
         {
             std::lock_guard<std::mutex> lk(resultMutex_);
             resultQueue_.push_back(MeshResult{job.cx, job.cy, job.cz, job.version, std::move(md)});

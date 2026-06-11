@@ -454,9 +454,16 @@ Core Optimizations:
       head/arms/legs) with a walk clip (limbs slerp-swing), stood in front of spawn,
       animated each frame. VISUALLY CONFIRMED via a headless `--screenshot` — renders
       as a clean white box-figure in the world.
-    - **STILL OPEN — E3:** vendor cgltf + a `.glb` loader so real Blockbench models
-      (skeleton + boxes + clips) replace the procedural test biped; then per-mob
-      texture array layers instead of borrowing block textures.
+    - **TODO — E3: cgltf `.glb` loader** (BLOCKED on an input asset). Vendor cgltf
+      (single-header) under `third_party/`, add `src/entity/GltfLoader.{h,cpp}` that
+      parses a Blockbench-exported `.glb` into a `vg::Skeleton` (node hierarchy ->
+      joints, mesh primitives -> `Box`es) + `AnimationClip`s (glTF TRS samplers ->
+      channels, CUBICSPLINE flattened to LINEAR), and load per-mob textures into
+      their own array layers instead of borrowing block textures. Then replace the
+      procedural `buildTestEntity` biped with a loaded model.
+      PREREQUISITE (only the user can provide): drop a simple Blockbench `.glb`
+      (a box model + one animation) into `assets/models/` to load + test against —
+      writing the parser blind without a sample model isn't verifiable.
     Original spec below.
     Direction chosen (user): **blocky**, so use box-part rigs, NOT skinned meshes.
     - **Authoring tool: Blockbench** (free, purpose-built for voxel/Minecraft-style box
@@ -586,8 +593,24 @@ Core Optimizations:
       land refactors incrementally with the --selftest golden as the safety net.
 
     **M. Particles & game-feel juice** (small wins)
-    PREREQ: a small **pooled particle system** — billboarded quads with lifetime +
-    gravity, drawn in one cheap instanced pass. Everything below hangs off it.
+    PREREQ: a small **pooled particle system** — **DONE** (`src/entity/Particles.{h,cpp}`):
+    a capped CPU pool of chips with gravity + drag + ground-settle + lifetime + a
+    size-shrink curve. Rendered as **flat 2D camera-facing billboards** (one batched
+    mesh built from the camera's right/up axes, lit as top faces) via the
+    EntityRenderer — no new pipeline. Effects are **data-driven `.prtcl` files**
+    (`vg::ParticleEffect::load`; `assets/particles/break.prtcl`) and authored live in
+    **`tools/particle_tool.py`** (Flask localhost editor on :5001 with sliders + a JS
+    canvas preview mirroring the C++ sim + Save). Dropped items stay 3D cubes; only
+    particles are 2D. Also
+    landed: **break particles** (a 14-chip burst pops out of a block when it breaks,
+    App::breakBlockAt) and the **crack overlay** (#13H below) — while mining, an
+    inflated cube of a crack-stage texture is drawn over the targeted block; the entity
+    shader's alpha cutout shows only the cracks, stage tracking `mineProgress01_`. The
+    crack textures (`crack_0..3.block.png`, `scripts/gen_cracks.py`) are interned as
+    extra texture-array layers by BlockRegistry (`crackLayer(stage)`). **Dropped items
+    now render** (#13B) as little spinning, bobbing block cubes via the same path
+    (`makeCubeMesh`). Remaining juice (place poof, splashes, embers, damage numbers,
+    screen shake, …) still hangs off the now-built particle system.
     - Particles: block-break shards (in the block's colour) + place poof; water splash
       + expanding ripple ring on entry, underwater bubbles; lava embers/sparks + faint
       smoke; torch flame flicker + smoke; hurt puff on hit; item-pickup sparkle / crit
@@ -622,9 +645,11 @@ Core Optimizations:
       lowers); a true shrunk crouch hitbox + the crouched render pose are deferred.
     - ~~**Sprint** — hold to run faster.~~ **DONE.** Already existed (7 m/s); rebound
       from Shift to **LeftCtrl** so Shift is free for sneak. Sneak overrides sprint.
-    - **Key scheme:** walking = Shift sneak / Ctrl sprint / Space jump; free-fly =
-      Space up / Ctrl down / Shift fast (free-fly fast moved onto the sneak key so
-      Shift still means "fast" in the air). Double-tap-to-sprint + stamina still open.
+    - **Key scheme (updated):** walking = **Shift sprint / C sneak** / Space jump;
+      free-fly = Space up / Ctrl down / **Shift fast**. (Sprint moved Ctrl->Shift and
+      sneak Shift->C; free-fly "fast" now follows sprint/Shift. Ctrl is otherwise the
+      hammer rotate modifier.) Sneak still overrides sprint. Double-tap-to-sprint +
+      stamina still open.
 
 14. **WORLD-GEN TOOLING + SINGLE ISLAND** — **DONE** (tuning aids + an island-shaped world)
 
@@ -693,6 +718,86 @@ Core Optimizations:
       16 + scale sea_level/splines/snow_line) for the vertical room.
 
 15. Remove all armors expecpt boots, Also make Inventory more polished. Add scrolable inventory, more compact trinket space, crafting when howevered should show what is it using for the recipe and not available recipes should be darkned
+    **DONE.**
+    - **Armour trimmed to boots:** `Equipment::kArmorSlots` 4 -> 1 (slot 0 = Feet;
+      `accepts()` returns Feet for slot 0, Trinket otherwise). The iron_helmet/
+      iron_chestplate block entries are KEPT (removing them would shift every later
+      block id and break saved chunks/inventories, per the blocks.yaml warning) but
+      are now unobtainable + unequippable (no Head/Chest slot, dropped from the
+      starter kit, non-placeable so not in the creative palette). The starter kit
+      now grants iron_boots so the one armour piece is reachable. `--logictest`
+      equipment checks rewritten for the boots+trinket layout (6 armour = 6%).
+    - **Compact gear panel** (buildEquipment): the lone boots slot centred above the
+      four trinkets in a 2-wide grid (was an 8-tall column), right-anchored beside
+      the inventory.
+    - **Crafting list overhaul** (buildCrafting): now lists ALL recipes (was only the
+      craftable ones); un-craftable recipes are drawn then **darkened** with a
+      translucent overlay (visible but disabled, not clickable); the list is
+      **scrollable** with the mouse wheel (capped window of 8 rows, "scroll for more"
+      hint); and **hovering a recipe shows a tooltip** of its inputs as `Nx name
+      (have)` so you can see what it consumes and how much you hold.
+    NOTE: "scrollable inventory" was applied to the crafting list (the part that
+    overflows now that all recipes show); the 27-slot backpack still fits without
+    scrolling. Equipment is not persisted, so the slot-count change is save-safe.
 
 
 16. textures are scaled where we shuldnt scale them they should persists in scale of 16x16 pixels texture as a blocks
+    **DONE (grew into a block-shape system).** The literal bug: the non-cube mesh
+    path (`pushQuad`) hardcoded UV 0..1 across the whole quad, so anything not 1
+    block wide rescaled the 16px texture (trunk squished 2x, torch/foliage
+    stretched). Fix: a shared `faceUV(pos, axis)` maps every axis-aligned box face
+    in *block units* (REPEAT sampler) — the same 16px/block density the cube greedy
+    path already used — so partial faces show the matching texture slice. CROSS
+    foliage planes keep the 0..1 sprite-fit (authored to fill the quad).
+
+    In conversation this grew into a per-placed-block **shape system** (`src/world/
+    Shape.{h,cpp}`): a *shapeable* solid (new `shapeable` flag, default solid+opaque
+    +cube) can be Cube / Slab (h+v) / Stairs / Post / Wall (auto-connecting), stored
+    in `Block::metadata` (0 = Cube, so all existing blocks/saves are unchanged;
+    liquids/foliage are not shapeable). `shapeBoxes()` is the SINGLE source of truth:
+    one box-union feeds BOTH the mesher (textured box faces, lit by the brightest
+    open neighbour like cube faces) AND collision/raycast. PlayerController's single
+    inset-column collision became a per-cell box list (`World::collisionBoxesAt`);
+    raycast's `InsetFn` became a `BoxesFn` reporting the struck sub-box face + hit
+    point. Placed blocks are always full cubes; shapes are applied only by the
+    **hammer**. Holding the hammer: **hold right-click** to open a shape radial —
+    the cursor stays locked and the mouse delta slides the selector across the
+    shapes; **release** sets the highlighted one as the active shape (a quick tap
+    keeps the current shape; Esc cancels). **Left-click** a block applies the active
+    shape oriented from where the player is looking (`orientForPlacement`), and
+    **Ctrl+left-click** steps through the orientations instead (manual rotate). The
+    hammer neither mines nor places. (The transient crosshair shape tooltip was
+    removed — the shape outline + radial are enough feedback.)
+    **Auto-step (walking on slabs/stairs):** PlayerController now steps up obstacles
+    up to `kStepHeight` (0.6) — if a grounded horizontal move is blocked, it retries
+    the move lifted by the step height and drops back onto the step, so you walk
+    straight up half-slabs and stair steps without jumping (kept only when it gains
+    ground; off while sneaking, which keeps its edge-stop). `--logictest` covers it.
+    **Orientation made predictable:** a slab fills the half you aimed at (top face ->
+    top, bottom face -> bottom, side -> clicked height); stairs ascend the way you
+    look and only go upside-down when you hit the underside (no more flips from a
+    side click). The block-selection **outline now traces the targeted block's actual
+    shape** (the `shapeBoxes` union from `World::collisionBoxesAt`, drawn per sub-box)
+    so it matches the collision/render volume — a slab highlights a half-box, stairs
+    two boxes, etc. And while the hammer is held the crosshair shows the **active
+    shape name + controls** (`L apply / Ctrl+L rotate / R-click pick`) for feedback.
+    Blocks also default to a `${name}.block.png` texture
+    (overridable per face). Verified: 15 new `--logictest` checks (shapeable flags,
+    metadata pack/unpack, box geometry, player stands on a slab), `--selftest` golden
+    unchanged (0x3ca4dfb49ca7f61e), and a headless `VG_SHAPES_DEMO` `--screenshot`
+    renders slab/stairs/post/wall/v-slab/cube correctly lit with unstretched textures.
+    Asset rename DONE: every block texture under assets/textures/ now carries the
+    `.block.png` suffix (e.g. `dirt.block.png`); textures.yaml keys + blocks.yaml refs
+    updated in lockstep; gen_textures.py writes by key so it's unaffected (cloud.png,
+    a non-block texture, kept). Dedicated hammer icon DONE: `scripts/gen_hammer.py`
+    draws a 16x16 mallet to `hammer.block.png` and the hammer block uses the
+    `${name}.block.png` default (no explicit `textures:`).
+    **Foliage refit DONE:** ground plants (grass/bush/torch) now fill exactly their
+    cell (spill removed) so the sprite reads at native size instead of an oversized
+    blur; LeafCube canopies keep a modest crown (overhang 0.42 -> 0.22). **Double-slab
+    DONE:** hammering a slab onto the OPPOSITE half of an existing slab fills it back
+    into a full cube (bottom + top = block). **Trunk:** oak_trunk widened to width 12,
+    sampling the centre 12px of the bark (a part — never scaled).
+    REMAINING (optional): drop the now-redundant `textures:` blocks from single-
+    texture entries so they rely on the `${name}.block.png` default; corner/inner
+    stairs and richer wall connections are still open shape-system extensions.

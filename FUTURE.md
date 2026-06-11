@@ -8,6 +8,26 @@ the current code should make them hard to add. Search the codebase for
 
 ---
 
+## Backlog — outstanding work
+
+A higher-level digest of what's still missing (the per-issue detail lives in
+`ISSUES.md`).
+
+### Content breadth
+
+- **Worldgen richness (C)** — rivers & lakes, cave variety (ravines, cave pools), ore-balance pass.
+- **Flora expansion (F)** — only oak so far; birch/maple/pine/willow + flowers/ferns/mushrooms/cacti/vines/lilypads are planned.
+- **Structure/template authoring (G)** — no system to capture/stamp houses, ruins, dungeons, villages (trees are currently a hardcoded special case).
+- **Dramatic mountains (14)** — needs a taller (256) world for vertical room.
+
+### Tech debt / optional
+
+- **LOD for distant chunks** (open since issue #3 — only matters at larger view distance).
+- **Codebase audit/refactor pass (L)** — God-class creep in `App.cpp`, renderer pipeline-boilerplate duplication, the mesher's growing render-type special-cases.
+- **Optional worldgen:** OpenSimplex2 noise, isometric genmap view.
+
+---
+
 ## Deferred features
 
 | Feature                | Status     | Where it hooks in (see also `TODO(future)` comments) |

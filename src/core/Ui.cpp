@@ -123,11 +123,50 @@ void Ui::roundRectOutline(float x, float y, float w, float h, float radius,
 
 void Ui::frame(float x, float y, float w, float h, const glm::vec4& fill,
                const glm::vec4& border, float thickness, float radius) {
+    if (haveSprites_) {
+        box(UiBox::Bg, x, y, w, h); // border + fill baked into the 9-patch sprite
+        return;
+    }
     roundRect(x, y, w, h, radius, border); // whole shape = border colour
     if (w > 2 * thickness && h > 2 * thickness) {
         roundRect(x + thickness, y + thickness, w - 2 * thickness, h - 2 * thickness,
                   std::max(0.0f, radius - thickness), fill); // inset fill leaves the border
     }
+}
+
+void Ui::ninePatch(float x, float y, float w, float h, uint32_t layer,
+                   const glm::vec4& tint) {
+    constexpr float kSrc = 16.0f, kInset = 5.0f; // source size + corner inset (px)
+    const float u0 = 0.0f, u1 = kInset / kSrc, u2 = (kSrc - kInset) / kSrc, u3 = 1.0f;
+    const float cd = std::min({8.0f, w * 0.5f, h * 0.5f}); // dest corner size
+    const float mw = w - 2 * cd, mh = h - 2 * cd;          // stretched middle span
+    const float xR = x + w - cd, yB = y + h - cd, mx = x + cd, my = y + cd;
+    auto s = [&](float dx, float dy, float dw, float dh,
+                 float su0, float sv0, float su1, float sv1) {
+        if (dw > 0.0f && dh > 0.0f) r_.sprite(dx, dy, dw, dh, layer, su0, sv0, su1, sv1, tint);
+    };
+    // 4 corners (fixed size), 4 edges (stretched on one axis), centre (both).
+    s(x,  y,  cd, cd, u0, u0, u1, u1);  s(xR, y,  cd, cd, u2, u0, u3, u1);
+    s(x,  yB, cd, cd, u0, u2, u1, u3);  s(xR, yB, cd, cd, u2, u2, u3, u3);
+    s(mx, y,  mw, cd, u1, u0, u2, u1);  s(mx, yB, mw, cd, u1, u2, u2, u3);
+    s(x,  my, cd, mh, u0, u1, u1, u2);  s(xR, my, cd, mh, u2, u1, u3, u2);
+    s(mx, my, mw, mh, u1, u1, u2, u2);
+}
+
+void Ui::box(UiBox kind, float x, float y, float w, float h, const glm::vec4& tint) {
+    if (!haveSprites_) { roundRect(x, y, w, h, kRadius, kCharcoal); return; }
+    uint32_t layer = sprites_.bg;
+    switch (kind) {
+        case UiBox::Bg:       layer = sprites_.bg;       break;
+        case UiBox::Bg2:      layer = sprites_.bg2;      break;
+        case UiBox::Bg3:      layer = sprites_.bg3;      break;
+        case UiBox::Eq:       layer = sprites_.eq;       break;
+        case UiBox::Button:   layer = sprites_.button;   break;
+        case UiBox::SliderBg: layer = sprites_.sliderBg; break;
+        case UiBox::Slider:   layer = sprites_.slider;   break;
+        case UiBox::Border:   layer = sprites_.border;   break;
+    }
+    ninePatch(x, y, w, h, layer, tint);
 }
 
 void Ui::line(const glm::vec2& a, const glm::vec2& b, float thickness,
@@ -182,8 +221,12 @@ void Ui::labelCentered(float cx, float y, const std::string& s, float scale,
 
 bool Ui::button(float x, float y, float w, float h, const std::string& label) {
     const bool hot = hovered(x, y, w, h);
-    // Charcoal fill with a thick cream border; the border turns lilac on hover.
-    frame(x, y, w, h, kCharcoal, hot ? kLilac : kCream, kBorder, kRadius);
+    if (haveSprites_) {
+        box(UiBox::Button, x, y, w, h);
+        if (hot) box(UiBox::Border, x, y, w, h, kLilac); // lilac border ring on hover
+    } else {
+        frame(x, y, w, h, kCharcoal, hot ? kLilac : kCream, kBorder, kRadius);
+    }
     const float tw = r_.textWidth(label, kFontScale);
     const float th = r_.lineHeight(kFontScale);
     textOutlined(r_, x + (w - tw) * 0.5f, y + (h - th) * 0.5f, label, kFontScale, kCream);
@@ -210,12 +253,18 @@ float Ui::slider(float x, float y, float w, float h, float value, float minv, fl
         }
     }
 
-    // Framed charcoal track with a thick cream border; a lilac bar fills to the
-    // value and a chunky cream handle rides on top.
-    frame(x, y, w, h, kCharcoal, kCream, kBorder, kRadius);
+    // Recessed track, a lilac fill bar to the value, and a chunky cream handle.
     const float pad = kBorder;
-    if (t > 0.0f && w > 2 * pad && h > 2 * pad) {
-        r_.rect(x + pad, y + pad, (w - 2 * pad) * t, h - 2 * pad, kLilac);
+    if (haveSprites_) {
+        box(UiBox::SliderBg, x, y, w, h);
+        if (t > 0.0f && w > 2 * pad && h > 2 * pad) {
+            box(UiBox::Slider, x + pad, y + pad, (w - 2 * pad) * t, h - 2 * pad);
+        }
+    } else {
+        frame(x, y, w, h, kCharcoal, kCream, kBorder, kRadius);
+        if (t > 0.0f && w > 2 * pad && h > 2 * pad) {
+            r_.rect(x + pad, y + pad, (w - 2 * pad) * t, h - 2 * pad, kLilac);
+        }
     }
     const float handleW = 3 * kUnit;
     roundRect(x + t * w - handleW * 0.5f, y - kUnit, handleW, h + 2 * kUnit, kUnit, kCream);

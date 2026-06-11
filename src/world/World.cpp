@@ -130,6 +130,20 @@ World::World(const WorldConfig& config, const std::string& blocksFile)
     trunkId_  = registry_.idByName("oak_trunk");
     leavesId_ = registry_.idByName("oak_leaves");
     bushId_   = registry_.idByName("bush");
+    tallGrassId_    = registry_.idByName("tall_grass");
+    fernId_         = registry_.idByName("fern");
+    flowerRedId_    = registry_.idByName("flower_red");
+    flowerYellowId_ = registry_.idByName("flower_yellow");
+    redMushroomId_  = registry_.idByName("red_mushroom");
+    cactusId_       = registry_.idByName("cactus");
+    birchTrunkId_   = registry_.idByName("birch_trunk");
+    birchLeavesId_  = registry_.idByName("birch_leaves");
+    pineTrunkId_    = registry_.idByName("pine_trunk");
+    pineLeavesId_   = registry_.idByName("pine_leaves");
+    mapleTrunkId_   = registry_.idByName("maple_trunk");
+    mapleLeavesId_  = registry_.idByName("maple_leaves");
+    willowTrunkId_  = registry_.idByName("willow_trunk");
+    willowLeavesId_ = registry_.idByName("willow_leaves");
     waterId_  = registry_.idByName("water");
     lavaId_   = registry_.idByName("lava");
     coalId_    = registry_.idByName("coal_ore");
@@ -469,17 +483,43 @@ void World::generateColumn(int cx, int cz) {
                 pc.set(lx, wy % N, lz, Block{pid, 0});
             };
 
-            // A single-cell shrub, at the biome's bush density (0 underwater/desert-rock).
-            if (hash01(wx, wz, seed ^ 0xb05fu) < ci.bushDensity) {
-                place(h + 1, bushId_);
+            // Ground plants, at the biome's plant density. The biome's `plant:`
+            // theme (ci.plantKind) chooses the FAMILY; a second per-column variety
+            // hash picks the actual plant, so a meadow mixes grass + flowers and a
+            // wood mixes ferns + mushrooms + shrubs. Single-column (seam-safe).
+            if (ci.plantKind != FloraKind::None &&
+                hash01(wx, wz, seed ^ 0xb05fu) < ci.bushDensity) {
+                const float v = hash01(wx, wz, seed ^ 0x91a3u); // variety roll [0,1)
+                switch (ci.plantKind) {
+                    case FloraKind::Desert: {
+                        // A 1..3-tall cactus column (each cell a thin model block).
+                        const int ch = 1 + static_cast<int>(hash01(wx, wz, seed ^ 0xcac7u) * 2.99f);
+                        for (int k = 1; k <= ch; ++k) place(h + k, cactusId_);
+                        break;
+                    }
+                    case FloraKind::GrassFlower:
+                        place(h + 1, v < 0.72f ? tallGrassId_
+                                   : v < 0.87f ? flowerRedId_ : flowerYellowId_);
+                        break;
+                    case FloraKind::Forest:
+                        place(h + 1, v < 0.40f ? fernId_
+                                   : v < 0.62f ? bushId_
+                                   : v < 0.82f ? redMushroomId_ : flowerRedId_);
+                        break;
+                    case FloraKind::Bush:
+                    default:
+                        place(h + 1, bushId_);
+                        break;
+                }
             }
 
-            // Oak trees. A tree rooted at column (ox,oz) spreads its canopy over the
+            // Trees. A tree rooted at column (ox,oz) spreads its canopy over the
             // neighbouring columns, so this column gathers contributions from every
             // nearby root within the canopy radius — keeping generation a pure
             // function of world coords (seam-safe, approach-independent). The root's
-            // BIOME sets how likely a tree is (dense forests, none in desert/ocean).
-            constexpr int kTreeR = 3; // max canopy half-width gathered, in blocks
+            // BIOME sets how likely a tree is (dense forests, none in desert/ocean)
+            // AND which SPECIES roots (oc.treeKind -> trunk/leaf blocks + crown shape).
+            constexpr int kTreeR = 4; // max canopy half-width gathered (broad maples/willows)
             const float maxTreeD = gen_.maxTreeDensity();
             for (int oz = wz - kTreeR; oz <= wz + kTreeR; ++oz) {
                 for (int ox = wx - kTreeR; ox <= wx + kTreeR; ++ox) {
@@ -493,42 +533,94 @@ void World::generateColumn(int cx, int cz) {
                     if (th >= oc.treeDensity) continue;
                     const int oh = oc.height;
 
-                    // Varied trunk height (5..11), hashed per root, so canopy tops
-                    // sit at different levels across the forest.
-                    const int trunkH =
-                        5 + static_cast<int>(hash01(ox, oz, seed ^ 0x7234u) * 6.99f); // 5..11
+                    const int   dx = wx - ox, dz = wz - oz;
+                    const int   d2 = dx * dx + dz * dz;
+                    const float csz = hash01(ox, oz, seed ^ 0x7241u); // canopy-size roll
+                    const float hh  = hash01(ox, oz, seed ^ 0x7234u); // trunk-height roll
+
+                    // Resolve the SPECIES (from the root biome) to its blocks, trunk
+                    // height, crown radii (rH wide, rV tall) and silhouette shape.
+                    enum Shape { Rounded, Conical, Drooping };
+                    uint16_t trunkBlk = trunkId_, leafBlk = leavesId_;
+                    int trunkH, rH, rV, droop = 0;
+                    Shape shape = Rounded;
+                    switch (oc.treeKind) {
+                        case TreeKind::Birch:
+                            trunkBlk = birchTrunkId_; leafBlk = birchLeavesId_;
+                            trunkH = 7 + static_cast<int>(hh * 5.99f);  // 7..12, slim
+                            rH = 2; rV = 3; break;
+                        case TreeKind::Pine:
+                            trunkBlk = pineTrunkId_; leafBlk = pineLeavesId_;
+                            trunkH = 8 + static_cast<int>(hh * 6.99f);  // 8..14, spire
+                            rH = 2 + static_cast<int>(csz * 1.99f); rV = trunkH;
+                            shape = Conical; break;
+                        case TreeKind::Maple:
+                            trunkBlk = mapleTrunkId_; leafBlk = mapleLeavesId_;
+                            trunkH = 5 + static_cast<int>(hh * 4.99f);  // 5..9
+                            rH = 3 + static_cast<int>(csz * 1.99f); rV = rH; break; // broad, round
+                        case TreeKind::Willow:
+                            trunkBlk = willowTrunkId_; leafBlk = willowLeavesId_;
+                            trunkH = 6 + static_cast<int>(hh * 4.99f);  // 6..10
+                            rH = 3 + static_cast<int>(csz * 1.99f); rV = rH;
+                            droop = 3 + static_cast<int>(csz * 2.99f);  // strand length
+                            shape = Drooping; break;
+                        case TreeKind::Oak:
+                        default:
+                            trunkBlk = trunkId_; leafBlk = leavesId_;
+                            trunkH = 5 + static_cast<int>(hh * 6.99f);  // 5..11
+                            rH = 2 + static_cast<int>(csz * 1.99f); rV = rH + 1; break;
+                    }
                     const int topY = oh + trunkH; // topmost trunk block
-                    const int dx = wx - ox, dz = wz - oz;
 
                     // Trunk occupies only the root column.
                     if (dx == 0 && dz == 0) {
-                        for (int wy = oh + 1; wy <= topY; ++wy) place(wy, trunkId_);
+                        for (int wy = oh + 1; wy <= topY; ++wy) place(wy, trunkBlk);
                     }
 
-                    // Ellipsoidal canopy: a rounded crown wrapping the trunk top.
-                    // Horizontal radius rH (2..3) with a taller vertical radius rV
-                    // for an oval crown; size hashed per root for variety. The trunk
-                    // pokes up into the hollow core.
-                    const int   d2  = dx * dx + dz * dz;
-                    const float csz = hash01(ox, oz, seed ^ 0x7241u);
-                    const int   rH  = 2 + static_cast<int>(csz * 1.99f); // 2..3
-                    const int   rV  = rH + 1;                            // taller -> oval
-                    if (d2 > rH * rH + 1) continue;     // outside the crown footprint
-                    const int cyc = topY - 1 + rV / 2;  // canopy centre Y
-                    for (int wy = cyc - rV; wy <= cyc + rV; ++wy) {
-                        const int   ddy = wy - cyc;
-                        const float e =
-                            static_cast<float>(d2) / static_cast<float>(rH * rH) +
-                            static_cast<float>(ddy * ddy) / static_cast<float>(rV * rV);
-                        if (e > 1.0f) continue;                         // outside the ellipsoid
-                        if (dx == 0 && dz == 0 && wy <= topY) continue; // leave the trunk core
-                        // Ragged the silhouette: thin the outer shell so the crown
-                        // isn't a perfect ball.
-                        if (e > 0.72f &&
-                            hash01(wx * 73 + wy, wz * 19 + (wy & 7), seed ^ 0x7240u) < 0.28f) {
-                            continue;
+                    if (shape == Conical) {
+                        // Pine: a stack of shrinking rings — radius grows downward from
+                        // a one-block spire above the trunk top, in tiered layers.
+                        if (d2 > rH * rH + 1) continue;
+                        const int tipY  = topY + 1;
+                        const int baseY = topY - (trunkH - 2);
+                        for (int wy = baseY; wy <= tipY; ++wy) {
+                            int r = (tipY - wy) / 2;             // two rows per radius step
+                            if (r > rH) r = rH;
+                            if (d2 > r * r) continue;
+                            if (dx == 0 && dz == 0 && wy <= topY) continue; // keep trunk visible
+                            if (((tipY - wy) & 1) && d2 == r * r &&         // thin alt. tiers
+                                hash01(wx * 73 + wy, wz * 19, seed ^ 0x7240u) < 0.5f) continue;
+                            place(wy, leafBlk);
                         }
-                        place(wy, leavesId_);
+                        continue;
+                    }
+
+                    // Rounded / Drooping: an ellipsoid crown centred above the trunk
+                    // top, ragged at the outer shell so it isn't a perfect ball.
+                    const int cyc = topY - 1 + rV / 2; // canopy centre Y
+                    if (d2 <= rH * rH + 1) {
+                        for (int wy = cyc - rV; wy <= cyc + rV; ++wy) {
+                            const int   ddy = wy - cyc;
+                            const float e =
+                                static_cast<float>(d2) / static_cast<float>(rH * rH) +
+                                static_cast<float>(ddy * ddy) / static_cast<float>(rV * rV);
+                            if (e > 1.0f) continue;
+                            if (dx == 0 && dz == 0 && wy <= topY) continue; // leave the trunk core
+                            if (e > 0.72f &&
+                                hash01(wx * 73 + wy, wz * 19 + (wy & 7), seed ^ 0x7240u) < 0.28f) {
+                                continue;
+                            }
+                            place(wy, leafBlk);
+                        }
+                    }
+
+                    // Willow: hang leaf strands down from the crown's outer rim, so the
+                    // canopy droops. Only some rim columns get a strand (hashed).
+                    if (shape == Drooping && d2 >= (rH - 1) * (rH - 1) && d2 <= rH * rH + 1 &&
+                        hash01(wx, wz, seed ^ 0x7242u) < 0.6f) {
+                        const int rim = cyc - rV / 2; // just below the crown's middle
+                        const int len = droop + static_cast<int>(hash01(wx, wz, seed ^ 0x7243u) * 2.99f);
+                        for (int k = 0; k < len; ++k) place(rim - k, leafBlk);
                     }
                 }
             }
@@ -576,6 +668,48 @@ float World::modelInsetAt(int wx, int wy, int wz) const {
     const Block b = blockAt(wx, wy, wz);
     return registry_.renderType(b.id) == RenderType::Model ? registry_.modelInset(b.id)
                                                            : 0.0f;
+}
+
+int World::collisionBoxesAt(int wx, int wy, int wz, ShapeBox out[]) const {
+    if (!isSolid(wx, wy, wz)) return 0;
+    const Block b = blockAt(wx, wy, wz);
+
+    // A thin Model post (e.g. a trunk) collides as its centred render column.
+    if (registry_.renderType(b.id) == RenderType::Model) {
+        const float ins = registry_.modelInset(b.id);
+        out[0] = {{wx + ins, static_cast<float>(wy), wz + ins},
+                  {wx + 1.0f - ins, wy + 1.0f, wz + 1.0f - ins}};
+        return 1;
+    }
+
+    ShapeKind kind   = ShapeKind::Cube;
+    uint8_t   orient = 0;
+    uint8_t   wallMask = 0;
+    if (registry_.shapeable(b.id)) {
+        kind   = shapeKindOf(b.metadata);
+        orient = shapeOrientOf(b.metadata);
+        if (kind == ShapeKind::Wall) {
+            auto conn = [&](int dx, int dy, int dz) {
+                const Block nb = blockAt(wx + dx, wy + dy, wz + dz);
+                const bool fullCube = registry_.isOpaque(nb.id) &&
+                    (!registry_.shapeable(nb.id) || shapeKindOf(nb.metadata) == ShapeKind::Cube);
+                return fullCube || (registry_.shapeable(nb.id) &&
+                                    shapeKindOf(nb.metadata) == ShapeKind::Wall);
+            };
+            if (conn(0, 0, -1)) wallMask |= 0x1;
+            if (conn(1, 0, 0))  wallMask |= 0x2;
+            if (conn(0, 0, 1))  wallMask |= 0x4;
+            if (conn(-1, 0, 0)) wallMask |= 0x8;
+        }
+    }
+    const int n = shapeBoxes(kind, orient, wallMask, out);
+    const glm::vec3 origin(static_cast<float>(wx), static_cast<float>(wy),
+                           static_cast<float>(wz));
+    for (int i = 0; i < n; ++i) {
+        out[i].lo += origin;
+        out[i].hi += origin;
+    }
+    return n;
 }
 
 int World::lightIndex(int wx, int wy, int wz) const {

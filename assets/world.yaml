@@ -150,7 +150,7 @@ features:
   # the neighbouring columns. Grass only. The generator stamps each tree from every
   # column it overlaps (a pure function of world coords), so canopies cross chunk
   # seams cleanly. 0 = no trees.
-  tree_density: 0.005
+  tree_density: 0.00005
   # Ground bushes: a single crossed-quad shrub on a grass surface. Single-column.
   bush_density: 0.1
 

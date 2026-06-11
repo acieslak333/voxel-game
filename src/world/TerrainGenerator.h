@@ -23,6 +23,17 @@ struct Spline {
     [[nodiscard]] float at(float x) const;
 };
 
+// Which family of ground plants a biome scatters (the biome's `plant:` theme).
+// World::generateColumn maps the theme + a per-column variety hash to an actual
+// plant block, so one theme yields a mix (e.g. GrassFlower = mostly tall grass
+// with the odd flower). None = no ground plants (beaches, bare mountains, ocean).
+enum class FloraKind : uint8_t { None, Bush, GrassFlower, Forest, Desert };
+
+// Which tree species a biome grows (its `tree:` key). World::generateColumn reads
+// the ROOT column's species and shapes the canopy accordingly (oak/birch/maple =
+// rounded, pine = conical, willow = drooping). Oak is the default.
+enum class TreeKind : uint8_t { Oak, Birch, Pine, Maple, Willow };
+
 // -----------------------------------------------------------------------------
 //  BiomeDef — one biome, loaded from assets/biomes.yaml. A biome is selected for
 //  a column when the column's climate (temperature, humidity) and elevation (in
@@ -40,7 +51,9 @@ struct BiomeDef {
     uint16_t fillerId = 0;  // a few blocks under the surface (dirt/sand/stone)
     bool   snow         = false;  // surface is snow regardless of altitude
     float  treeDensity  = 0.0f;   // per-column probability a tree roots here
-    float  bushDensity   = 0.0f;  // per-column probability of a shrub
+    float  bushDensity   = 0.0f;  // per-column probability of a ground plant
+    FloraKind plant      = FloraKind::Bush; // which plant family scatters here
+    TreeKind  tree       = TreeKind::Oak;   // which tree species roots here
 };
 
 // What generateColumn needs to know about a single (x, z) column.
@@ -52,6 +65,8 @@ struct ColumnInfo {
     uint16_t fillerId   = 0; // resolved sub-surface block
     float    treeDensity = 0.0f;
     float    bushDensity = 0.0f;
+    FloraKind plantKind  = FloraKind::None; // resolved plant family for this column
+    TreeKind  treeKind   = TreeKind::Oak;   // resolved tree species for this column
 };
 
 // -----------------------------------------------------------------------------

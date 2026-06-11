@@ -36,7 +36,7 @@ bool rayBox(const glm::vec3& o, const glm::vec3& d, const glm::vec3& bmin,
 } // namespace
 
 RaycastHit raycastVoxel(const glm::vec3& origin, const glm::vec3& dir,
-                        float maxDistance, const SolidFn& solid, const InsetFn& inset) {
+                        float maxDistance, const SolidFn& solid, const BoxesFn& boxes) {
     RaycastHit result;
     if (glm::dot(dir, dir) == 0.0f) {
         return result; // no direction, no hit
@@ -96,29 +96,41 @@ RaycastHit raycastVoxel(const glm::vec3& origin, const glm::vec3& dir,
             break;
         }
         if (solid(x, y, z)) {
-            const float ins = inset ? inset(x, y, z) : 0.0f;
-            if (ins <= 0.0f) {
-                result.hit = true;
-                result.block = {x, y, z};
+            ShapeBox cellBoxes[kMaxShapeBoxes];
+            const int n = boxes ? boxes(x, y, z, cellBoxes) : 0;
+            if (n == 0) {
+                // Full-cell target (cut-out foliage, or no box provider): the DDA
+                // entry face/point is the hit.
+                result.hit    = true;
+                result.block  = {x, y, z};
                 result.normal = normal;
+                result.point  = origin + t * d;
                 return result;
             }
-            // Thin centred column (e.g. a tree trunk): only a hit if the ray
-            // actually pierces the box; otherwise keep marching to the block behind.
-            const glm::vec3 bmin(static_cast<float>(x) + ins, static_cast<float>(y),
-                                 static_cast<float>(z) + ins);
-            const glm::vec3 bmax(static_cast<float>(x) + 1.0f - ins,
-                                 static_cast<float>(y) + 1.0f,
-                                 static_cast<float>(z) + 1.0f - ins);
-            float tn = 0.0f;
+            // Refine: hit the nearest sub-box the ray actually pierces; if it
+            // misses them all (e.g. aiming over a slab), keep marching to the
+            // block behind. normal/point describe the struck sub-box face.
+            float      bestT = std::numeric_limits<float>::infinity();
             glm::ivec3 bnormal{0};
-            if (rayBox(origin, d, bmin, bmax, maxDistance, tn, bnormal)) {
-                result.hit = true;
-                result.block = {x, y, z};
+            bool       got = false;
+            for (int i = 0; i < n; ++i) {
+                float tn = 0.0f;
+                glm::ivec3 nrm{0};
+                if (rayBox(origin, d, cellBoxes[i].lo, cellBoxes[i].hi, maxDistance, tn, nrm) &&
+                    tn < bestT) {
+                    bestT   = tn;
+                    bnormal = nrm;
+                    got     = true;
+                }
+            }
+            if (got) {
+                result.hit    = true;
+                result.block  = {x, y, z};
                 result.normal = bnormal;
+                result.point  = origin + bestT * d;
                 return result;
             }
-            // missed the column — fall through and continue the DDA
+            // missed every sub-box — fall through and continue the DDA
         }
     }
     return result;

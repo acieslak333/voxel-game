@@ -1,0 +1,14 @@
+# Particle effect (ISSUES #13M). Authored in tools/particle_tool.py.
+# Loaded by vg::ParticleEffect::load, played by vg::Particles (2D billboards).
+name: break
+texture: ""
+count: 14
+gravity: -20
+drag: 3.4
+spawn_radius: 0.3
+speed: [0, 7.1]
+up_bias: 3.5
+lifetime: [0.45, 1.8]
+size: [0.05, 0.11]
+size_end: 1
+spin: [-2.5, 3]

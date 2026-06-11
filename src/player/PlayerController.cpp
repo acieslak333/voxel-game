@@ -22,6 +22,9 @@ constexpr float kFlySprint   = 26.0f;
 
 constexpr float kGravity     = -26.0f;  // m/s^2
 constexpr float kJumpSpeed   = 8.4f;    // gives ~1.35 block jump height
+// Auto-step: walk up obstacles no taller than this without jumping (half-slabs and
+// stair steps are 0.5; below 1.0 so you can't walk up a full block).
+constexpr float kStepHeight  = 0.6f;
 
 // Fall damage: falls up to kSafeFall blocks are harmless; beyond that you lose
 // kFallDmgPerBlock HP per extra block (so on a 100-HP scale a ~23-block drop kills).
@@ -105,8 +108,8 @@ void PlayerController::update(float dt, const InputState& input) {
         if (glm::dot(wish, wish) > 0.0f) {
             wish = glm::normalize(wish);
         }
-        // Holding Shift (sneak key) flies ~2.17x faster (old kFlySprint/kFlySpeed).
-        const float speed = flySpeed_ * (input.sneak ? (kFlySprint / kFlySpeed) : 1.0f);
+        // Holding Shift (sprint) flies ~2.17x faster (kFlySprint/kFlySpeed).
+        const float speed = flySpeed_ * (input.sprint ? (kFlySprint / kFlySpeed) : 1.0f);
         feet_ += wish * speed * dt;
         syncCameraToBody();
         return;
@@ -169,12 +172,41 @@ void PlayerController::update(float dt, const InputState& input) {
     // would leave the player hanging over a drop (Minecraft-style). Try each axis,
     // and undo it if the footprint ends up with no solid block beneath it.
     const bool edgeStop = sneaking_ && wasGrounded;
-    const float prevX = feet_.x;
-    moveAxis(feet_, delta.x, 0);
-    if (edgeStop && !hasGroundSupport()) { feet_.x = prevX; velocity_.x = 0.0f; }
-    const float prevZ = feet_.z;
-    moveAxis(feet_, delta.z, 2);
-    if (edgeStop && !hasGroundSupport()) { feet_.z = prevZ; velocity_.z = 0.0f; }
+    const glm::vec3 startFeet = feet_;
+    auto horizontalMove = [&]() {
+        const float prevX = feet_.x;
+        moveAxis(feet_, delta.x, 0);
+        if (edgeStop && !hasGroundSupport()) { feet_.x = prevX; velocity_.x = 0.0f; }
+        const float prevZ = feet_.z;
+        moveAxis(feet_, delta.z, 2);
+        if (edgeStop && !hasGroundSupport()) { feet_.z = prevZ; velocity_.z = 0.0f; }
+    };
+    horizontalMove();
+
+    // Auto-step: if grounded and a low obstacle stopped the horizontal move short,
+    // retry it lifted by the step height, then drop back onto the step — so you walk
+    // straight up slabs and stairs without jumping. Disabled while sneaking (the
+    // edge-stop owns crouch movement) and only kept if it actually gains ground.
+    constexpr float kEps = 1e-4f;
+    const bool blocked = std::abs(feet_.x - startFeet.x) + kEps < std::abs(delta.x) ||
+                         std::abs(feet_.z - startFeet.z) + kEps < std::abs(delta.z);
+    if (wasGrounded && !edgeStop && blocked) {
+        const glm::vec3 flat = feet_; // result without stepping
+        auto horiz2 = [&](const glm::vec3& p) {
+            const float dx = p.x - startFeet.x, dz = p.z - startFeet.z;
+            return dx * dx + dz * dz;
+        };
+        feet_ = startFeet;
+        const float yBefore = feet_.y;
+        moveAxis(feet_, kStepHeight, 1);          // rise (capped by any ceiling)
+        const float climbed = feet_.y - yBefore;
+        horizontalMove();
+        moveAxis(feet_, -climbed, 1);             // settle down onto the step
+        if (horiz2(feet_) <= horiz2(flat) + kEps) {
+            feet_ = flat;                         // no gain -> keep the flat result
+        }
+    }
+
     moveAxis(feet_, delta.y, 1);
 
     // Landed this frame after falling: apply fall damage from the impact speed —
@@ -251,46 +283,43 @@ void PlayerController::moveAxis(glm::vec3& feet, float delta, int axis) {
     const int b0 = static_cast<int>(std::floor(lo[o2] + kEps));
     const int b1 = static_cast<int>(std::floor(hi[o2] - kEps));
 
-    // The collision AABB of a solid cell, accounting for thin (Model) blocks whose
-    // box is a centred column inset on X/Z (full height on Y). False if not solid.
-    auto cellBox = [&](int cx, int cy, int cz, glm::vec3& bmin, glm::vec3& bmax) {
-        if (!isSolid_(cx, cy, cz)) {
-            return false;
-        }
-        bmin = glm::vec3(cx, cy, cz);
-        bmax = bmin + glm::vec3(1.0f);
-        const float ins = collisionInset_ ? collisionInset_(cx, cy, cz) : 0.0f;
-        if (ins > 0.0f) {
-            bmin.x += ins; bmin.z += ins;
-            bmax.x -= ins; bmax.z -= ins;
-        }
-        return true;
+    // The collision boxes of a cell, in world coords. A full cube is one box; a
+    // reshaped block (slab/stairs/post/wall) or thin Model post returns several.
+    // Returns the count (0 = not solid). Falls back to a full cube if no box
+    // provider was wired (keeps unit tests / minimal setups working).
+    auto cellBoxes = [&](int cx, int cy, int cz, ShapeBox out[]) -> int {
+        if (boxesFn_) return boxesFn_(cx, cy, cz, out);
+        if (!isSolid_(cx, cy, cz)) return 0;
+        out[0] = {glm::vec3(cx, cy, cz), glm::vec3(cx + 1, cy + 1, cz + 1)};
+        return 1;
     };
 
-    // Nearest contact coordinate along `axis` among blocks in slab cell-index `idx`
-    // whose box actually overlaps the player's footprint on the two stationary axes
-    // (a thin block may sit in the same cell yet miss the player). `positive` picks
-    // the block's near face: its min side when moving +, its max side when moving -.
+    // Nearest contact coordinate along `axis` among the boxes in slab cell-index
+    // `idx` that actually overlap the player's footprint on the two stationary axes
+    // (a partial box may sit in the cell yet miss the player). `positive` picks the
+    // box's near face: its min side when moving +, its max side when moving -.
     auto slabFace = [&](int idx, bool positive, float& outFace) {
         bool  any  = false;
         float best = positive ? 1e30f : -1e30f;
-        glm::vec3 bmin, bmax;
+        ShapeBox boxes[kMaxShapeBoxes];
         glm::ivec3 c;
         c[axis] = idx;
         for (int a = a0; a <= a1; ++a) {
             for (int b = b0; b <= b1; ++b) {
                 c[o1] = a;
                 c[o2] = b;
-                if (!cellBox(c.x, c.y, c.z, bmin, bmax)) {
-                    continue;
+                const int n = cellBoxes(c.x, c.y, c.z, boxes);
+                for (int i = 0; i < n; ++i) {
+                    const glm::vec3& bmin = boxes[i].lo;
+                    const glm::vec3& bmax = boxes[i].hi;
+                    if (hi[o1] - kEps <= bmin[o1] || lo[o1] + kEps >= bmax[o1]) continue;
+                    if (hi[o2] - kEps <= bmin[o2] || lo[o2] + kEps >= bmax[o2]) continue;
+                    const float face = positive ? bmin[axis] : bmax[axis];
+                    if (positive ? (face < best) : (face > best)) {
+                        best = face;
+                    }
+                    any = true;
                 }
-                if (hi[o1] - kEps <= bmin[o1] || lo[o1] + kEps >= bmax[o1]) continue;
-                if (hi[o2] - kEps <= bmin[o2] || lo[o2] + kEps >= bmax[o2]) continue;
-                const float face = positive ? bmin[axis] : bmax[axis];
-                if (positive ? (face < best) : (face > best)) {
-                    best = face;
-                }
-                any = true;
             }
         }
         outFace = best;

@@ -122,7 +122,14 @@ erosion_spline:
 #   elevation     : [min, max] blocks relative to sea level
 #   top / filler  : surface block / the few blocks beneath it (names from blocks.yaml)
 #   snow          : surface is snow (cold biomes); peaks also snow via snow_line
-#   trees / bushes: per-column spawn probability
+#   trees / bushes: per-column spawn probability (bushes = any ground plant)
+#   plant         : ground-plant family — none / bush / grass (tall grass +
+#                   flowers) / forest (ferns, mushrooms, bushes, flowers) /
+#                   desert (cacti). A per-column variety hash in
+#                   World::generateColumn turns the family into a specific plant.
+#   tree          : tree species rooted here — oak / birch / pine / maple /
+#                   willow (default oak). Shapes the canopy (rounded / conical /
+#                   drooping) and picks the trunk + leaf blocks.
 biomes:
 - name: beach
   temp: [-2, 2]
@@ -132,6 +139,7 @@ biomes:
   filler: sand
   trees: 0.0
   bushes: 0.0
+  plant: none
 - name: mountain
   temp: [-2, 2]
   humidity: [-2, 2]
@@ -140,6 +148,8 @@ biomes:
   filler: stone
   trees: 0.003
   bushes: 0.0
+  plant: none
+  tree: pine
 - name: desert
   temp: [0.35, 2]
   humidity: [-2, -0.15]
@@ -148,6 +158,7 @@ biomes:
   filler: sand
   trees: 0.0
   bushes: 0.012
+  plant: desert
 - name: savanna
   temp: [0.2, 2]
   humidity: [-0.15, 0.3]
@@ -156,6 +167,8 @@ biomes:
   filler: dirt
   trees: 0.006
   bushes: 0.05
+  plant: grass
+  tree: maple
 - name: snowy
   temp: [-2, -0.35]
   humidity: [-2, 2]
@@ -165,6 +178,21 @@ biomes:
   snow: true
   trees: 0.012
   bushes: 0.02
+  plant: bush
+  tree: pine
+# Swamp: low, wet temperate ground just above the waterline. Tested before forest
+# so only the lowest wet land becomes swamp (higher wet land stays forest). Home
+# of the drooping willows.
+- name: swamp
+  temp: [-0.35, 0.6]
+  humidity: [0.45, 2]
+  elevation: [2, 5]
+  top: grass
+  filler: dirt
+  trees: 0.03
+  bushes: 0.06
+  plant: forest
+  tree: willow
 - name: forest
   temp: [-0.35, 0.6]
   humidity: [0.2, 2]
@@ -173,6 +201,8 @@ biomes:
   filler: dirt
   trees: 0.055
   bushes: 0.05
+  plant: forest
+  tree: oak
 - name: plains
   temp: [-2, 2]
   humidity: [-2, 2]
@@ -181,3 +211,5 @@ biomes:
   filler: dirt
   trees: 0.018
   bushes: 0.05
+  plant: grass
+  tree: birch
