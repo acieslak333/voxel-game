@@ -32,11 +32,15 @@ public:
     // For a solid block, its collision-box X/Z inset (0 = full cell; >0 = a centred
     // column, e.g. the thin tree trunk). Y always spans the full cell. Optional.
     using InsetFn = std::function<float(int x, int y, int z)>;
+    // Returns true if the cell at (x,y,z) is swimmable liquid (water). Drives the
+    // buoyant swim physics + drowning. Optional; absent = no water anywhere.
+    using WaterFn = std::function<bool(int x, int y, int z)>;
 
     explicit PlayerController(glm::vec3 feetPosition);
 
     void setSolidFn(SolidFn fn) { isSolid_ = std::move(fn); }
     void setCollisionInsetFn(InsetFn fn) { collisionInset_ = std::move(fn); }
+    void setWaterFn(WaterFn fn) { isWater_ = std::move(fn); }
 
     // Advance one frame given elapsed time and this frame's input.
     void update(float dt, const InputState& input);
@@ -66,6 +70,15 @@ public:
     // Creative / debug: ignore all damage (fall, lava, combat).
     void setInvulnerable(bool v) { invulnerable_ = v; }
     [[nodiscard]] bool invulnerable() const { return invulnerable_; }
+
+    // --- Air / drowning (swim physics) -------------------------------------
+    // Remaining breath in seconds (maxAir when the head is out of water). Once it
+    // hits 0 with the head submerged, the player takes continuous drowning damage.
+    // Exposed for a HUD bubble bar.
+    [[nodiscard]] float air()    const { return air_; }
+    [[nodiscard]] float maxAir() const { return maxAir_; }
+    // Is the player's body currently in water (last update)? Lets the HUD/App react.
+    [[nodiscard]] bool  inWater() const { return inWater_; }
 
     // Equipment-derived modifiers, pushed by App from the equipped armour/trinkets.
     // armorReduction is a 0..0.8 damage-reduction fraction; the others scale walk/
@@ -112,10 +125,13 @@ private:
     glm::vec3 velocity_{0.0f};
     Mode      mode_     = Mode::Walking;
     bool      onGround_ = false;
+    bool      inWater_  = false;  // body submerged (set each update for swim physics)
     float     health_     = 100.0f;
     float     maxHealth_  = 100.0f;
     bool      invulnerable_ = false;
     float     regenDelay_ = 0.0f; // seconds before passive regen resumes after a hit
+    float     air_    = 10.0f;    // remaining breath, seconds (drowning when 0)
+    float     maxAir_ = 10.0f;
     // Equipment modifiers (set by App from the equipped armour/trinkets).
     float     armorReduction_ = 0.0f; // 0..0.8 damage-reduction fraction
     float     speedMul_   = 1.0f;
@@ -128,6 +144,7 @@ private:
 
     SolidFn isSolid_;
     InsetFn collisionInset_; // optional: thin-block X/Z inset (tree trunk)
+    WaterFn isWater_;        // optional: swimmable-liquid query (swim + drowning)
 };
 
 } // namespace vg

@@ -28,6 +28,17 @@ constexpr float kFallDmgPerBlock = 5.0f;
 // Passive regen: after kRegenDelay seconds without a hit, heal kRegenRate HP/s.
 constexpr float kRegenDelay = 5.0f;
 constexpr float kRegenRate  = 2.0f;
+
+// Swim physics (body in water): buoyancy weakens gravity, vertical drag damps the
+// fall to a slow sink, and holding jump swims up. Horizontal swim is slower.
+constexpr float kWaterGravityScale    = 0.28f; // effective gravity while submerged
+constexpr float kWaterVerticalDrag    = 6.0f;  // s^-1 exponential damping of vy
+constexpr float kWaterSinkSpeedMax    = 2.2f;  // terminal sink speed (m/s)
+constexpr float kSwimUpSpeed          = 4.0f;  // rise speed while holding jump
+constexpr float kWaterHorizontalScale = 0.62f; // horizontal speed multiplier
+// Drowning: breath drains while the head is submerged; once empty you take HP/s.
+constexpr float kAirRefillRate     = 4.0f; // breath/s recovered with the head out
+constexpr float kDrownDamagePerSec = 4.0f; // HP/s once breath hits 0
 } // namespace
 
 PlayerController::PlayerController(glm::vec3 feetPosition) : feet_(feetPosition) {
@@ -41,6 +52,7 @@ void PlayerController::syncCameraToBody() {
 void PlayerController::teleport(glm::vec3 feet) {
     feet_ = feet;
     velocity_ = glm::vec3(0.0f);
+    air_ = maxAir_; // surface / respawn -> full breath
     syncCameraToBody();
 }
 
@@ -98,20 +110,43 @@ void PlayerController::update(float dt, const InputState& input) {
     }
 
     // --- Walking -----------------------------------------------------------
+    // Sample whether the body / head are in water this frame (drives swim physics
+    // + drowning). Cheap: a couple of cell lookups down the player's centre column.
+    bool bodyInWater = false, headInWater = false;
+    if (isWater_) {
+        const int cx = static_cast<int>(std::floor(feet_.x));
+        const int cz = static_cast<int>(std::floor(feet_.z));
+        bodyInWater = isWater_(cx, static_cast<int>(std::floor(feet_.y + 0.1f)), cz) ||
+                      isWater_(cx, static_cast<int>(std::floor(feet_.y + kHeight * 0.5f)), cz);
+        headInWater = isWater_(cx, static_cast<int>(std::floor(feet_.y + kEyeHeight)), cz);
+    }
+    inWater_ = bodyInWater;
+
     // Horizontal velocity is set directly from input (no momentum, which feels
-    // responsive for a blocky game). Vertical velocity is driven by gravity.
+    // responsive for a blocky game). Swimming damps it. Vertical velocity is driven
+    // by gravity, weakened by buoyancy while submerged.
     glm::vec3 wish = camera_.forwardHorizontal() * input.move.y +
                      camera_.rightHorizontal() * input.move.x;
     if (glm::dot(wish, wish) > 0.0f) {
         wish = glm::normalize(wish);
     }
-    const float speed = (input.sprint ? kSprintSpeed : kWalkSpeed) * speedMul_;
+    float speed = (input.sprint ? kSprintSpeed : kWalkSpeed) * speedMul_;
+    if (bodyInWater) speed *= kWaterHorizontalScale;
     velocity_.x = wish.x * speed;
     velocity_.z = wish.z * speed;
 
-    velocity_.y += kGravity * dt;
-    if (onGround_ && input.jump) {
-        velocity_.y = kJumpSpeed * jumpMul_;
+    if (bodyInWater) {
+        // Buoyant, damped vertical motion: weak gravity, exponential drag toward a
+        // slow sink, and swim up while holding jump. No instant fall-through.
+        velocity_.y += kGravity * kWaterGravityScale * dt;
+        velocity_.y -= velocity_.y * kWaterVerticalDrag * dt;
+        velocity_.y = std::max(velocity_.y, -kWaterSinkSpeedMax);
+        if (input.jump) velocity_.y = kSwimUpSpeed;
+    } else {
+        velocity_.y += kGravity * dt;
+        if (onGround_ && input.jump) {
+            velocity_.y = kJumpSpeed * jumpMul_;
+        }
     }
 
     // Integrate + resolve collisions per axis (allows sliding along walls). Capture
@@ -124,9 +159,19 @@ void PlayerController::update(float dt, const InputState& input) {
     moveAxis(feet_, delta.z, 2);
     moveAxis(feet_, delta.y, 1);
 
-    // Landed this frame after falling: apply fall damage from the impact speed.
-    if (onGround_ && wasAirborne) {
+    // Landed this frame after falling: apply fall damage from the impact speed —
+    // unless we're in water, which breaks the fall (Minecraft-style).
+    if (onGround_ && wasAirborne && !bodyInWater) {
         damage(fallDamage(impactSpeed));
+    }
+
+    // Breath / drowning: drains while the head is submerged; once empty, continuous
+    // damage. Refills quickly with the head above water.
+    if (headInWater) {
+        air_ = std::max(0.0f, air_ - dt);
+        if (air_ <= 0.0f) damage(kDrownDamagePerSec * dt);
+    } else {
+        air_ = std::min(maxAir_, air_ + dt * kAirRefillRate);
     }
 
     // Slow passive regen once you've gone a few seconds without taking damage

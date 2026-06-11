@@ -90,6 +90,11 @@ App::App()
     // full cell — return their X/Z inset so the player can stand right against them.
     player_.setCollisionInsetFn(
         [this](int x, int y, int z) { return world_.modelInsetAt(x, y, z); });
+    // Swim physics + drowning: tell the player which cells are water (resolve the id
+    // once; blockAt is a cheap window lookup).
+    const uint16_t waterId = world_.registry().idByName("water");
+    player_.setWaterFn(
+        [this, waterId](int x, int y, int z) { return world_.blockAt(x, y, z).id == waterId; });
 
     // Start in creative with every block available (press G to switch to survival).
     // In survival, mining adds to the inventory and placing consumes the held slot;

@@ -1,8 +1,10 @@
 #include "core/App.h"
+#include "core/Input.h"
 #include "entity/ItemEntity.h"
 #include "player/ChestStore.h"
 #include "player/Crafting.h"
 #include "player/Equipment.h"
+#include "player/PlayerController.h"
 #include "player/PlayerSave.h"
 
 #include "world/BlockRegistry.h"
@@ -372,6 +374,45 @@ int runLogicTest(const std::string& assetDir) {
         pc.setInvulnerable(true);
         pc.damage(50.0f);
         check(near(pc.health(), 50.0f), "invulnerable ignores damage");
+
+        // Swim physics + drowning. Stepping at a fixed 60 Hz, with water reported
+        // everywhere, the player should sink far slower than in air, swim up on
+        // jump, and drown once breath runs out (verifiable with no Vulkan/world).
+        {
+            auto stepFor = [](vg::PlayerController& p, const vg::InputState& in, float secs) {
+                for (float t = 0.0f; t < secs; t += 1.0f / 60.0f) p.update(1.0f / 60.0f, in);
+            };
+            const vg::InputState idle{};
+
+            vg::PlayerController dry(glm::vec3(0.0f, 100.0f, 0.0f));
+            stepFor(dry, idle, 1.0f);
+            const float dryDrop = 100.0f - dry.feetPosition().y; // free-fall reference
+
+            vg::PlayerController wet(glm::vec3(0.0f, 100.0f, 0.0f));
+            wet.setWaterFn([](int, int, int) { return true; });
+            stepFor(wet, idle, 1.0f);
+            const float wetDrop = 100.0f - wet.feetPosition().y;
+            check(wetDrop < dryDrop * 0.5f, "buoyancy: sinks far slower in water than air");
+            check(wet.inWater(), "player reports submerged in water");
+
+            vg::PlayerController rise(glm::vec3(0.0f, 100.0f, 0.0f));
+            rise.setWaterFn([](int, int, int) { return true; });
+            vg::InputState jumpIn{}; jumpIn.jump = true;
+            stepFor(rise, jumpIn, 0.5f);
+            check(rise.feetPosition().y > 100.0f, "swim up: holding jump rises in water");
+
+            vg::PlayerController drown(glm::vec3(0.0f, 100.0f, 0.0f));
+            drown.setWaterFn([](int, int, int) { return true; });
+            stepFor(drown, idle, drown.maxAir() + 3.0f);
+            check(drown.air() == 0.0f, "breath drains to 0 with head underwater");
+            check(drown.health() < 100.0f, "drowning deals damage once breath is gone");
+
+            vg::PlayerController airborne(glm::vec3(0.0f, 100.0f, 0.0f));
+            airborne.setWaterFn([](int, int, int) { return false; });
+            stepFor(airborne, idle, 2.0f);
+            check(airborne.air() == airborne.maxAir() && airborne.health() == 100.0f,
+                  "out of water: full breath, no drown damage");
+        }
 
         // Player save: serialize -> deserialize round-trips all fields.
         vg::PlayerSave save;

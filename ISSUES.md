@@ -381,8 +381,18 @@ Core Optimizations:
       `--selftest` golden is unaffected. NOTE: tuning (murk colour/density) is by eye
       and unverified in-engine — adjust `kWaterMurk` / the `0.045` density and the
       `0.30..0.94` range in composite.frag to taste.
-    - Swim/buoyancy physics + drowning; lava deals damage.
-    - Water meets lava -> stone/obsidian.
+    - ~~Swim/buoyancy physics + drowning; lava deals damage.~~ **DONE.** (Lava damage
+      already existed.) PlayerController now samples whether the body/head are in
+      water (via a new `setWaterFn` predicate App wires from the world) and, while
+      submerged, swaps to buoyant physics: weak effective gravity, exponential
+      vertical drag toward a slow terminal sink, hold-jump to swim up, slower
+      horizontal swim, and water breaks fall damage. Drowning: a breath timer
+      (`air_`, 10s) drains while the head is underwater and deals continuous HP/s
+      once empty, refilling fast above water (exposed via `air()`/`maxAir()`/
+      `inWater()` for a future HUD bubble bar). Verified headless: 6 new `--logictest`
+      checks (buoyant sink rate, swim-up, breath-drain, drown damage, surface
+      refill) pass; `--selftest` golden unchanged. TODO(polish): HUD air bubbles.
+    - Water meets lava -> stone (always stone, no obsidian).
     - Infinite source (two sources fill the gap between them, like Minecraft).
     - Kill the per-tick `vkDeviceWaitIdle` in liquid remeshes — route flow remeshes
       through the streaming path (the remaining flow-time stutter; remeshChunks does
@@ -634,3 +644,5 @@ Core Optimizations:
       `<cstddef>` (GCC doesn't pull it in transitively), so the project didn't compile.
     - **Dramatic mountains** — almost certainly needs the 256-tall world (height_chunks
       16 + scale sea_level/splines/snow_line) for the vertical room.
+
+15. Remove all armors expecpt boots, Also make Inventory more polished. Add scrolable inventory, more compact trinket space, crafting when howevered should show what is it using for the recipe and not available recipes should be darkned
