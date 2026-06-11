@@ -801,3 +801,59 @@ Core Optimizations:
     REMAINING (optional): drop the now-redundant `textures:` blocks from single-
     texture entries so they rely on the `${name}.block.png` default; corner/inner
     stairs and richer wall connections are still open shape-system extensions.
+
+17. **AUTONOMOUS FEATURE RUN** (flora → world richness → polish → structures → critters)
+    A multi-session push through the backlog, committed per-feature on `main`.
+
+    **DONE (committed):**
+    - **Flora expansion (#13F):** ground plants (tall_grass, fern, flower_red,
+      flower_yellow, red_mushroom, cactus) + tree species (birch/pine/maple/willow)
+      with per-species crown shapes (rounded/conical/drooping) and a new **swamp**
+      biome for willows. Biome-gated via `plant:`/`tree:` themes in biomes.yaml
+      (FloraKind/TreeKind). New gen_textures patterns (blades/flower/mushroom).
+    - **Random block-texture variants** (grass/stone/foliage): list-valued faces +
+      world-pos hash in the mesher. (Currently disabled in blocks.yaml — code kept.)
+    - **Worldgen richness C (#13C):** ravines (slot canyons), cave fluid pools (deep
+      lava + shallow water films), ore-balance pass. (Rivers/lakes already existed.)
+    - **Biome colour tinting (#13H):** per-biome `tint: [r,g,b]` multiplies grass/
+      leaf/foliage albedo (new `tint` vertex attr; flowers/mushrooms stay un-tinted).
+    - **Animated foliage sway + water surface (#13H):** wind-sway on cross fronds/
+      plants + water bob/UV-scroll in chunk.vert, driven by a frame-clock UBO time.
+    - **Structures (#13G), worldgen half:** Structure/StructureSet load
+      assets/structures/*.yaml (legend + layer grid + anchor + skip); seam-safe
+      per-column stamping in generateColumn (coarse-grid origins, gather like trees);
+      starter templates well/boulder/pillar; world.yaml `structures:` knobs.
+    - **Passive critters (#13I):** src/entity/Critters.* wander/gravity AI; App spawns
+      a few near spawn and renders them by baking the shared box rig (placeholder rig
+      until the glTF loader). **Dropped-item entities were already done** in the WIP.
+    - **Live biome/flora/cave editor:** tools/biome_tool.py (Flask :5002) — per-biome
+      density/plant/tree + cave/ore/ravine/pool knobs, patches biomes.yaml+world.yaml,
+      re-runs --genmap. **Player save (#13K) was already implemented** in the WIP.
+    - (256-tall world was committed then reverted to 128 by hand — see worldgen files.)
+
+    **TODO (remaining backlog):**
+    - **Manual item drop control:** no key to throw the held stack yet (items only
+      drop when survival mining overflows a full inventory). Add a `drop` InputState
+      flag + key (e.g. Q) that calls droppedItems_.spawn with outward velocity.
+      Touches Input.* + App.cpp.
+    - **Audio (#13J):** still absent. BLOCKED on vendoring `third_party/miniaudio.h`
+      (single-header, ~90k lines — drop it in). Then an AudioEngine + break/place/
+      step/ambient hooks (the break-feedback in #13H is the natural first caller).
+    - **Structure capture wand (#13G, other half):** in-game select-two-corners →
+      save region to an assets/structures/*.yaml template (WorldEdit-style). Reuses
+      the block-edit + chunk save-to-disk seams. Touches App.cpp.
+    - **Mobs/AI + combat (#13I):** hostile mobs, spawn rules, pathfinding, sword
+      swing/damage/knockback/death-drops. BLOCKED on the glTF loader (E3) for real
+      models; the critter AI seam is the starting point.
+    - **glTF `.glb` loader (#13E3):** vendor cgltf, load Blockbench models into the
+      box rig + per-mob textures. BLOCKED on a sample .glb in assets/models/.
+    - **Flora leftovers (#13F):** vines (surface-hanging) + lilypads (water-surface)
+      need new placement logic; re-enable the random texture variants if wanted.
+    - **Visual polish leftovers (#13H/M):** precipitation tied to weather, first-person
+      hand/held-item viewmodel, place-poof / splash / ember particles, damage numbers,
+      screen shake + hit-stop, crosshair feedback.
+    - **Codebase refactor pass (#13L):** App.cpp god-class, renderer pipeline/
+      descriptor boilerplate, ChunkMesher render-type special-cases. Incremental,
+      selftest-guarded; do with supervision (the golden guards worldgen only).
+    - **Perf (#13D):** LOD for distant chunks; kill the per-tick vkDeviceWaitIdle in
+      liquid/edit remeshes.
