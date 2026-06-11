@@ -21,7 +21,8 @@ InputState Input::poll() {
     in.jump    = down(GLFW_KEY_SPACE);            // walking: jump
     in.ascend  = down(GLFW_KEY_SPACE);            // free-fly: rise
     in.descend = down(GLFW_KEY_LEFT_CONTROL);     // free-fly: descend
-    in.sprint  = down(GLFW_KEY_LEFT_SHIFT);       // move faster
+    in.sneak   = down(GLFW_KEY_LEFT_SHIFT);       // walking: crouch; free-fly: fast
+    in.sprint  = down(GLFW_KEY_LEFT_CONTROL);     // walking: run faster
 
     // Esc toggles the pause menu (edge-triggered). Quitting is the menu's job.
     const bool escKey = down(GLFW_KEY_ESCAPE);

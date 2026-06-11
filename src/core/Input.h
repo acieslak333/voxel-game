@@ -11,7 +11,8 @@ class Window;
 struct InputState {
     glm::vec2 move{0.0f};       // x: strafe (+ = right), y: forward (+ = forward)
     bool jump          = false; // walking: jump
-    bool sprint        = false; // hold to move faster
+    bool sprint        = false; // walking: hold Ctrl to run faster
+    bool sneak         = false; // walking: hold Shift to crouch (slow + edge-stop)
     bool ascend        = false; // free-fly: up
     bool descend       = false; // free-fly: down
     bool toggleFreeFly = false; // edge-triggered (true only on the press frame)

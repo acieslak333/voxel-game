@@ -582,13 +582,19 @@ Core Optimizations:
     - Highest juice-per-line: break shards · damage numbers · screen shake + hit-stop ·
       break-crack stages · item bob/pickup · torch flicker.
 
-    **N. Movement & controls**
-    - **Sneaking (hold Shift, Minecraft-style):** move slower + lower the camera/hitbox
-      (crouch); **don't walk off block edges** (edge-stop); lets you safely place blocks
-      while hanging over an edge; render the crouched pose. Wire to a new
-      `InputState.sneak` (LeftShift) in Input + PlayerController movement/collision.
-    - **Sprint** (the FOV-kick juice in M assumes this) — toggle/double-tap or hold to
-      run faster, with stamina later if wanted.
+    **N. Movement & controls** — **DONE** (sneak + sprint; key scheme remapped)
+    - ~~**Sneaking (hold Shift):**~~ **DONE.** New `InputState.sneak` (LeftShift):
+      crouch walk speed (1.4 m/s), camera lowered by 0.28, and **edge-stop** —
+      `PlayerController::hasGroundSupport()` refuses a horizontal step that would
+      leave the footprint over a drop, so you can't walk/overhang off a ledge while
+      sneaking. Verified headless (sneak speed, crouch camera, pillar edge-stop in
+      `--logictest`). NOTE: hitbox stays full-height for now (only the *camera*
+      lowers); a true shrunk crouch hitbox + the crouched render pose are deferred.
+    - ~~**Sprint** — hold to run faster.~~ **DONE.** Already existed (7 m/s); rebound
+      from Shift to **LeftCtrl** so Shift is free for sneak. Sneak overrides sprint.
+    - **Key scheme:** walking = Shift sneak / Ctrl sprint / Space jump; free-fly =
+      Space up / Ctrl down / Shift fast (free-fly fast moved onto the sneak key so
+      Shift still means "fast" in the air). Double-tap-to-sprint + stamina still open.
 
 14. **WORLD-GEN TOOLING + SINGLE ISLAND** — **DONE** (tuning aids + an island-shaped world)
 

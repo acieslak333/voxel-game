@@ -111,12 +111,20 @@ public:
     // placing a block inside the player.
     [[nodiscard]] bool occupies(int bx, int by, int bz) const;
 
+    // Is the player crouching (sneaking) this frame? Lowers the camera; the HUD/
+    // future crouched pose can read it.
+    [[nodiscard]] bool sneaking() const { return sneaking_; }
+
     // TODO(future): additional survival stats (stamina) would live next to health_.
 
 private:
     // Move along one axis (0=x,1=y,2=z) by `delta`, swept against solid blocks:
     // advances exactly to the contact plane instead of stopping a block short.
     void moveAxis(glm::vec3& feet, float delta, int axis);
+
+    // Is any solid block directly under the player's footprint? Used by the sneak
+    // edge-stop to refuse a step that would leave the player hanging over a drop.
+    [[nodiscard]] bool hasGroundSupport() const;
 
     void syncCameraToBody();
 
@@ -126,6 +134,7 @@ private:
     Mode      mode_     = Mode::Walking;
     bool      onGround_ = false;
     bool      inWater_  = false;  // body submerged (set each update for swim physics)
+    bool      sneaking_ = false;  // crouching this frame (lowers camera, edge-stop)
     float     health_     = 100.0f;
     float     maxHealth_  = 100.0f;
     bool      invulnerable_ = false;

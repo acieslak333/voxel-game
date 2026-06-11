@@ -15,6 +15,8 @@ constexpr float kEyeHeight   = 1.62f;
 
 constexpr float kWalkSpeed   = 4.3f;
 constexpr float kSprintSpeed = 7.0f;
+constexpr float kSneakSpeed  = 1.4f;   // crouch walk speed
+constexpr float kCrouchDrop  = 0.28f;  // camera lowered this much while sneaking
 constexpr float kFlySpeed    = 12.0f;
 constexpr float kFlySprint   = 26.0f;
 
@@ -46,7 +48,8 @@ PlayerController::PlayerController(glm::vec3 feetPosition) : feet_(feetPosition)
 }
 
 void PlayerController::syncCameraToBody() {
-    camera_.position = feet_ + glm::vec3(0.0f, kEyeHeight, 0.0f);
+    const float eye = kEyeHeight - (sneaking_ ? kCrouchDrop : 0.0f);
+    camera_.position = feet_ + glm::vec3(0.0f, eye, 0.0f);
 }
 
 void PlayerController::teleport(glm::vec3 feet) {
@@ -102,8 +105,8 @@ void PlayerController::update(float dt, const InputState& input) {
         if (glm::dot(wish, wish) > 0.0f) {
             wish = glm::normalize(wish);
         }
-        // Sprinting flies ~2.17x faster (the old kFlySprint / kFlySpeed ratio).
-        const float speed = flySpeed_ * (input.sprint ? (kFlySprint / kFlySpeed) : 1.0f);
+        // Holding Shift (sneak key) flies ~2.17x faster (old kFlySprint/kFlySpeed).
+        const float speed = flySpeed_ * (input.sneak ? (kFlySprint / kFlySpeed) : 1.0f);
         feet_ += wish * speed * dt;
         syncCameraToBody();
         return;
@@ -121,6 +124,9 @@ void PlayerController::update(float dt, const InputState& input) {
         headInWater = isWater_(cx, static_cast<int>(std::floor(feet_.y + kEyeHeight)), cz);
     }
     inWater_ = bodyInWater;
+    // Sneaking (crouch): slower walk + a lowered camera + edge-stop below. Sneak
+    // wins over sprint. Not while swimming (you tread water, not crouch).
+    sneaking_ = input.sneak && !bodyInWater;
 
     // Horizontal velocity is set directly from input (no momentum, which feels
     // responsive for a blocky game). Swimming damps it. Vertical velocity is driven
@@ -130,7 +136,9 @@ void PlayerController::update(float dt, const InputState& input) {
     if (glm::dot(wish, wish) > 0.0f) {
         wish = glm::normalize(wish);
     }
-    float speed = (input.sprint ? kSprintSpeed : kWalkSpeed) * speedMul_;
+    float speed = sneaking_ ? kSneakSpeed
+                            : (input.sprint ? kSprintSpeed : kWalkSpeed);
+    speed *= speedMul_;
     if (bodyInWater) speed *= kWaterHorizontalScale;
     velocity_.x = wish.x * speed;
     velocity_.z = wish.z * speed;
@@ -151,12 +159,22 @@ void PlayerController::update(float dt, const InputState& input) {
 
     // Integrate + resolve collisions per axis (allows sliding along walls). Capture
     // the downward speed just before the Y sweep so a landing can score fall damage.
+    const bool wasGrounded = onGround_;
     const bool wasAirborne = !onGround_;
     const float impactSpeed = -velocity_.y; // >0 while falling
     onGround_ = false;
     const glm::vec3 delta = velocity_ * dt;
+
+    // Sneak edge-stop: while crouched on the ground, refuse a horizontal step that
+    // would leave the player hanging over a drop (Minecraft-style). Try each axis,
+    // and undo it if the footprint ends up with no solid block beneath it.
+    const bool edgeStop = sneaking_ && wasGrounded;
+    const float prevX = feet_.x;
     moveAxis(feet_, delta.x, 0);
+    if (edgeStop && !hasGroundSupport()) { feet_.x = prevX; velocity_.x = 0.0f; }
+    const float prevZ = feet_.z;
     moveAxis(feet_, delta.z, 2);
+    if (edgeStop && !hasGroundSupport()) { feet_.z = prevZ; velocity_.z = 0.0f; }
     moveAxis(feet_, delta.y, 1);
 
     // Landed this frame after falling: apply fall damage from the impact speed —
@@ -183,6 +201,21 @@ void PlayerController::update(float dt, const InputState& input) {
     }
 
     syncCameraToBody();
+}
+
+bool PlayerController::hasGroundSupport() const {
+    if (!isSolid_) return true; // no world knowledge -> assume supported
+    // The block layer just under the feet, scanned across the AABB footprint
+    // (shrunk slightly so a box flush against an edge doesn't borrow the far cell).
+    const int y  = static_cast<int>(std::floor(feet_.y - 1e-3f));
+    const int x0 = static_cast<int>(std::floor(feet_.x - kHalfWidth + 1e-4f));
+    const int x1 = static_cast<int>(std::floor(feet_.x + kHalfWidth - 1e-4f));
+    const int z0 = static_cast<int>(std::floor(feet_.z - kHalfWidth + 1e-4f));
+    const int z1 = static_cast<int>(std::floor(feet_.z + kHalfWidth - 1e-4f));
+    for (int x = x0; x <= x1; ++x)
+        for (int z = z0; z <= z1; ++z)
+            if (isSolid_(x, y, z)) return true;
+    return false;
 }
 
 bool PlayerController::occupies(int bx, int by, int bz) const {

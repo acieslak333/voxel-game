@@ -412,6 +412,39 @@ int runLogicTest(const std::string& assetDir) {
             stepFor(airborne, idle, 2.0f);
             check(airborne.air() == airborne.maxAir() && airborne.health() == 100.0f,
                   "out of water: full breath, no drown damage");
+
+            // Sneak: slower than a normal walk + a lowered camera.
+            auto floorAll = [](int, int y, int) { return y < 100; };
+            vg::InputState fwd{};  fwd.move = {0.0f, 1.0f};
+            vg::InputState sneakFwd = fwd; sneakFwd.sneak = true;
+            vg::PlayerController walk(glm::vec3(0.5f, 100.0f, 0.5f));
+            walk.setSolidFn(floorAll);
+            stepFor(walk, fwd, 0.5f);
+            const glm::vec3 walkP = walk.feetPosition();
+            vg::PlayerController crouch(glm::vec3(0.5f, 100.0f, 0.5f));
+            crouch.setSolidFn(floorAll);
+            stepFor(crouch, sneakFwd, 0.5f);
+            const glm::vec3 crouchP = crouch.feetPosition();
+            const float walkDist = glm::length(glm::vec2(walkP.x - 0.5f, walkP.z - 0.5f));
+            const float crouchDist = glm::length(glm::vec2(crouchP.x - 0.5f, crouchP.z - 0.5f));
+            check(crouchDist < walkDist * 0.5f, "sneak walks much slower than a normal walk");
+            check(crouch.sneaking(), "sneak flag set while holding the sneak key");
+            check(crouch.camera().position.y < walk.camera().position.y - 0.2f,
+                  "sneak lowers the camera (crouch)");
+
+            // Edge-stop: on a single 1x1 pillar, a normal walk strides off and falls;
+            // sneaking refuses the step that would drop the player.
+            auto pillar = [](int x, int y, int z) { return x == 0 && z == 0 && y < 100; };
+            vg::InputState diag{}; diag.move = {1.0f, 1.0f};
+            vg::InputState sneakDiag = diag; sneakDiag.sneak = true;
+            vg::PlayerController fell(glm::vec3(0.5f, 100.0f, 0.5f));
+            fell.setSolidFn(pillar);
+            stepFor(fell, diag, 1.0f);
+            vg::PlayerController held(glm::vec3(0.5f, 100.0f, 0.5f));
+            held.setSolidFn(pillar);
+            stepFor(held, sneakDiag, 1.0f);
+            check(fell.feetPosition().y < 99.0f, "walking off a pillar falls");
+            check(held.feetPosition().y > 99.5f, "sneak edge-stop keeps the player on the pillar");
         }
 
         // Player save: serialize -> deserialize round-trips all fields.
