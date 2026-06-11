@@ -474,6 +474,7 @@ void App::tickLiquids() {
     }
     const uint16_t water = world_.registry().idByName("water");
     const uint16_t lava  = world_.registry().idByName("lava");
+    const uint16_t stone = world_.registry().idByName("stone");
     auto isLiquid = [&](uint16_t id) { return id == water || id == lava; };
 
     // Mutating the world: sync with the streaming workers exactly like editBlocks.
@@ -519,6 +520,33 @@ void App::tickLiquids() {
         }
         const uint16_t lid   = b.id;
         const int      level = b.metadata;
+
+        // Water <-> lava contact: the lava cell turns to STONE (user: always stone,
+        // no obsidian). Scan the six neighbours; convert whichever cell is lava.
+        {
+            const int ndx[6] = {1, -1, 0, 0, 0, 0};
+            const int ndy[6] = {0, 0, 1, -1, 0, 0};
+            const int ndz[6] = {0, 0, 0, 0, 1, -1};
+            auto convertToStone = [&](int x, int y, int z) {
+                if (pending(x, y, z)) return; // already edited this tick
+                edits.push_back({glm::ivec3{x, y, z}, Block{stone, 0}});
+                ++fills; // count toward the per-tick cap so a big contact spreads over ticks
+            };
+            bool becameStone = false;
+            for (int k = 0; k < 6; ++k) {
+                const int nx = c.x + ndx[k], ny = c.y + ndy[k], nz = c.z + ndz[k];
+                const uint16_t nid = world_.blockAt(nx, ny, nz).id;
+                if (lid == lava && nid == water) {
+                    convertToStone(c.x, c.y, c.z); // this lava solidifies
+                    becameStone = true;
+                    break;
+                }
+                if (lid == water && nid == lava) {
+                    convertToStone(nx, ny, nz);    // the touched lava solidifies
+                }
+            }
+            if (becameStone) continue; // this cell is stone now — it no longer flows
+        }
 
         auto fill = [&](int x, int y, int z, int nl) {
             if (world_.blockAt(x, y, z).id != 0 || pending(x, y, z)) {

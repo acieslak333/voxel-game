@@ -392,7 +392,13 @@ Core Optimizations:
       `inWater()` for a future HUD bubble bar). Verified headless: 6 new `--logictest`
       checks (buoyant sink rate, swim-up, breath-drain, drown damage, surface
       refill) pass; `--selftest` golden unchanged. TODO(polish): HUD air bubbles.
-    - Water meets lava -> stone (always stone, no obsidian).
+    - ~~Water meets lava -> stone (always stone, no obsidian).~~ **DONE.** In the
+      liquid flow tick (App::tickLiquids), when a flowing liquid cell is processed
+      and a lava cell touches water (either the cell is lava with a water neighbour,
+      or water with a lava neighbour), that lava cell is converted to STONE (one
+      batched edit, relit by setBlocksBatch; counted toward the per-tick fill cap so
+      a large contact solidifies over a few ticks). Triggers on flow/placement
+      (seedLiquid is queued on place + break). No obsidian variant, per user.
     - Infinite source (two sources fill the gap between them, like Minecraft).
     - Kill the per-tick `vkDeviceWaitIdle` in liquid remeshes — route flow remeshes
       through the streaming path (the remaining flow-time stutter; remeshChunks does
