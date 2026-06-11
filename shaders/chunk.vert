@@ -16,6 +16,7 @@ layout(set = 0, binding = 0) uniform CameraUBO {
     mat4 proj;
     vec4 sunDir; // xyz: toward the active light (sun/moon), w: ambient floor
     vec4 sunCol; // rgb: linear light tint, a: sky-light intensity
+    vec4 misc;   // x: animation time (seconds) for foliage sway / water waves
 } camera;
 
 // Per-draw model transform (chunk world position) + params: params.x is the
@@ -34,8 +35,32 @@ layout(location = 5) out vec3      fragBlockColor;
 layout(location = 6) out vec3      fragTint;
 
 void main() {
-    gl_Position = camera.proj * camera.view * push.model * vec4(inPos, 1.0);
+    // --- Ambient motion (foliage sway + water waves) -------------------------
+    // Displace in chunk-local space (the chunk model is a pure translation, so a
+    // local offset is a world offset). Phase varies by world position so plants
+    // don't all wave in lockstep.
+    float t = camera.misc.x;
+    vec3 wp = (push.model * vec4(inPos, 1.0)).xyz;
+    vec3 p = inPos;
+    // Foliage: tint.a < 1 marks swayable cross fronds / ground plants. The top of
+    // the plant bends; the base (fract(y) ~ 0) stays planted.
+    float sway = 1.0 - inTint.a;
+    if (sway > 0.001) {
+        float h  = fract(inPos.y);
+        float ph = wp.x * 0.7 + wp.z * 0.7;
+        float amp = sway * 0.12 * h;
+        p.x += amp * sin(t * 1.6 + ph);
+        p.z += amp * cos(t * 1.3 + ph * 1.1);
+    }
+    // Water: the translucent pass (params.x < 1) gently bobs its top surface.
+    if (push.params.x < 0.999 && inNormal == 3u) {
+        p.y += 0.05 * sin(t * 1.1 + wp.x * 0.6 + wp.z * 0.6) - 0.02;
+    }
+
+    gl_Position = camera.proj * camera.view * push.model * vec4(p, 1.0);
     fragUV         = inUV;
+    // Water scrolls its UV slightly so the surface reads as flowing, not glass.
+    if (push.params.x < 0.999) fragUV += vec2(t * 0.04, t * 0.02);
     fragLayer      = inLayer;
     fragLight      = inLight;
     fragNormal     = inNormal;

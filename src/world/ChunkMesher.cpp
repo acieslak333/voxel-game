@@ -539,6 +539,10 @@ MeshData ChunkMesher::greedyMesh(const Chunk& chunk, const BlockRegistry& reg,
                 // Biome vegetation tint for this cell's foliage (white for non-foliage,
                 // e.g. trunks/cactus/flowers, so only leaves & leafy plants tint).
                 const uint32_t cellTint = packColorRGBA8(tint(x, z, id));
+                // Sway marker in the tint alpha: cross fronds / ground plants bend in
+                // the wind (the shader sways verts where tint.a < 1). 0xBF ~ a gentle
+                // amount. Only the CROSS planes get it; leaf-cube box faces stay rigid.
+                const uint32_t cellTintSway = withAlpha(cellTint, 0xBFu);
 
                 if (flowing) {
                     // Corner-connected liquid surface (issue: invisible sides /
@@ -703,10 +707,10 @@ MeshData ChunkMesher::greedyMesh(const Chunk& chunk, const BlockRegistry& reg,
                     const float pt = leaf ? 1.0f + e : 1.0f;      // top overhang (plants flush)
                     addNonCubeQuad(o + glm::vec3(p0, pb, p0), o + glm::vec3(p1, pb, p1),
                                    o + glm::vec3(p1, pt, p1), o + glm::vec3(p0, pt, p0),
-                                   layer, lv, nrm, col, cellTint);
+                                   layer, lv, nrm, col, cellTintSway);
                     addNonCubeQuad(o + glm::vec3(p0, pb, p1), o + glm::vec3(p1, pb, p0),
                                    o + glm::vec3(p1, pt, p0), o + glm::vec3(p0, pt, p1),
-                                   layer, lv, nrm, col, cellTint);
+                                   layer, lv, nrm, col, cellTintSway);
                     if (rt == RenderType::LeafCube) {
                         // ...plus the full voxel-cube faces, so the canopy reads as
                         // solid leaf blocks with the cross fronds poking through.

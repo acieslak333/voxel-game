@@ -117,7 +117,9 @@ private:
         glm::mat4 proj;
         glm::vec4 sunDir; // xyz: toward the active light, w: ambient floor
         glm::vec4 sunCol; // rgb: linear light tint, a: sky-light intensity
+        glm::vec4 misc;   // x: animation time (seconds) for foliage sway / water waves
     };
+    float animTime_ = 0.0f; // accumulated per recorded frame; drives the sway/wave clock
     // Per-draw push constant: chunk model matrix + params (params.x = output
     // alpha — 1 for the opaque pass, < 1 for the translucent water pass).
     struct PushConstants {

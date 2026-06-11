@@ -79,4 +79,11 @@ struct Vertex {
     return q(c.r) | (q(c.g) << 8) | (q(c.b) << 16) | (0xFFu << 24);
 }
 
+// Replace the alpha byte of a packed RGBA8 value. The chunk shader reads the tint
+// alpha as a "sway" marker (1.0 = rigid; < 1.0 = foliage that bends in the wind),
+// so this stamps a sway amount onto a tint without touching its RGB.
+[[nodiscard]] inline uint32_t withAlpha(uint32_t rgba, uint8_t a) {
+    return (rgba & 0x00FFFFFFu) | (static_cast<uint32_t>(a) << 24);
+}
+
 } // namespace vg

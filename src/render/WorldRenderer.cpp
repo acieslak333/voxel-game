@@ -642,7 +642,12 @@ void WorldRenderer::record(VkCommandBuffer cmd, uint32_t frameIndex, VkExtent2D 
                            const glm::vec4& sunDirAmbient, const glm::vec4& sunColIntensity) {
     tickRetired(); // reap deferred buffer frees whose in-flight frames have completed
 
-    CameraUBO ubo{view, proj, sunDirAmbient, sunColIntensity};
+    // Advance the animation clock one frame (~60fps). Used by the vertex shader for
+    // foliage sway + water waves; wrapped so the float stays small over long sessions.
+    animTime_ += 1.0f / 60.0f;
+    if (animTime_ > 3600.0f) animTime_ -= 3600.0f;
+    CameraUBO ubo{view, proj, sunDirAmbient, sunColIntensity,
+                  glm::vec4(animTime_, 0.0f, 0.0f, 0.0f)};
     uniformBuffers_[frameIndex].upload(&ubo, sizeof(ubo));
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_->handle());
