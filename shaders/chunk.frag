@@ -17,6 +17,7 @@ layout(location = 1) in flat uint fragLayer;
 layout(location = 2) in vec2      fragLight;  // x = sky-lit, y = block-lit (0..1)
 layout(location = 3) in flat uint fragNormal; // face index (Face enum, 0..5)
 layout(location = 4) in flat float fragAlpha; // 1 opaque pass, <1 translucent water
+layout(location = 5) in vec3      fragBlockColor; // emitter hue for the block-lit term
 
 layout(location = 0) out vec4 outColor;
 
@@ -53,10 +54,14 @@ void main() {
 
     // --- Coloured light ------------------------------------------------------
     // Sky light is tinted by the time of day (warm noon, orange dusk, pale blue
-    // moonlight); block light is the warm emitter glow. Blend by dominance.
-    const vec3 kSource = vec3(1.00, 0.66, 0.32);
+    // moonlight); block light is the emitter's own colour (a warm torch, orange
+    // lava, ...), carried per-vertex from the dominant emitter reaching it. Blend
+    // by dominance. Where no block light reaches (block ~= 0) fragBlockColor is
+    // black, but wSky -> 1 there so the sky tint wins and the black is ignored.
+    const vec3 kSourceFallback = vec3(1.00, 0.66, 0.32);
+    vec3 blockCol = block > 1e-4 ? fragBlockColor : kSourceFallback;
     float wSky = sky / max(sky + block, 1e-4);
-    vec3 lightCol = mix(kSource, camera.sunCol.rgb, wSky);
+    vec3 lightCol = mix(blockCol, camera.sunCol.rgb, wSky);
     vec3 surf = texel.rgb * lightCol; // fully-lit surface colour
 
     // --- 7-level dithered shadow ramp ----------------------------------------

@@ -2,6 +2,8 @@
 
 #include "world/Block.h"
 
+#include <glm/glm.hpp>
+
 #include <array>
 #include <cstdint>
 #include <string>
@@ -34,6 +36,12 @@ struct BlockProperties {
     // flood fill, so glowstone/lava-like blocks illuminate their surroundings
     // independently of the sky. Opaque emitters still light the air around them.
     uint8_t emission = 0;
+    // Linear-RGB colour of the emitted light (a warm torch vs orange lava). The
+    // dominant emitter reaching a cell tints its block light this colour in the
+    // shader. Defaults to the legacy warm glow so emitters without an explicit
+    // `light_color` look unchanged. Only used where emission > 0. Parsed from the
+    // `light_color: [r, g, b]` key (0..1 floats) in blocks.yaml.
+    glm::vec3 emissionColor{1.00f, 0.66f, 0.32f};
 
     // Texture-array layer index per face, indexed by the Face enum. Lets a
     // block show different textures on top/side/bottom (e.g. grass).
@@ -100,6 +108,7 @@ public:
     [[nodiscard]] bool isSolid(uint16_t id) const { return get(id).solid; }
     [[nodiscard]] bool isOpaque(uint16_t id) const { return get(id).opaque; }
     [[nodiscard]] uint8_t emission(uint16_t id) const { return get(id).emission; }
+    [[nodiscard]] glm::vec3 emissionColor(uint16_t id) const { return get(id).emissionColor; }
     [[nodiscard]] RenderType renderType(uint16_t id) const { return get(id).renderType; }
     [[nodiscard]] float modelInset(uint16_t id) const { return get(id).modelInset; }
     [[nodiscard]] uint32_t faceLayer(uint16_t id, int face) const {

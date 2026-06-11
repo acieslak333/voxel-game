@@ -24,6 +24,22 @@ constexpr int floormod(int a, int b) {
     return (r != 0 && ((r < 0) != (b < 0))) ? r + b : r;
 }
 
+// Block-light hue packing: a linear RGB colour (0..1) <-> RGBA8 with R in the low
+// byte, matching the GPU vertex format (render/Vertex.h packColorRGBA8). The flood
+// carries the dominant emitter's packed colour alongside the intensity level.
+inline uint32_t packLightColor(const glm::vec3& c) {
+    auto q = [](float v) -> uint32_t {
+        const float cl = v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v);
+        return static_cast<uint32_t>(cl * 255.0f + 0.5f);
+    };
+    return q(c.r) | (q(c.g) << 8) | (q(c.b) << 16) | (0xFFu << 24);
+}
+inline glm::vec3 unpackLightColor(uint32_t p) {
+    return {static_cast<float>(p & 0xFF) / 255.0f,
+            static_cast<float>((p >> 8) & 0xFF) / 255.0f,
+            static_cast<float>((p >> 16) & 0xFF) / 255.0f};
+}
+
 // --- Chunk persistence (save-to-disk for edited chunks) ----------------------
 // One little binary file per *edited* chunk (unedited chunks regenerate from the
 // seed, so they are never written). Format: magic + version + edge length, then
@@ -590,6 +606,16 @@ uint8_t World::blockLightAt(int wx, int wy, int wz) const {
     return blockLight_[static_cast<size_t>(lightIndex(wx, wy, wz))];
 }
 
+glm::vec3 World::blockLightColorAt(int wx, int wy, int wz) const {
+    const glm::ivec3 s = sizeInBlocks();
+    const glm::ivec3 o = originBlock();
+    if (wx < o.x || wy < o.y || wz < o.z ||
+        wx >= o.x + s.x || wy >= o.y + s.y || wz >= o.z + s.z) {
+        return glm::vec3(0.0f); // no emitters outside the loaded window
+    }
+    return unpackLightColor(blockLightColor_[static_cast<size_t>(lightIndex(wx, wy, wz))]);
+}
+
 uint8_t World::lightAt(int wx, int wy, int wz) const {
     return std::max(skyLightAt(wx, wy, wz), blockLightAt(wx, wy, wz));
 }
@@ -653,6 +679,9 @@ void World::computeSkyLight() {
 void World::computeBlockLight() {
     const glm::ivec3 s = sizeInBlocks();
     blockLight_.assign(static_cast<size_t>(s.x) * s.y * s.z, 0);
+    // Hue rides along with the intensity: each cell records the colour of whichever
+    // emitter reaches it brightest (set together with the level below).
+    blockLightColor_.assign(static_cast<size_t>(s.x) * s.y * s.z, 0);
 
     std::vector<glm::ivec3> frontier;
 
@@ -663,9 +692,12 @@ void World::computeBlockLight() {
     for (int z = o.z; z < o.z + s.z; ++z) {
         for (int y = o.y; y < o.y + s.y; ++y) {
             for (int x = o.x; x < o.x + s.x; ++x) {
-                const uint8_t e = registry_.emission(blockAt(x, y, z).id);
+                const uint16_t id = blockAt(x, y, z).id;
+                const uint8_t e = registry_.emission(id);
                 if (e > 0) {
-                    blockLight_[static_cast<size_t>(lightIndex(x, y, z))] = e;
+                    const size_t li = static_cast<size_t>(lightIndex(x, y, z));
+                    blockLight_[li] = e;
+                    blockLightColor_[li] = packLightColor(registry_.emissionColor(id));
                     frontier.push_back({x, y, z});
                 }
             }
@@ -674,13 +706,15 @@ void World::computeBlockLight() {
 
     // Flood fill: light spreads into non-opaque neighbours, dimming by
     // block_falloff levels per step (world.yaml), so a glowstone glow fades
-    // smoothly into the surrounding dark.
+    // smoothly into the surrounding dark. The neighbour inherits the spreading
+    // cell's hue whenever it brightens it, so the dominant emitter wins each cell.
     const int falloff = config_.blockFalloff;
     const glm::ivec3 dirs[6] = {{1, 0, 0},  {-1, 0, 0}, {0, 1, 0},
                                 {0, -1, 0}, {0, 0, 1},  {0, 0, -1}};
     for (size_t head = 0; head < frontier.size(); ++head) {
         const glm::ivec3 p = frontier[head];
-        const uint8_t level = blockLight_[static_cast<size_t>(lightIndex(p.x, p.y, p.z))];
+        const size_t pi = static_cast<size_t>(lightIndex(p.x, p.y, p.z));
+        const uint8_t level = blockLight_[pi];
         if (level <= falloff) {
             continue;
         }
@@ -693,9 +727,11 @@ void World::computeBlockLight() {
             if (registry_.isOpaque(blockAt(nx, ny, nz).id)) {
                 continue; // opaque blocks don't transmit light
             }
-            uint8_t& nl = blockLight_[static_cast<size_t>(lightIndex(nx, ny, nz))];
+            const size_t ni = static_cast<size_t>(lightIndex(nx, ny, nz));
+            uint8_t& nl = blockLight_[ni];
             if (nl < level - falloff) {
                 nl = static_cast<uint8_t>(level - falloff);
+                blockLightColor_[ni] = blockLightColor_[pi];
                 frontier.push_back({nx, ny, nz});
             }
         }
@@ -717,6 +753,12 @@ void World::relightField(std::vector<uint8_t>& field, bool emitterSeed, int x0, 
     auto fieldAt = [&](int x, int y, int z) -> uint8_t& {
         return field[static_cast<size_t>(lightIndex(x, y, z))];
     };
+    // Block-light hue, mirrored alongside `field` only on the emitter pass (the
+    // sky pass leaves it untouched, since sky/block relight the same box back to
+    // back and the block pass owns the colour). Writes are guarded by emitterSeed.
+    auto colorAt = [&](int x, int y, int z) -> uint32_t& {
+        return blockLightColor_[static_cast<size_t>(lightIndex(x, y, z))];
+    };
     auto chunkAtBlock = [&](int x, int y, int z) -> const Chunk& {
         return chunks_[static_cast<size_t>(
             chunkIndex(floordiv(x, N), floordiv(y, N), floordiv(z, N)))];
@@ -729,7 +771,10 @@ void World::relightField(std::vector<uint8_t>& field, bool emitterSeed, int x0, 
     // Clear the box (full height).
     for (int z = z0; z <= z1; ++z)
         for (int x = x0; x <= x1; ++x)
-            for (int y = o.y; y < o.y + sy; ++y) fieldAt(x, y, z) = 0;
+            for (int y = o.y; y < o.y + sy; ++y) {
+                fieldAt(x, y, z) = 0;
+                if (emitterSeed) colorAt(x, y, z) = 0;
+            }
 
     std::vector<glm::ivec3> frontier;
     if (!emitterSeed) {
@@ -746,10 +791,12 @@ void World::relightField(std::vector<uint8_t>& field, bool emitterSeed, int x0, 
         for (int z = z0; z <= z1; ++z)
             for (int y = o.y; y < o.y + sy; ++y)
                 for (int x = x0; x <= x1; ++x) {
-                    const uint8_t e = registry_.emission(
-                        chunkAtBlock(x, y, z).get(floormod(x, N), floormod(y, N), floormod(z, N)).id);
+                    const uint16_t id =
+                        chunkAtBlock(x, y, z).get(floormod(x, N), floormod(y, N), floormod(z, N)).id;
+                    const uint8_t e = registry_.emission(id);
                     if (e > 0) {
                         fieldAt(x, y, z) = e;
+                        colorAt(x, y, z) = packLightColor(registry_.emissionColor(id));
                         frontier.push_back({x, y, z});
                     }
                 }
@@ -767,6 +814,7 @@ void World::relightField(std::vector<uint8_t>& field, bool emitterSeed, int x0, 
         const int v = static_cast<int>(fieldAt(ax, ay, az)) - falloff;
         if (v > static_cast<int>(fieldAt(ix, iy, iz))) {
             fieldAt(ix, iy, iz) = static_cast<uint8_t>(v);
+            if (emitterSeed) colorAt(ix, iy, iz) = colorAt(ax, ay, az); // inherit outside hue
             frontier.push_back({ix, iy, iz});
         }
     };
@@ -789,6 +837,7 @@ void World::relightField(std::vector<uint8_t>& field, bool emitterSeed, int x0, 
             if (opaqueAt(nx, ny, nz)) continue;
             if (fieldAt(nx, ny, nz) < level - falloff) {
                 fieldAt(nx, ny, nz) = static_cast<uint8_t>(level - falloff);
+                if (emitterSeed) colorAt(nx, ny, nz) = colorAt(p.x, p.y, p.z); // inherit parent hue
                 frontier.push_back({nx, ny, nz});
             }
         }

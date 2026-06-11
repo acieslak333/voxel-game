@@ -54,6 +54,13 @@ void applyTextures(const YAML::Node& tex, BlockProperties& props, InternFn inter
     if (tex["posz"]) setFace(FacePosZ, tex["posz"].as<std::string>());
 }
 
+// Parse an [r, g, b] colour sequence (0..1 floats); absent/malformed -> fallback.
+glm::vec3 parseColor(const YAML::Node& node, const char* key, glm::vec3 fallback) {
+    const YAML::Node n = node[key];
+    if (!n || !n.IsSequence() || n.size() < 3) return fallback;
+    return {n[0].as<float>(), n[1].as<float>(), n[2].as<float>()};
+}
+
 // Parse a tool-kind name; unknown / absent -> None.
 ToolKind parseTool(const YAML::Node& node, const char* key) {
     if (!node[key]) return ToolKind::None;
@@ -108,6 +115,7 @@ BlockRegistry::BlockRegistry(const std::string& blocksFile) {
         props.opaque = valueOr(entry, "opaque", false);
         props.emission = static_cast<uint8_t>(
             std::min(15, std::max(0, valueOr(entry, "light", 0))));
+        props.emissionColor = parseColor(entry, "light_color", props.emissionColor);
 
         // Survival: mining time, tool role, combat, placeability (all optional).
         props.hardness      = valueOr(entry, "hardness", 0.0f);

@@ -57,6 +57,12 @@ public:
     // losing one level per step. Zero outside the world (no sky fallback).
     [[nodiscard]] uint8_t blockLightAt(int wx, int wy, int wz) const;
 
+    // Linear-RGB hue of the block light at world coords: the colour of the
+    // dominant (brightest-reaching) emitter, carried alongside blockLightAt() by
+    // the same flood. Black outside the window / where no emitter reaches. The
+    // mesher bakes this per-vertex so torches/lava glow in their own colours.
+    [[nodiscard]] glm::vec3 blockLightColorAt(int wx, int wy, int wz) const;
+
     // Light the mesher actually shades with: the brighter of sky and block light.
     [[nodiscard]] uint8_t lightAt(int wx, int wy, int wz) const;
 
@@ -212,6 +218,7 @@ private:
     std::vector<Chunk>   chunks_;     // flat ring buffer, indexed by chunkIndex()
     std::vector<uint8_t> skyLight_;   // per-block sky light, indexed by lightIndex()
     std::vector<uint8_t> blockLight_; // per-block emitted light, same indexing
+    std::vector<uint32_t> blockLightColor_; // per-block emitter hue (packed RGBA8), same indexing
     std::vector<uint8_t> chunkDirty_; // per ring slot: edited since gen/load (needs saving)
     std::string          savePath_;   // <config.saveDir>/<seed>; empty = persistence off
 

@@ -44,9 +44,12 @@ public:
 
     // Sky- and block-light levels (each 0..15) at a world cell. Kept separate so
     // the shader can give them different colours (a warm sun vs a glowstone glow).
+    // blockColor is the linear-RGB hue of the block light here (the dominant
+    // emitter's colour); meaningful only where block > 0.
     struct LightSample {
-        uint8_t sky   = 15;
-        uint8_t block = 0;
+        uint8_t   sky   = 15;
+        uint8_t   block = 0;
+        glm::vec3 blockColor{0.0f};
     };
     // Samples the light at chunk-local coords (which may lie just outside the
     // chunk). Light is a world-level field, so unlike blocks there is no in-chunk

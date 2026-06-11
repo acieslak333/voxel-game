@@ -485,9 +485,21 @@ Core Optimizations:
       H is the natural first caller.
 
     **K. Smaller wins**
-    - **Coloured block light:** the block-light flood is monochrome — make torches warm
-      and lava orange (per-emitter colour through the flood / in the shader). Cheap,
-      big atmosphere payoff.
+    - ~~**Coloured block light:**~~ **DONE.** The monochrome block-light flood now
+      carries a per-emitter *hue* alongside the intensity: each cell records the colour
+      of the brightest emitter reaching it (dominant-emitter model — the cheap path, one
+      extra packed-RGBA8 field parallel to `blockLight_`, propagated in the same BFS in
+      `World::computeBlockLight`/`relightField`; no 3-channel flood). Emitter colours are
+      authored per block via `light_color: [r,g,b]` in blocks.yaml (default warm; torch
+      flame-orange, lava deep molten orange-red, glowstone warm yellow-white). The mesher
+      bakes a smoothed per-corner hue into a new `Vertex.blockColor` (packed RGBA8, attr
+      5, R8G8B8A8_UNORM) — weighted by block level so the brightest emitter dominates and
+      unlit cells don't wash it grey; `chunk.frag` tints the block-lit term by it instead
+      of the old hardcoded `kSource`. Intensity values are unchanged, so `--selftest`
+      golden (0x3ca4dfb49ca7f61e) still passes. KNOWN MINOR: a colour change that does
+      NOT change intensity (e.g. removing one of two equally-bright differently-coloured
+      emitters) won't remesh until the chunk is otherwise dirtied — the dirty diff still
+      keys on intensity only; rare, deliberately left for the cheap path.
     - **Player save:** chunks persist (saves/<seed>/) but player position / inventory /
       health do not — save them with the world.
     - **Switch palette source to `assets/colormap3.png`** (newest of colormap/2/3):

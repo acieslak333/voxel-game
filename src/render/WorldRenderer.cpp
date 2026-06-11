@@ -155,7 +155,8 @@ ChunkMesher::LightSampler WorldRenderer::makeLightSampler(int cx, int cy, int cz
     const int baseZ = cz * Chunk::kSize;
     return [this, baseX, baseY, baseZ](int lx, int ly, int lz) -> ChunkMesher::LightSample {
         const int wx = baseX + lx, wy = baseY + ly, wz = baseZ + lz;
-        return {world_.skyLightAt(wx, wy, wz), world_.blockLightAt(wx, wy, wz)};
+        return {world_.skyLightAt(wx, wy, wz), world_.blockLightAt(wx, wy, wz),
+                world_.blockLightColorAt(wx, wy, wz)};
     };
 }
 

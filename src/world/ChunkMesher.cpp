@@ -43,6 +43,7 @@ struct Mask {
     uint8_t  ao[4]     = {3, 3, 3, 3};         // occlusion 0..3 at the 4 face corners
     float    sky[4]    = {15, 15, 15, 15};      // smoothed sky light 0..15 per corner
     float    blk[4]    = {0, 0, 0, 0};          // smoothed block light 0..15 per corner
+    glm::vec3 col[4]   = {};                     // smoothed block-light hue per corner
 
     bool operator==(const Mask& o) const {
         return present == o.present && block == o.block && positive == o.positive &&
@@ -50,7 +51,9 @@ struct Mask {
                ao[1] == o.ao[1] && ao[2] == o.ao[2] && ao[3] == o.ao[3] &&
                sky[0] == o.sky[0] && sky[1] == o.sky[1] && sky[2] == o.sky[2] &&
                sky[3] == o.sky[3] && blk[0] == o.blk[0] && blk[1] == o.blk[1] &&
-               blk[2] == o.blk[2] && blk[3] == o.blk[3];
+               blk[2] == o.blk[2] && blk[3] == o.blk[3] &&
+               col[0] == o.col[0] && col[1] == o.col[1] &&
+               col[2] == o.col[2] && col[3] == o.col[3];
     }
     bool operator!=(const Mask& o) const { return !(*this == o); }
 };
@@ -164,13 +167,14 @@ MeshData ChunkMesher::greedyMesh(const Chunk& chunk, const BlockRegistry& reg,
             return glm::vec2(ao * (m.sky[k] / 15.0f),
                              m.baseShade * ao * (m.blk[k] / 15.0f));
         };
+        auto colorOf = [&](int k) -> uint32_t { return packColorRGBA8(m.col[k]); };
         const auto faceNormal = static_cast<uint32_t>(faceIndex(d, m.positive));
 
         const auto base_index = static_cast<uint32_t>(outV.size());
-        outV.push_back({p0, uvFor(p0), m.layer, lightOf(0), faceNormal});
-        outV.push_back({p1, uvFor(p1), m.layer, lightOf(1), faceNormal});
-        outV.push_back({p2, uvFor(p2), m.layer, lightOf(2), faceNormal});
-        outV.push_back({p3, uvFor(p3), m.layer, lightOf(3), faceNormal});
+        outV.push_back({p0, uvFor(p0), m.layer, lightOf(0), faceNormal, colorOf(0)});
+        outV.push_back({p1, uvFor(p1), m.layer, lightOf(1), faceNormal, colorOf(1)});
+        outV.push_back({p2, uvFor(p2), m.layer, lightOf(2), faceNormal, colorOf(2)});
+        outV.push_back({p3, uvFor(p3), m.layer, lightOf(3), faceNormal, colorOf(3)});
 
         // Winding: (u, v, d) form a right-handed basis, so p0->p1->p2->p3 is
         // counter-clockwise seen from the +d side. Positive faces use that order;
@@ -239,21 +243,32 @@ MeshData ChunkMesher::greedyMesh(const Chunk& chunk, const BlockRegistry& reg,
             c[v] = cv;
             return light(c[0], c[1], c[2]);
         };
-        auto cornerLight = [&](int L, int cu, int cv, int du, int dv) -> glm::vec2 {
+        // Smoothed corner light + hue. Sky/block are averaged over the up-to-four
+        // air-side cells (matching the AO neighbourhood); the hue is averaged
+        // *weighted by each cell's block level*, so the brightest emitter dominates
+        // the corner colour and unlit (colour 0) cells don't wash it toward black.
+        struct CornerLight { glm::vec2 light; glm::vec3 col; };
+        auto cornerLight = [&](int L, int cu, int cv, int du, int dv) -> CornerLight {
             const int offU[4] = {0, du, 0, du};
             const int offV[4] = {0, 0, dv, dv};
             int sky = 0, blk = 0, count = 0;
+            glm::vec3 colSum(0.0f);
+            float colW = 0.0f;
             for (int k = 0; k < 4; ++k) {
                 if (!occ(L, cu + offU[k], cv + offV[k])) {
                     const LightSample ls = lightAt(L, cu + offU[k], cv + offV[k]);
                     sky += ls.sky;
                     blk += ls.block;
+                    colSum += ls.blockColor * static_cast<float>(ls.block);
+                    colW += static_cast<float>(ls.block);
                     ++count;
                 }
             }
-            return count ? glm::vec2(static_cast<float>(sky) / count,
-                                     static_cast<float>(blk) / count)
-                         : glm::vec2(0.0f);
+            const glm::vec2 lv = count ? glm::vec2(static_cast<float>(sky) / count,
+                                                   static_cast<float>(blk) / count)
+                                       : glm::vec2(0.0f);
+            const glm::vec3 col = colW > 0.0f ? colSum / colW : glm::vec3(0.0f);
+            return {lv, col};
         };
         auto setFace = [&](Mask& m, uint16_t blk, bool positive, int L, int cu, int cv) {
             m.present   = true;
@@ -266,15 +281,17 @@ MeshData ChunkMesher::greedyMesh(const Chunk& chunk, const BlockRegistry& reg,
                 m.ao[0] = m.ao[1] = m.ao[2] = m.ao[3] = 3;
                 m.sky[0] = m.sky[1] = m.sky[2] = m.sky[3] = 15.0f;
                 m.blk[0] = m.blk[1] = m.blk[2] = m.blk[3] = 0.0f;
+                m.col[0] = m.col[1] = m.col[2] = m.col[3] = glm::vec3(0.0f);
                 return;
             }
             const int du[4] = {-1, +1, +1, -1};
             const int dv[4] = {-1, -1, +1, +1};
             for (int k = 0; k < 4; ++k) {
                 m.ao[k] = cornerAo(L, cu, cv, du[k], dv[k]);
-                const glm::vec2 lc = cornerLight(L, cu, cv, du[k], dv[k]);
-                m.sky[k] = lc.x;
-                m.blk[k] = lc.y;
+                const CornerLight lc = cornerLight(L, cu, cv, du[k], dv[k]);
+                m.sky[k] = lc.light.x;
+                m.blk[k] = lc.light.y;
+                m.col[k] = lc.col;
             }
         };
 
@@ -387,12 +404,12 @@ MeshData ChunkMesher::greedyMesh(const Chunk& chunk, const BlockRegistry& reg,
     auto pushQuad = [&](std::vector<Vertex>& outV, std::vector<uint32_t>& outI,
                         const glm::vec3& p0, const glm::vec3& p1, const glm::vec3& p2,
                         const glm::vec3& p3, uint32_t layer, const glm::vec2& lv,
-                        uint32_t normal) {
+                        uint32_t normal, uint32_t blockCol = 0) {
         const auto b = static_cast<uint32_t>(outV.size());
-        outV.push_back({p0, {0.0f, 1.0f}, layer, lv, normal});
-        outV.push_back({p1, {1.0f, 1.0f}, layer, lv, normal});
-        outV.push_back({p2, {1.0f, 0.0f}, layer, lv, normal});
-        outV.push_back({p3, {0.0f, 0.0f}, layer, lv, normal});
+        outV.push_back({p0, {0.0f, 1.0f}, layer, lv, normal, blockCol});
+        outV.push_back({p1, {1.0f, 1.0f}, layer, lv, normal, blockCol});
+        outV.push_back({p2, {1.0f, 0.0f}, layer, lv, normal, blockCol});
+        outV.push_back({p3, {0.0f, 0.0f}, layer, lv, normal, blockCol});
         outI.insert(outI.end(),
                     {b + 0, b + 1, b + 2, b + 0, b + 2, b + 3,    // front
                      b + 0, b + 2, b + 1, b + 0, b + 3, b + 2});  // back
@@ -400,8 +417,9 @@ MeshData ChunkMesher::greedyMesh(const Chunk& chunk, const BlockRegistry& reg,
     // Opaque non-cube geometry (plants, posts, leaf cubes, flowing lava).
     auto addNonCubeQuad = [&](const glm::vec3& p0, const glm::vec3& p1,
                               const glm::vec3& p2, const glm::vec3& p3,
-                              uint32_t layer, const glm::vec2& lv, uint32_t normal) {
-        pushQuad(mesh.vertices, mesh.indices, p0, p1, p2, p3, layer, lv, normal);
+                              uint32_t layer, const glm::vec2& lv, uint32_t normal,
+                              uint32_t blockCol = 0) {
+        pushQuad(mesh.vertices, mesh.indices, p0, p1, p2, p3, layer, lv, normal, blockCol);
     };
 
     for (int z = 0; z < N; ++z) {
@@ -422,6 +440,7 @@ MeshData ChunkMesher::greedyMesh(const Chunk& chunk, const BlockRegistry& reg,
                 const LightSample ls = light(x, y, z);
                 const float sky = static_cast<float>(ls.sky) / 15.0f;
                 const float blk = static_cast<float>(ls.block) / 15.0f;
+                const uint32_t col = packColorRGBA8(ls.blockColor); // emitter hue for this cell
                 const glm::vec3 o(static_cast<float>(x), static_cast<float>(y),
                                   static_cast<float>(z));
 
@@ -461,10 +480,11 @@ MeshData ChunkMesher::greedyMesh(const Chunk& chunk, const BlockRegistry& reg,
                     for (int k = 0; k < 6; ++k) {
                         const LightSample n = light(x + ndx[k], y + ndy[k], z + ndz[k]);
                         if (n.sky > lq.sky) lq.sky = n.sky;
-                        if (n.block > lq.block) lq.block = n.block;
+                        if (n.block > lq.block) { lq.block = n.block; lq.blockColor = n.blockColor; }
                     }
                     const float lsky = static_cast<float>(lq.sky) / 15.0f;
                     const float lblk = static_cast<float>(lq.block) / 15.0f;
+                    const uint32_t lcol = packColorRGBA8(lq.blockColor);
                     // Flowing water joins the translucent water batch (alpha-blended);
                     // flowing lava is opaque, so it stays in the opaque batch.
                     std::vector<Vertex>&   tv = isWater(id) ? mesh.waterVertices : mesh.vertices;
@@ -474,7 +494,7 @@ MeshData ChunkMesher::greedyMesh(const Chunk& chunk, const BlockRegistry& reg,
                                         int axis, bool pos, Face f) {
                         pushQuad(tv, ti, o + a, o + b, o + c, o + d, reg.faceLayer(id, f),
                                  glm::vec2(lsky, faceShade(axis, pos) * lblk),
-                                 static_cast<uint32_t>(f));
+                                 static_cast<uint32_t>(f), lcol);
                     };
                     // A face is hidden where it meets another liquid (surfaces connect)
                     // or an opaque block (terrain); only water-vs-air shows.
@@ -516,10 +536,10 @@ MeshData ChunkMesher::greedyMesh(const Chunk& chunk, const BlockRegistry& reg,
                     const float pt = 1.0f + e;                    // top overhang
                     addNonCubeQuad(o + glm::vec3(p0, pb, p0), o + glm::vec3(p1, pb, p1),
                                    o + glm::vec3(p1, pt, p1), o + glm::vec3(p0, pt, p0),
-                                   layer, lv, nrm);
+                                   layer, lv, nrm, col);
                     addNonCubeQuad(o + glm::vec3(p0, pb, p1), o + glm::vec3(p1, pb, p0),
                                    o + glm::vec3(p1, pt, p0), o + glm::vec3(p0, pt, p1),
-                                   layer, lv, nrm);
+                                   layer, lv, nrm, col);
                     if (rt == RenderType::LeafCube) {
                         // ...plus the full voxel-cube faces, so the canopy reads as
                         // solid leaf blocks with the cross fronds poking through.
@@ -532,7 +552,7 @@ MeshData ChunkMesher::greedyMesh(const Chunk& chunk, const BlockRegistry& reg,
                             if (nb == id || reg.isOpaque(nb)) return;
                             addNonCubeQuad(o + a, o + b, o + c, o + dd, reg.faceLayer(id, f),
                                            glm::vec2(sky, faceShade(axis, pos) * blk),
-                                           static_cast<uint32_t>(f));
+                                           static_cast<uint32_t>(f), col);
                         };
                         leafFace(-1, 0, 0, glm::vec3(0, 0, 0), glm::vec3(0, 0, 1),
                                  glm::vec3(0, 1, 1), glm::vec3(0, 1, 0), 0, false, FaceNegX);
@@ -557,19 +577,19 @@ MeshData ChunkMesher::greedyMesh(const Chunk& chunk, const BlockRegistry& reg,
                     addNonCubeQuad(o + glm::vec3(lo, 0, lo), o + glm::vec3(lo, 0, hi),
                                    o + glm::vec3(lo, 1, hi), o + glm::vec3(lo, 1, lo),
                                    reg.faceLayer(id, FaceNegX), faceLv(0, false),
-                                   static_cast<uint32_t>(FaceNegX));
+                                   static_cast<uint32_t>(FaceNegX), col);
                     addNonCubeQuad(o + glm::vec3(hi, 0, hi), o + glm::vec3(hi, 0, lo),
                                    o + glm::vec3(hi, 1, lo), o + glm::vec3(hi, 1, hi),
                                    reg.faceLayer(id, FacePosX), faceLv(0, true),
-                                   static_cast<uint32_t>(FacePosX));
+                                   static_cast<uint32_t>(FacePosX), col);
                     addNonCubeQuad(o + glm::vec3(hi, 0, lo), o + glm::vec3(lo, 0, lo),
                                    o + glm::vec3(lo, 1, lo), o + glm::vec3(hi, 1, lo),
                                    reg.faceLayer(id, FaceNegZ), faceLv(2, false),
-                                   static_cast<uint32_t>(FaceNegZ));
+                                   static_cast<uint32_t>(FaceNegZ), col);
                     addNonCubeQuad(o + glm::vec3(lo, 0, hi), o + glm::vec3(hi, 0, hi),
                                    o + glm::vec3(hi, 1, hi), o + glm::vec3(lo, 1, hi),
                                    reg.faceLayer(id, FacePosZ), faceLv(2, true),
-                                   static_cast<uint32_t>(FacePosZ));
+                                   static_cast<uint32_t>(FacePosZ), col);
                     // Top/bottom caps only where the neighbour isn't the same post
                     // (so a stacked trunk has no internal caps) and isn't opaque.
                     const bool capAbove = sample(x, y + 1, z).id != id &&
@@ -580,13 +600,13 @@ MeshData ChunkMesher::greedyMesh(const Chunk& chunk, const BlockRegistry& reg,
                         addNonCubeQuad(o + glm::vec3(lo, 1, lo), o + glm::vec3(lo, 1, hi),
                                        o + glm::vec3(hi, 1, hi), o + glm::vec3(hi, 1, lo),
                                        reg.faceLayer(id, FacePosY), faceLv(1, true),
-                                       static_cast<uint32_t>(FacePosY));
+                                       static_cast<uint32_t>(FacePosY), col);
                     }
                     if (capBelow) {
                         addNonCubeQuad(o + glm::vec3(lo, 0, lo), o + glm::vec3(hi, 0, lo),
                                        o + glm::vec3(hi, 0, hi), o + glm::vec3(lo, 0, hi),
                                        reg.faceLayer(id, FaceNegY), faceLv(1, false),
-                                       static_cast<uint32_t>(FaceNegY));
+                                       static_cast<uint32_t>(FaceNegY), col);
                     }
                 }
             }

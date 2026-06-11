@@ -11,6 +11,8 @@
 #    solid    default false. Participates in collision.
 #    opaque   default false. Hides the faces of neighbours touching it (meshing).
 #    light    default 0. Light level (0..15) this block emits (e.g. glowstone).
+#    light_color  default [1.00,0.66,0.32] (warm). Linear RGB hue of the emitted
+#             light: a warm torch vs orange lava. Only used when light > 0.
 #    hardness default 0. Seconds to break BY HAND (mining speed 1). 0 = instant
 #             (foliage), bigger = tougher; <0 = unbreakable. A held tool whose
 #             `tool:` matches this block's `preferred_tool:` mines it `tool_speed`x
@@ -106,6 +108,7 @@
   solid: true
   opaque: true
   light: 14
+  light_color: [1.00, 0.85, 0.55]   # warm yellow-white glow
   textures:
     all: glowstone.png
 
@@ -163,6 +166,7 @@
   solid: false
   opaque: true
   light: 13
+  light_color: [1.00, 0.38, 0.10]   # deep molten orange-red
   textures:
     all: lava.png
 
@@ -291,6 +295,7 @@
   solid: false
   opaque: false
   light: 13
+  light_color: [1.00, 0.58, 0.22]   # warm flame orange
   render: cross
   textures:
     all: torch.png
