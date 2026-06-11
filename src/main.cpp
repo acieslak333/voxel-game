@@ -77,10 +77,10 @@ int runWorldGenSelfTest(const std::string& assetDir) {
 
     // Recorded golden. NOTE: the selftest reads assets/biomes.yaml, so TUNING the
     // generation (e.g. via tools/genmap_tool.py) intentionally changes this hash —
-    // rebaseline when the config settles. Last set for flora-expansion tree species
-    // (biome `tree:` -> oak/birch/pine/maple/willow with per-species crowns, plus a
-    // new swamp biome). Bump ONLY for an intentional worldgen change (per WORLD_GEN_AGENT_TIPS §6).
-    constexpr uint64_t kGolden = 0xc5be57f810811b1dull;
+    // rebaseline when the config settles. Last set for worldgen-richness C: ravines
+    // (thin slot canyons) + cave fluid pools (deep lava, shallow water films) carved
+    // in caveAt/the column fill. Bump ONLY for an intentional worldgen change (per WORLD_GEN_AGENT_TIPS §6).
+    constexpr uint64_t kGolden = 0xdbd0fc426c20e6deull;
 
     uint64_t h1 = 0, h2 = 0;
     try {

@@ -294,6 +294,17 @@ bool World::caveAt(int wx, int wy, int wz, float surfaceTaper) const {
             return true;
         }
     }
+    // Ravines: a long, narrow, deep slot canyon. Where a low-frequency 2D winding
+    // noise sits inside a thin band, carve the whole tall span — so the canyon is a
+    // continuous vertical slit (not blobs) that can breach a hillside. Independent
+    // of surfaceTaper so it DOES open at the top (its narrowness keeps it rare).
+    if (config_.ravineWidth > 0.0f && wy > config_.ravineFloor && wy < config_.ravineMaxY) {
+        const float rf = config_.ravineFrequency;
+        const float r = caveNoise_.fbm((wx + 911) * rf, (wz - 733) * rf, 3);
+        if (std::abs(r) < config_.ravineWidth) {
+            return true;
+        }
+    }
     return false;
 }
 
@@ -417,9 +428,14 @@ void World::generateColumn(int cx, int cz) {
             // identical output to the old per-chunk loop, just without recomputing
             // the column shape for every chunk in the stack.
             const int top = std::min(std::max(featureTop, waterLevel), worldTop - 1);
+            // Id assigned to the cell directly below (wy-1) in this column, so a cave
+            // pool can tell it is resting on a solid floor. 0xFFFF = unknown (the cell
+            // below was in a disk-loaded chunk we skipped), which suppresses water.
+            uint16_t belowId = 0;
             for (int wy = 0; wy <= top; ++wy) {
                 const int cy = wy / N; // wy >= 0, plain division is fine
                 if (!needNoise[static_cast<size_t>(cy)]) {
+                    belowId = 0xFFFF;
                     continue;
                 }
                 uint16_t id = 0; // air
@@ -450,7 +466,18 @@ void World::generateColumn(int cx, int cz) {
                         }
                     }
                     if (carve) {
-                        id = 0;
+                        // Cave fluid pools: deep magma at the bottom, else a shallow
+                        // water film on a solid cave floor (a fraction of eligible cells).
+                        if (wy <= config_.lavaPoolMaxY) {
+                            id = lavaId_;
+                        } else if (wy <= config_.caveWaterMaxY && belowId != 0 &&
+                                   belowId != 0xFFFF && belowId != waterId_ &&
+                                   belowId != lavaId_ &&
+                                   hash01(wx, wy, wz, seed ^ 0x7a7eu) < config_.caveWaterChance) {
+                            id = waterId_;
+                        } else {
+                            id = 0;
+                        }
                     } else if (isStone) {
                         const uint16_t ore = oreAt(wx, wy, wz);
                         id = ore != 0 ? ore : stoneId_;
@@ -468,6 +495,7 @@ void World::generateColumn(int cx, int cz) {
                 if (id != 0) {
                     chunks_[slots[static_cast<size_t>(cy)]].set(lx, wy % N, lz, Block{id, 0});
                 }
+                belowId = id; // remember this cell for the one above (cave-pool floor test)
             }
 
             // --- Trees & bushes (sit on top of the terrain) -------------------

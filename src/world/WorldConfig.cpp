@@ -87,6 +87,17 @@ WorldConfig WorldConfig::load(const std::string& path) {
         get(cv["floor"], c.caveFloor);
         get(cv["cavern_threshold"], c.cavernThreshold);
         get(cv["cavern_max_y"], c.cavernMaxY);
+        if (const YAML::Node rv = cv["ravines"]) {
+            get(rv["frequency"], c.ravineFrequency);
+            get(rv["width"], c.ravineWidth);
+            get(rv["max_y"], c.ravineMaxY);
+            get(rv["floor"], c.ravineFloor);
+        }
+        if (const YAML::Node pl = cv["pools"]) {
+            get(pl["lava_max_y"], c.lavaPoolMaxY);
+            get(pl["water_max_y"], c.caveWaterMaxY);
+            get(pl["water_chance"], c.caveWaterChance);
+        }
     }
     if (const YAML::Node ore = root["ores"]) {
         auto getOre = [&](const char* key, float& density, int& maxY) {

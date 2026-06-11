@@ -150,7 +150,7 @@ features:
   # the neighbouring columns. Grass only. The generator stamps each tree from every
   # column it overlaps (a pure function of world coords), so canopies cross chunk
   # seams cleanly. 0 = no trees.
-  tree_density: 0.00005
+  tree_density: 0.000005
   # Ground bushes: a single crossed-quad shrub on a grass surface. Single-column.
   bush_density: 0.1
 
@@ -175,6 +175,21 @@ caves:
   # surface so the strongest ones open as cave mouths on hillsides.
   cavern_threshold: 0.52
   cavern_max_y: 40
+  # Ravines: long, narrow, deep slot canyons where a low-frequency 2D winding noise
+  # sits in a thin band. Carved over floor..max_y and can breach a hillside. Sparse
+  # + narrow so they stay rare; width: 0 disables them.
+  ravines:
+    frequency: 0.0009   # lower = longer, sparser canyons
+    width: 0.016        # |noise| half-band counted as canyon (narrow = thin slot)
+    max_y: 52           # carve ravines only below this world Y
+    floor: 6            # ...and never at/below this (keeps a base under the slot)
+  # Cave fluid pools. A carved cell at/below lava_max_y floods with lava (deep magma
+  # at the cave bottom); higher up (<= water_max_y) a carved cell resting on a SOLID
+  # floor becomes a shallow water film with probability water_chance.
+  pools:
+    lava_max_y: 8
+    water_max_y: 30
+    water_chance: 0.45
 
 # -----------------------------------------------------------------------------
 #  ores: each ore replaces stone in small clusters (one roll shared across a
@@ -184,13 +199,16 @@ caves:
 #    density  per-cell probability (0..1) — higher = more common
 #    max_y    only generated at or below this world height
 # -----------------------------------------------------------------------------
+# Rebalanced alongside ravines + cave pools (ISSUES #13C): slightly wider depth
+# bands and a touch more of each ore, so the deeper, more-exposed cave network
+# (ravine + cavern walls) yields a steadier ore supply across the tiers.
 ores:
-  coal:    { density: 0.020,  max_y: 56 }
-  iron:    { density: 0.013,  max_y: 44 }
-  gold:    { density: 0.006,  max_y: 28 }
-  ruby:    { density: 0.0035, max_y: 18 }
-  emerald: { density: 0.0030, max_y: 16 }
-  mythril: { density: 0.0016, max_y: 9 }
+  coal:    { density: 0.022,  max_y: 60 }
+  iron:    { density: 0.014,  max_y: 48 }
+  gold:    { density: 0.006,  max_y: 30 }
+  ruby:    { density: 0.0038, max_y: 20 }
+  emerald: { density: 0.0032, max_y: 18 }
+  mythril: { density: 0.0018, max_y: 11 }
 
 # NOTE: light falloff (how fast sky/block light dies per spread step) is a
 # player-facing option — it lives in assets/settings.yaml ("skyFalloff" /

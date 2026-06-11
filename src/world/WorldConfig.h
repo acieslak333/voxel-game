@@ -106,6 +106,22 @@ struct WorldConfig {
     float cavernThreshold = 0.52f;
     int   cavernMaxY      = 40;
 
+    // Ravines: long, narrow, deep canyons. Carved where a low-frequency 2D winding
+    // noise sits inside a thin band, over the tall span (ravineFloor..ravineMaxY) —
+    // so they read as slot canyons that can breach a hillside. Sparse + narrow so
+    // they stay rare; 0 width disables them.
+    float ravineFrequency = 0.0009f; // lower => longer, sparser canyons
+    float ravineWidth     = 0.016f;  // |noise| half-band counted as canyon (narrow => thin slot)
+    int   ravineMaxY      = 52;      // carve ravines only below this world Y
+    int   ravineFloor     = 6;       // ...and never at/below this (keeps a base under the slot)
+
+    // Cave fluid pools. A carved cell at/below lavaPoolMaxY floods with lava (deep
+    // magma at the cave bottom). Higher up (<= caveWaterMaxY), a carved cell resting
+    // on a SOLID floor becomes a shallow water film with probability caveWaterChance.
+    int   lavaPoolMaxY    = 8;
+    int   caveWaterMaxY   = 30;
+    float caveWaterChance = 0.45f;
+
     // --- Ores ------------------------------------------------------------------
     // Each ore replaces stone in small clusters (a roll shared across a 2x2x2 cell)
     // up to its max world-Y, so rarer ores sit deeper. Checked rarest-first.
