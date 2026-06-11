@@ -39,6 +39,7 @@ public:
         glm::vec4 camPos;        // xyz camera world position
         glm::vec4 color;         // rgb haze colour, w = distance-fog density
         glm::vec4 params;        // x heightFalloff, y groundFogDensity, z fogTopY, w maxFog
+        float     submerged = 0.0f; // 0 = above water, 1 = camera underwater (blue murk)
     };
     // Point the pass at the offscreen colour + depth images to read this frame.
     // Call once up front and again after the offscreen is recreated.
@@ -48,16 +49,12 @@ public:
     // swapchain extent; `lowRes` is the offscreen extent (drives the dither cell).
     void record(VkCommandBuffer cmd, VkExtent2D screen, VkExtent2D lowRes, const Fog& fog);
 
-    // Quantisation steps per channel (higher = smoother). Tunable look knob.
-    void setLevels(float levels) { levels_ = levels; }
-
 private:
     void createSampler();
     void createDescriptor();
     void createPipeline(VkRenderPass targetRenderPass);
 
     VulkanContext& ctx_;
-    float          levels_ = 8.0f;
 
     VkSampler             sampler_   = VK_NULL_HANDLE;
     VkDescriptorSetLayout setLayout_ = VK_NULL_HANDLE;

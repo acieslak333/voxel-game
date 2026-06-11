@@ -772,6 +772,14 @@ void App::run(long maxFrames, const std::string& screenshotPath) {
                                        fogOn * fogGroundMul_ * 0.0028f * fogAmt, // ground fog
                                        72.0f,                               // fog top Y
                                        fogMax_);                            // max fog
+                // Underwater (issue #13A): when the camera eye sits inside a water
+                // block, drown the view in blue murk via the composite pass.
+                const uint16_t waterId = world_.registry().idByName("water");
+                const int eyeX = static_cast<int>(std::floor(cam.position.x));
+                const int eyeY = static_cast<int>(std::floor(cam.position.y));
+                const int eyeZ = static_cast<int>(std::floor(cam.position.z));
+                fog.submerged =
+                    (world_.blockAt(eyeX, eyeY, eyeZ).id == waterId) ? 1.0f : 0.0f;
                 renderer_.setFog(fog);
             },
             [this](VkCommandBuffer cmd, uint32_t frameIndex, VkExtent2D extent) {

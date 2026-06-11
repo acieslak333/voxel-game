@@ -372,7 +372,15 @@ Core Optimizations:
     Liquids and the weather overhaul are done; this is the candidate work after them.
 
     **A. Liquid polish & physics**
-    - Underwater fog + blue tint when the camera is submerged.
+    - ~~Underwater fog + blue tint when the camera is submerged.~~ **DONE.** App
+      flags the composite pass when the camera eye sits in a water block; the pass
+      then drowns the whole view (sky included) in a distance-thickening blue-green
+      murk (`kWaterMurk`, cheap exponential — no march). Routed through the existing
+      fog push constant by repurposing its dead `levels` slot as `submerged` (no
+      layout change; removed the unused `setLevels`/`levels_`). Render-only, so the
+      `--selftest` golden is unaffected. NOTE: tuning (murk colour/density) is by eye
+      and unverified in-engine — adjust `kWaterMurk` / the `0.045` density and the
+      `0.30..0.94` range in composite.frag to taste.
     - Swim/buoyancy physics + drowning; lava deals damage.
     - Water meets lava -> stone/obsidian.
     - Infinite source (two sources fill the gap between them, like Minecraft).

@@ -46,7 +46,7 @@ struct PushConstants {
     glm::vec4 fogColor;
     glm::vec4 fogParams;
     float     lowRes[2];
-    float     levels;
+    float     submerged; // 0 = above water, 1 = camera underwater
 };
 } // namespace
 
@@ -254,7 +254,7 @@ void CompositeRenderer::record(VkCommandBuffer cmd, VkExtent2D screen, VkExtent2
     pc.fogParams   = fog.params;
     pc.lowRes[0]   = static_cast<float>(lowRes.width);
     pc.lowRes[1]   = static_cast<float>(lowRes.height);
-    pc.levels      = levels_;
+    pc.submerged   = fog.submerged;
     vkCmdPushConstants(cmd, pipelineLayout_, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pc), &pc);
 
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout_, 0, 1, &set_,
