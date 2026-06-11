@@ -104,4 +104,20 @@ struct AnimationClip {
 [[nodiscard]] std::vector<glm::mat4> worldMatrices(const Skeleton& skel,
                                                    const LocalPose& pose);
 
+// One baked entity vertex. Model-space (the renderer applies the entity's world
+// placement); the box rig is already posed into these positions by bakeMesh().
+struct EntityVertex {
+    glm::vec3 pos;
+    glm::vec3 normal;
+    glm::vec2 uv;
+    uint32_t  layer;
+};
+
+// Bake every box of `skel` into a non-indexed triangle list (36 verts/box),
+// transforming each box's corners + normals by its joint's world matrix. Called
+// per frame for animated entities (cheap for the small box counts a mob has). The
+// renderer uploads the result to a dynamic vertex buffer.
+[[nodiscard]] std::vector<EntityVertex> bakeMesh(const Skeleton& skel,
+                                                 const std::vector<glm::mat4>& world);
+
 } // namespace vg

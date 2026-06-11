@@ -517,6 +517,31 @@ int runLogicTest(const std::string& assetDir) {
             const auto restT = vg::worldMatrices(skel, vg::sampleClip(skel, spin, 0.0f));
             check(vnear(worldPos(restT[1]), glm::vec3(0.0f, 1.0f, 0.0f)),
                   "unanimated channels keep their rest transform");
+
+            // Bake: one box -> 36 verts, all within its bounds, with unit normals.
+            vg::Skeleton bx;
+            bx.joints.push_back({"root", -1, glm::vec3(0.0f),
+                                 glm::quat(1, 0, 0, 0), glm::vec3(1.0f)});
+            vg::Box box; box.joint = 0; box.min = glm::vec3(-1.0f); box.max = glm::vec3(1.0f);
+            bx.boxes.push_back(box);
+            const auto verts = vg::bakeMesh(bx, vg::worldMatrices(bx, vg::restPose(bx)));
+            check(verts.size() == 36, "one box bakes to 36 vertices");
+            bool inBounds = true, unitN = true;
+            for (const auto& vv : verts) {
+                if (std::fabs(vv.pos.x) > 1.001f || std::fabs(vv.pos.y) > 1.001f ||
+                    std::fabs(vv.pos.z) > 1.001f) inBounds = false;
+                if (std::fabs(glm::length(vv.normal) - 1.0f) > 1e-3f) unitN = false;
+            }
+            check(inBounds, "baked box verts lie within the box bounds");
+            check(unitN, "baked normals are unit length");
+
+            // A translated joint carries its baked geometry along.
+            bx.joints[0].restT = glm::vec3(5.0f, 0.0f, 0.0f);
+            const auto moved = vg::bakeMesh(bx, vg::worldMatrices(bx, vg::restPose(bx)));
+            bool shifted = true;
+            for (const auto& vv : moved)
+                if (vv.pos.x < 3.999f || vv.pos.x > 6.001f) shifted = false;
+            check(shifted, "translating a joint moves its baked box");
         }
 
         // Player save: serialize -> deserialize round-trips all fields.

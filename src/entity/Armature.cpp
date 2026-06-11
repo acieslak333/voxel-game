@@ -123,4 +123,57 @@ std::vector<glm::mat4> worldMatrices(const Skeleton& skel, const LocalPose& pose
     return world;
 }
 
+std::vector<EntityVertex> bakeMesh(const Skeleton& skel,
+                                   const std::vector<glm::mat4>& world) {
+    // Six faces, each defined by its outward axis + sign and two in-plane axes
+    // chosen so unit(uAxis) x unit(vAxis) == the outward normal (CCW winding).
+    struct Face { int axis; float sign; int u; int v; };
+    static const Face kFaces[6] = {
+        {0, +1.0f, 1, 2}, {0, -1.0f, 2, 1}, // +X, -X
+        {1, +1.0f, 2, 0}, {1, -1.0f, 0, 2}, // +Y, -Y
+        {2, +1.0f, 0, 1}, {2, -1.0f, 1, 0}, // +Z, -Z
+    };
+
+    std::vector<EntityVertex> out;
+    out.reserve(skel.boxes.size() * 36);
+
+    for (const Box& b : skel.boxes) {
+        if (b.joint < 0 || b.joint >= static_cast<int>(world.size())) continue;
+        const glm::mat4 m  = world[static_cast<size_t>(b.joint)];
+        const glm::mat3 nm = glm::mat3(m); // rotation (entities use uniform scale)
+        const glm::vec3 c  = (b.min + b.max) * 0.5f;
+        const glm::vec3 h  = (b.max - b.min) * 0.5f;
+
+        for (const Face& f : kFaces) {
+            glm::vec3 n(0.0f); n[f.axis] = f.sign;
+            glm::vec3 u(0.0f); u[f.u] = 1.0f;
+            glm::vec3 v(0.0f); v[f.v] = 1.0f;
+            const float hu = h[f.u], hv = h[f.v];
+            const glm::vec3 fc = c + n * h[f.axis]; // face centre in box space
+
+            // Four corners CCW (-u,-v)(+u,-v)(+u,+v)(-u,+v) with matching uvs.
+            const glm::vec3 p[4] = {
+                fc - u * hu - v * hv, fc + u * hu - v * hv,
+                fc + u * hu + v * hv, fc - u * hu + v * hv,
+            };
+            const glm::vec2 uv[4] = {
+                {b.uvMin.x, b.uvMax.y}, {b.uvMax.x, b.uvMax.y},
+                {b.uvMax.x, b.uvMin.y}, {b.uvMin.x, b.uvMin.y},
+            };
+            const glm::vec3 wn = glm::normalize(nm * n);
+            auto emit = [&](int k) {
+                EntityVertex ev;
+                ev.pos    = glm::vec3(m * glm::vec4(p[k], 1.0f));
+                ev.normal = wn;
+                ev.uv     = uv[k];
+                ev.layer  = b.layer;
+                out.push_back(ev);
+            };
+            emit(0); emit(1); emit(2); // two triangles per face
+            emit(0); emit(2); emit(3);
+        }
+    }
+    return out;
+}
+
 } // namespace vg
