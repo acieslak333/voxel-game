@@ -437,6 +437,27 @@ Core Optimizations:
     - The liquid remesh de-stutter from A.
 
     **E. 3D entities & animation** (prereq for mobs/NPCs/dropped items, combat)
+    **PROGRESS — E1 (rig+anim core), E2 (renderer) & E4 (test entity) DONE; E3 (glTF
+    loader) still open.** Done so far:
+    - **CPU core** (`src/entity/Armature.{h,cpp}`, headless-tested): box-part
+      `Skeleton` (joint hierarchy + rest TRS), `Box` geometry, `AnimationClip` with
+      per-joint TRS keyframe channels, `sampleClip` (lerp/slerp + loop/clamp),
+      `worldMatrices` (pose composition), `bakeMesh` (posed rig -> CCW triangle list).
+      10 `--logictest` checks.
+    - **EntityRenderer** (`src/render/EntityRenderer.{h,cpp}` + `shaders/entity.*`):
+      own pipeline (real per-vertex normals, depth+cull, lit like terrain), reuses
+      the block texture array + a per-frame host-visible vertex buffer; one draw per
+      entity with a model push constant. Drawn into the scene pass so it shares depth
+      + composite/fog. (Chose CPU re-bake per frame over a part-matrix UBO/skinning —
+      the cheap path; revisit if mob counts get large.)
+    - **Test biped** wired into App (`buildTestEntity`): a 7-joint biped (root/torso/
+      head/arms/legs) with a walk clip (limbs slerp-swing), stood in front of spawn,
+      animated each frame. VISUALLY CONFIRMED via a headless `--screenshot` — renders
+      as a clean white box-figure in the world.
+    - **STILL OPEN — E3:** vendor cgltf + a `.glb` loader so real Blockbench models
+      (skeleton + boxes + clips) replace the procedural test biped; then per-mob
+      texture array layers instead of borrowing block textures.
+    Original spec below.
     Direction chosen (user): **blocky**, so use box-part rigs, NOT skinned meshes.
     - **Authoring tool: Blockbench** (free, purpose-built for voxel/Minecraft-style box
       models + a built-in keyframe animation editor). Matches the game's blocky look.
@@ -672,3 +693,6 @@ Core Optimizations:
       16 + scale sea_level/splines/snow_line) for the vertical room.
 
 15. Remove all armors expecpt boots, Also make Inventory more polished. Add scrolable inventory, more compact trinket space, crafting when howevered should show what is it using for the recipe and not available recipes should be darkned
+
+
+16. textures are scaled where we shuldnt scale them they should persists in scale of 16x16 pixels texture as a blocks

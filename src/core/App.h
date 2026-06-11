@@ -2,6 +2,7 @@
 
 #include "clouds/CloudSystem.h"
 #include "core/DayNight.h"
+#include "entity/Armature.h"
 #include "entity/ItemEntity.h"
 #include "core/Input.h"
 #include "core/Palette.h"
@@ -14,6 +15,7 @@
 #include "render/Renderer.h"
 #include "render/SkyRenderer.h"
 #include "render/Swapchain.h"
+#include "render/EntityRenderer.h"
 #include "render/UiRenderer.h"
 #include "render/VulkanContext.h"
 #include "render/WorldRenderer.h"
@@ -144,6 +146,7 @@ private:
     SkyRenderer      skyRenderer_; // atmosphere + volumetric clouds, first in the scene pass
     World            world_;
     WorldRenderer    worldRenderer_;
+    EntityRenderer   entityRenderer_; // animated box-rig entities (ISSUES #13E)
     UiRenderer       ui_;        // 2D HUD/menu renderer (after renderer_)
     Input            input_;
     PlayerController  player_;
@@ -151,6 +154,14 @@ private:
     ChestStore        chests_;   // per-position chest contents (persisted to disk)
     Equipment         equipment_; // worn armour + trinkets (persisted with the player)
     ItemEntities      droppedItems_; // dropped-item entities (physics + walk-over pickup)
+
+    // Test entity (ISSUES #13E E4): a procedural animated biped proving the rig +
+    // EntityRenderer pipeline end to end. Built once; animated by entityAnimTime_.
+    Skeleton          testEntity_;
+    AnimationClip     testWalk_;
+    glm::vec3         entityPos_{0.0f};   // world position (feet) of the test biped
+    float             entityAnimTime_ = 0.0f;
+    void buildTestEntity();
 
     // UI state.
     bool             paused_ = false;        // escape menu open

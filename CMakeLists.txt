@@ -201,6 +201,8 @@ add_shader(sky.vert)
 add_shader(sky.frag)
 add_shader(composite.vert)
 add_shader(composite.frag)
+add_shader(entity.vert)
+add_shader(entity.frag)
 add_custom_target(shaders DEPENDS ${SPIRV_OUTPUTS})
 
 # -----------------------------------------------------------------------------
@@ -223,6 +225,7 @@ add_executable(voxelgame
     src/render/TextureArray.cpp
     src/render/Pipeline.cpp
     src/render/WorldRenderer.cpp
+    src/render/EntityRenderer.cpp
     src/render/OffscreenTarget.cpp
     src/render/CompositeRenderer.cpp
     src/render/SkyRenderer.cpp

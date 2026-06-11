@@ -68,6 +68,9 @@ App::App()
       worldRenderer_(context_, renderer_.sceneRenderPass(),
                      static_cast<uint32_t>(Renderer::kMaxFramesInFlight), world_,
                      VG_SHADER_DIR, std::string(VG_ASSET_DIR) + "/textures"),
+      entityRenderer_(context_, renderer_.sceneRenderPass(),
+                      static_cast<uint32_t>(Renderer::kMaxFramesInFlight), VG_SHADER_DIR,
+                      worldRenderer_.blockTextureView(), worldRenderer_.blockTextureSampler()),
       ui_(context_, renderer_.uiRenderPass(),
           static_cast<uint32_t>(Renderer::kMaxFramesInFlight),
           std::string(VG_ASSET_DIR) + "/fonts/ari/" + settings_.font, 32.0f,
@@ -82,6 +85,17 @@ App::App()
                            static_cast<float>(world_.surfaceHeight(cx, cz)) + 2.0f,
                            static_cast<float>(cz));
     player_.teleport(spawnFeet_);
+
+    // Test biped (ISSUES #13E): stand it a few blocks in front of the spawn camera
+    // (which defaults to looking down -Z) on the surface, so it's visible the moment
+    // the world loads.
+    {
+        const int ex = cx, ez = cz - 4;
+        entityPos_ = glm::vec3(static_cast<float>(ex),
+                               static_cast<float>(world_.surfaceHeight(ex, ez)) + 1.0f,
+                               static_cast<float>(ez));
+        buildTestEntity();
+    }
     player_.setInvulnerable(creativeMode_); // creative ignores fall/lava/combat damage
 
     // Collide against the generated world.
@@ -620,6 +634,59 @@ void App::enableFlyOverview() {
     player_.camera().pitch = -34.0f;  // looking down
 }
 
+void App::buildTestEntity() {
+    // Skin: reuse a block's texture-array layer so the rig is visibly textured
+    // (per-mob skins arrive with the glTF loader, E3).
+    uint32_t skin = 0;
+    try { skin = world_.registry().faceLayer(world_.registry().idByName("snow"), 0); } catch (...) {}
+
+    Skeleton& s = testEntity_;
+    s.joints.clear();
+    s.boxes.clear();
+    const glm::quat q(1, 0, 0, 0);
+    // 0 root(hip) 1 torso 2 head 3 armL 4 armR 5 legL 6 legR (parent < index).
+    s.joints.push_back({"root",  -1, glm::vec3(0.0f, 0.70f, 0.0f),  q, glm::vec3(1.0f)});
+    s.joints.push_back({"torso",  0, glm::vec3(0.0f, 0.0f, 0.0f),   q, glm::vec3(1.0f)});
+    s.joints.push_back({"head",   1, glm::vec3(0.0f, 0.55f, 0.0f),  q, glm::vec3(1.0f)});
+    s.joints.push_back({"armL",   1, glm::vec3(-0.26f, 0.50f, 0.0f), q, glm::vec3(1.0f)});
+    s.joints.push_back({"armR",   1, glm::vec3(0.26f, 0.50f, 0.0f),  q, glm::vec3(1.0f)});
+    s.joints.push_back({"legL",   0, glm::vec3(-0.10f, 0.0f, 0.0f),  q, glm::vec3(1.0f)});
+    s.joints.push_back({"legR",   0, glm::vec3(0.10f, 0.0f, 0.0f),   q, glm::vec3(1.0f)});
+
+    auto box = [&](int joint, glm::vec3 mn, glm::vec3 mx) {
+        Box b; b.joint = joint; b.min = mn; b.max = mx; b.layer = skin;
+        b.uvMin = glm::vec2(0.0f); b.uvMax = glm::vec2(1.0f);
+        s.boxes.push_back(b);
+    };
+    box(1, glm::vec3(-0.18f, 0.0f, -0.10f),   glm::vec3(0.18f, 0.55f, 0.10f)); // torso
+    box(2, glm::vec3(-0.16f, 0.0f, -0.16f),   glm::vec3(0.16f, 0.32f, 0.16f)); // head
+    box(3, glm::vec3(-0.09f, -0.50f, -0.09f), glm::vec3(0.09f, 0.06f, 0.09f)); // armL
+    box(4, glm::vec3(-0.09f, -0.50f, -0.09f), glm::vec3(0.09f, 0.06f, 0.09f)); // armR
+    box(5, glm::vec3(-0.09f, -0.70f, -0.09f), glm::vec3(0.09f, 0.0f, 0.09f));  // legL
+    box(6, glm::vec3(-0.09f, -0.70f, -0.09f), glm::vec3(0.09f, 0.0f, 0.09f));  // legR
+
+    // Walk clip: limbs swing about X; legs and the opposite arms move in phase.
+    testWalk_ = AnimationClip{};
+    testWalk_.name     = "walk";
+    testWalk_.duration = 1.0f;
+    testWalk_.loop     = true;
+    const float amp = glm::radians(28.0f);
+    auto swing = [&](int joint, float dir) {
+        AnimChannel ch;
+        ch.joint = joint;
+        ch.times = {0.0f, 0.5f, 1.0f};
+        const float a = dir * amp;
+        ch.rotations = {glm::angleAxis(a, glm::vec3(1, 0, 0)),
+                        glm::angleAxis(-a, glm::vec3(1, 0, 0)),
+                        glm::angleAxis(a, glm::vec3(1, 0, 0))};
+        testWalk_.channels.push_back(ch);
+    };
+    swing(5, +1.0f); // legL
+    swing(6, -1.0f); // legR (opposite)
+    swing(3, -1.0f); // armL counter-swings legL
+    swing(4, +1.0f); // armR counter-swings legR
+}
+
 void App::run(long maxFrames, const std::string& screenshotPath) {
     double lastTime = glfwGetTime();
     long frame = 0;
@@ -697,6 +764,7 @@ void App::run(long maxFrames, const std::string& screenshotPath) {
             player_.update(dt, in);
             editBlocks(in, dt);
             updateSurvival(dt);
+            entityAnimTime_ += dt; // drive the test biped's walk cycle
             // Dropped-item entities: fall, magnetise to the player, walk-over pickup.
             // (Rendering is pending the EntityRenderer; until then this only carries
             // mining overflow that wouldn't fit, so nothing is silently lost.)
@@ -800,6 +868,19 @@ void App::run(long maxFrames, const std::string& screenshotPath) {
                 worldRenderer_.record(cmd, frameIndex, extent, view, proj,
                                       glm::vec4(sky.lightDir, ambient),
                                       glm::vec4(lightCol, intensity));
+
+                // Test entity (ISSUES #13E E4): pose -> bake -> draw into the same
+                // scene pass (shares depth + the composite/fog), lit like the terrain.
+                {
+                    const LocalPose pose = sampleClip(testEntity_, testWalk_, entityAnimTime_);
+                    const std::vector<EntityVertex> mesh =
+                        bakeMesh(testEntity_, worldMatrices(testEntity_, pose));
+                    const std::vector<EntityRenderer::Draw> draws{
+                        {&mesh, glm::translate(glm::mat4(1.0f), entityPos_)}};
+                    entityRenderer_.record(cmd, frameIndex, extent, view, proj,
+                                           glm::vec4(sky.lightDir, ambient),
+                                           glm::vec4(lightCol, intensity), draws);
+                }
 
                 // Fog (issue #10 E): the composite pass fogs the terrain by depth.
                 // Haze colour tracks the horizon sky (pale blue by day, warm at
