@@ -857,3 +857,20 @@ Core Optimizations:
       selftest-guarded; do with supervision (the golden guards worldgen only).
     - **Perf (#13D):** LOD for distant chunks; kill the per-tick vkDeviceWaitIdle in
       liquid/edit remeshes.
+    - **Texture mipmapping (TextureArray):** the 16px block textures tiled via REPEAT
+      shimmer/moiré when minified (worse at the low-res offscreen + grazing angles).
+      Composes fine with the dither/pixelate — those act on lighting + a low-res
+      upscale, mips act only on albedo sampling (orthogonal). Plan (self-contained in
+      TextureArray.cpp, does NOT touch App.cpp): create the image with mipLevels=5,
+      generate the chain per array layer via vkCmdBlitImage at upload, set sampler
+      mipmapMode=NEAREST_MIPMAP_LINEAR, keep magFilter NEAREST (crisp close-up), and
+      CAP maxLod ~2-3 (a 16px tex's 1-2px mips are just the average colour = mush, and
+      LOD is computed at the coarse offscreen res so mips bite early). TWO gotchas:
+      (1) ALPHA-CUTOUT foliage/leaves/plants/water (discard a<0.5) DISSOLVE at distance
+      because mips average alpha — fix by sampling LOD 0 for cutout layers (simplest)
+      or rescaling the cutoff by per-LOD coverage (Wronski alpha-tested mipmaps, best).
+      (2) it softens the crisp pixel look — mitigated by NEAREST mag + capped maxLod.
+      Texture ARRAY (not atlas) => layers mip independently, no cross-tile bleed.
+      OPTIONAL/better for ground: enable the anisotropy device feature + anisotropic
+      filtering (sharper at grazing angles than plain mips). Verify via a distant-
+      terrain screenshot (shimmer is visible even in a still).
