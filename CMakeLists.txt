@@ -245,6 +245,7 @@ add_executable(voxelgame
     src/player/Crafting.cpp
     src/player/ChestStore.cpp
     src/entity/ItemEntity.cpp
+    src/entity/Armature.cpp
 )
 add_dependencies(voxelgame shaders)
 

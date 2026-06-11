@@ -1,5 +1,6 @@
 #include "core/App.h"
 #include "core/Input.h"
+#include "entity/Armature.h"
 #include "entity/ItemEntity.h"
 #include "player/ChestStore.h"
 #include "player/Crafting.h"
@@ -465,6 +466,57 @@ int runLogicTest(const std::string& assetDir) {
             stepFor(held, sneakDiag, 1.0f);
             check(fell.feetPosition().y < 99.0f, "walking off a pillar falls");
             check(held.feetPosition().y > 99.5f, "sneak edge-stop keeps the player on the pillar");
+        }
+
+        // Box-rig + animation core (ISSUES #13E) — pure math, no Vulkan.
+        {
+            auto worldPos = [](const glm::mat4& m) {
+                return glm::vec3(m * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
+            };
+            auto vnear = [](const glm::vec3& a, const glm::vec3& b) {
+                return glm::length(a - b) < 1e-3f;
+            };
+            vg::Skeleton skel;
+            skel.joints.push_back({"root", -1, glm::vec3(0.0f),
+                                   glm::quat(1, 0, 0, 0), glm::vec3(1.0f)});
+            skel.joints.push_back({"arm", 0, glm::vec3(0.0f, 1.0f, 0.0f),
+                                   glm::quat(1, 0, 0, 0), glm::vec3(1.0f)});
+            check(skel.isTopologicallyOrdered(), "skeleton is parent-before-child ordered");
+            check(skel.find("arm") == 1, "joint lookup by name");
+
+            const auto rest = vg::worldMatrices(skel, vg::restPose(skel));
+            check(vnear(worldPos(rest[1]), glm::vec3(0.0f, 1.0f, 0.0f)),
+                  "rest pose places child above root");
+
+            // Rotate the root +90deg about Z: the arm tip swings from +Y to -X.
+            vg::AnimationClip spin;
+            spin.name = "spin"; spin.duration = 1.0f; spin.loop = false;
+            vg::AnimChannel ch; ch.joint = 0; ch.times = {0.0f, 1.0f};
+            ch.rotations = {glm::quat(1, 0, 0, 0),
+                            glm::angleAxis(glm::radians(90.0f), glm::vec3(0, 0, 1))};
+            spin.channels.push_back(ch);
+            const auto endP = vg::worldMatrices(skel, vg::sampleClip(skel, spin, 1.0f));
+            check(vnear(worldPos(endP[1]), glm::vec3(-1.0f, 0.0f, 0.0f)),
+                  "90deg root spin swings child to -X");
+
+            const auto midP = vg::worldMatrices(skel, vg::sampleClip(skel, spin, 0.5f));
+            const float s = std::sqrt(0.5f);
+            check(vnear(worldPos(midP[1]), glm::vec3(-s, s, 0.0f)), "slerp midpoint = 45deg");
+
+            // Looping wraps the sample time (t=1.5 on a 1s loop -> t=0.5).
+            vg::AnimationClip slide;
+            slide.name = "slide"; slide.duration = 1.0f; slide.loop = true;
+            vg::AnimChannel tch; tch.joint = 0; tch.times = {0.0f, 1.0f};
+            tch.translations = {glm::vec3(0.0f), glm::vec3(10.0f, 0.0f, 0.0f)};
+            slide.channels.push_back(tch);
+            const auto looped = vg::worldMatrices(skel, vg::sampleClip(skel, slide, 1.5f));
+            check(vnear(worldPos(looped[0]), glm::vec3(5.0f, 0.0f, 0.0f)),
+                  "loop wraps t=1.5 -> t=0.5");
+
+            // A rotation-only channel leaves translation at its rest value.
+            const auto restT = vg::worldMatrices(skel, vg::sampleClip(skel, spin, 0.0f));
+            check(vnear(worldPos(restT[1]), glm::vec3(0.0f, 1.0f, 0.0f)),
+                  "unanimated channels keep their rest transform");
         }
 
         // Player save: serialize -> deserialize round-trips all fields.
