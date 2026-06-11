@@ -305,7 +305,10 @@ void App::breakBlockAt(const glm::ivec3& b) {
     }
 
     const std::vector<glm::ivec3> dirty = world_.setBlock(b.x, b.y, b.z, Block{});
-    if (broken != 0 && !creativeMode_) {
+    // Harvest gating: a block below its harvest tier still breaks but drops nothing
+    // (so stone/ores need the right pickaxe tier — the classic progression loop).
+    const uint16_t heldTool = player_.inventory().selectedStack().blockId;
+    if (broken != 0 && !creativeMode_ && world_.registry().canHarvest(broken, heldTool)) {
         // Survival: into the inventory, but if it's full the surplus becomes a
         // dropped-item entity at the block centre rather than vanishing.
         const int leftover = player_.inventory().add(broken, 1);

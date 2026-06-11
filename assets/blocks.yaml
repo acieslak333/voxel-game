@@ -55,6 +55,7 @@
 - name: stone
   hardness: 1.5
   preferred_tool: pickaxe
+  harvest_level: 1   # needs a wood pickaxe (or better) to drop
   solid: true
   opaque: true
   textures:
@@ -77,6 +78,7 @@
 - name: cobblestone
   hardness: 2.0
   preferred_tool: pickaxe
+  harvest_level: 1
   solid: true
   opaque: true
   textures:
@@ -176,6 +178,7 @@
 - name: coal_ore
   hardness: 3.0
   preferred_tool: pickaxe
+  harvest_level: 1
   solid: true
   opaque: true
   textures:
@@ -183,6 +186,7 @@
 - name: iron_ore
   hardness: 3.0
   preferred_tool: pickaxe
+  harvest_level: 2
   solid: true
   opaque: true
   textures:
@@ -190,6 +194,7 @@
 - name: gold_ore
   hardness: 3.0
   preferred_tool: pickaxe
+  harvest_level: 2
   solid: true
   opaque: true
   textures:
@@ -197,6 +202,7 @@
 - name: ruby_ore
   hardness: 4.0
   preferred_tool: pickaxe
+  harvest_level: 3
   solid: true
   opaque: true
   textures:
@@ -204,6 +210,7 @@
 - name: emerald_ore
   hardness: 4.0
   preferred_tool: pickaxe
+  harvest_level: 3
   solid: true
   opaque: true
   textures:
@@ -211,6 +218,8 @@
 - name: mythril_ore
   hardness: 5.0
   preferred_tool: pickaxe
+  harvest_level: 3   # iron-minable (avoids a mythril-needs-mythril cycle); the
+                     # mythril pickaxe is the speed reward, not a new gate
   solid: true
   opaque: true
   textures:
@@ -235,6 +244,7 @@
 - name: pickaxe
   tool: pickaxe
   tool_speed: 5.0
+  tier: 3            # iron-tier; wood/stone/mythril tiers appended at end of file
   textures:
     all: pickaxe.png
 - name: sword
@@ -299,3 +309,28 @@
   render: cross
   textures:
     all: torch.png
+
+# --- Tool tiers (ISSUES #13I: harvest-tier progression) -----------------------
+# Pickaxe tiers gate which ores yield a drop (a block drops only when mined with a
+# matching tool of tier >= its harvest_level). The plain `pickaxe` above is the
+# iron tier (3). These three fill out the wood->stone->iron->mythril ladder. They
+# reuse pickaxe.png for now (per-tier icons are a later art pass). Appended at the
+# very end so existing block ids / saved chunks don't shift.
+- name: wood_pickaxe
+  tool: pickaxe
+  tool_speed: 2.0
+  tier: 1
+  textures:
+    all: pickaxe.png
+- name: stone_pickaxe
+  tool: pickaxe
+  tool_speed: 3.5
+  tier: 2
+  textures:
+    all: pickaxe.png
+- name: mythril_pickaxe
+  tool: pickaxe
+  tool_speed: 8.0
+  tier: 4
+  textures:
+    all: pickaxe.png

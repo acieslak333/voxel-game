@@ -355,6 +355,26 @@ int runLogicTest(const std::string& assetDir) {
         check(reg.emission(torch) > 0,                 "torch emits block light");
         check(!reg.isSolid(torch),                     "torch is walk-through");
 
+        // Tool-tier harvest gating (ISSUES #13I): a block drops only with a matching
+        // tool of high enough tier; below tier it still breaks but yields nothing.
+        const uint16_t woodPick    = reg.idByName("wood_pickaxe");
+        const uint16_t stonePick   = reg.idByName("stone_pickaxe");
+        const uint16_t mythrilPick = reg.idByName("mythril_pickaxe");
+        const uint16_t coalOre = reg.idByName("coal_ore");
+        const uint16_t ironOre = reg.idByName("iron_ore");
+        const uint16_t rubyOre = reg.idByName("ruby_ore");
+        check(reg.canHarvest(dirt, air),           "dirt drops by hand (no tier gate)");
+        check(!reg.canHarvest(stone, air),         "stone needs a pickaxe (no bare-hand drop)");
+        check(reg.canHarvest(stone, woodPick),     "wood pickaxe harvests stone");
+        check(reg.canHarvest(coalOre, woodPick),   "wood pickaxe harvests coal ore");
+        check(!reg.canHarvest(ironOre, woodPick),  "wood pickaxe too low for iron ore");
+        check(reg.canHarvest(ironOre, stonePick),  "stone pickaxe harvests iron ore");
+        check(!reg.canHarvest(rubyOre, stonePick), "stone pickaxe too low for ruby ore");
+        check(reg.canHarvest(rubyOre, pick),       "iron pickaxe harvests ruby ore");
+        check(!reg.canHarvest(coalOre, sword),     "sword (wrong kind) doesn't harvest ore");
+        check(reg.toolTier(mythrilPick) == 4,      "mythril pickaxe is tier 4");
+        check(reg.toolTier(air) == 0,              "bare hand is tier 0");
+
         // Fall damage: harmless under the safe-fall height, scaling above it.
         check(near(vg::PlayerController::fallDamage(0.0f), 0.0f),  "no fall = no damage");
         check(vg::PlayerController::fallDamage(12.0f) == 0.0f,     "a 2-3 block fall is safe");

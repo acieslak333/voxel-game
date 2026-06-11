@@ -122,6 +122,8 @@ BlockRegistry::BlockRegistry(const std::string& blocksFile) {
         props.preferredTool = parseTool(entry, "preferred_tool");
         props.tool          = parseTool(entry, "tool");
         props.toolSpeed     = valueOr(entry, "tool_speed", 1.0f);
+        props.tier          = valueOr(entry, "tier", 0);
+        props.harvestLevel  = valueOr(entry, "harvest_level", 0);
         props.attackDamage  = valueOr(entry, "attack_damage", 1.0f);
 
         // Equipment: armour pieces (damage reduction) + trinkets (passive bonuses).
@@ -197,6 +199,16 @@ float BlockRegistry::breakSeconds(uint16_t target, uint16_t held) const {
         }
     }
     return t.hardness / speed;
+}
+
+bool BlockRegistry::canHarvest(uint16_t target, uint16_t held) const {
+    const BlockProperties& t = get(target);
+    if (t.harvestLevel <= 0) return true; // anything (even bare hands) drops it
+    if (held == 0 || held >= blocks_.size()) return false; // gated block needs a tool
+    const BlockProperties& h = blocks_[held];
+    // Must be the right *kind* of tool (e.g. a pickaxe for ore) AND a high enough tier.
+    if (t.preferredTool != ToolKind::None && h.tool != t.preferredTool) return false;
+    return h.tier >= t.harvestLevel;
 }
 
 uint16_t BlockRegistry::idByName(const std::string& name) const {

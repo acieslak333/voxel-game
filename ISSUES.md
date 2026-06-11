@@ -503,9 +503,18 @@ Core Optimizations:
       entity tooling (E) — without it that tooling has no use.
     - **Combat:** sword swing arc, damage + knockback, mob health, death drops — ties
       the sword, mobs, and the survival loop together.
-    - **Progression / tool tiers:** pickaxe tiers gate harder ores (wood -> stone ->
-      iron -> ...). This is what gives the ores AND crafting a purpose (ores are
-      currently decorative).
+    - ~~**Progression / tool tiers:**~~ **DONE.** Tools carry a harvest `tier`
+      (0 hand / 1 wood / 2 stone / 3 iron / 4 mythril) and blocks a `harvest_level`;
+      `BlockRegistry::canHarvest` lets a block DROP only when mined with a matching
+      tool of tier >= its level (below tier it still breaks but yields nothing).
+      App::breakBlockAt gates the drop on it. Stone/cobblestone = lvl 1, coal = 1,
+      iron/gold = 2, ruby/emerald = 3, mythril = 3 (iron-minable, avoids a self-cycle).
+      The plain `pickaxe` is iron-tier (3); wood/stone/mythril pickaxes appended to
+      blocks.yaml (reuse pickaxe.png — per-tier icons are a later art pass) and made
+      craftable in recipes.yaml (planks -> wood pick -> stone -> iron -> mythril; ore
+      stands in for the ingot since there's no furnace yet). Gives ores + crafting a
+      purpose. 11 `--logictest` checks; `--selftest` golden unchanged. The OTHER two
+      items in this section (mobs/AI, combat) remain blocked on entity tooling (E).
 
     **J. Audio** — **currently absent entirely** (no SFX / ambience / music)
     - Foundational: every system wants a sound hook (break/place, footsteps, water &

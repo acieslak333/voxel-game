@@ -70,6 +70,14 @@ struct BlockProperties {
     // Mining-speed multiplier this tool applies to blocks whose preferredTool matches
     // (e.g. a pickaxe with toolSpeed 5 breaks stone 5x faster than by hand).
     float toolSpeed = 1.0f;
+    // Harvest TIER this tool provides (if it IS a tool): 0 = hand, 1 wood, 2 stone,
+    // 3 iron, 4 mythril. A block only drops when mined with a tool whose tier is
+    // >= the block's harvestLevel (and of the matching kind). See canHarvest().
+    int tier = 0;
+    // The minimum tool tier required to DROP this block when mined (0 = anything,
+    // even bare hands). A block mined below its harvestLevel still breaks but yields
+    // nothing — the classic ore-gating loop (need a wood pick for stone, etc.).
+    int harvestLevel = 0;
     // Combat damage this item deals when used as a weapon (swords; future mobs).
     float attackDamage = 1.0f;
 
@@ -125,6 +133,15 @@ public:
     // time, exercised headlessly by --logictest. A held tool only speeds blocks
     // whose preferredTool matches its kind; otherwise hand speed applies.
     [[nodiscard]] float breakSeconds(uint16_t target, uint16_t held) const;
+
+    // Tier the held tool provides (0 by hand / non-tool).
+    [[nodiscard]] int toolTier(uint16_t held) const {
+        return (held != 0 && held < blocks_.size()) ? blocks_[held].tier : 0;
+    }
+    // Will breaking `target` with `held` yield a drop? True unless the block has a
+    // harvestLevel above 0 and the held tool is either the wrong kind or too low a
+    // tier. Pure function of registry data — exercised headlessly by --logictest.
+    [[nodiscard]] bool canHarvest(uint16_t target, uint16_t held) const;
 
     // Resolve a block name (e.g. "stone") to its id. Throws std::out_of_range
     // if no block with that name was defined.
