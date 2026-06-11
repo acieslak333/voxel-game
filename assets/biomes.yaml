@@ -21,9 +21,9 @@
 #   Tuned for a 128-block-tall world (world.yaml height_chunks: 8) with sea at the
 #   middle. To go taller (e.g. height_chunks: 16 = 256), raise sea_level (~128) and
 #   roughly scale the spline y-values + snow_line with it.
-sea_level: 64
+sea_level: 128
 # Blocks above sea level where any surface gets a snow cap (mountain snow line).
-snow_line: 44
+snow_line: 72
 
 # --- Shape noises -----------------------------------------------------------
 # frequency = how large the features are (smaller = broader); octaves = detail.
@@ -84,9 +84,9 @@ island:
   radius: 1100          # blocks from centre where land has fully sunk to ocean
   inner: 0.5            # inner fraction kept at full land height (the island's body)
   coast_warp: 340       # blocks of coastline noise (0 = a clean circle)
-  land_base: 9          # base interior land height above sea level
-  interior_var: 8       # continentalness -> interior hills/valleys amplitude
-  ocean_floor: -46      # deep sea-floor elevation far from the island
+  land_base: 18         # base interior land height above sea level
+  interior_var: 18      # continentalness -> interior hills/valleys amplitude
+  ocean_floor: -92      # deep sea-floor elevation far from the island
 
 # --- Shape splines ----------------------------------------------------------
 # continental_spline: continentalness noise (-1..1) -> base elevation (blocks vs
@@ -95,23 +95,23 @@ island:
 # with land only emerging where the noise is high (c > ~0.25). Raise the crossing
 # point (the [x, 0] knee) for more ocean / smaller islands; lower it for more land.
 continental_spline:
-- [-1.00, -46]
-- [-0.40, -26]
-- [-0.10, -12]
-- [0.12, -5]
-- [0.26, 2]
-- [0.45, 12]
-- [0.70, 22]
-- [1.00, 32]
+- [-1.00, -92]
+- [-0.40, -52]
+- [-0.10, -22]
+- [0.12, -8]
+- [0.26, 6]
+- [0.45, 26]
+- [0.70, 46]
+- [1.00, 56]
 # erosion_spline: erosion noise (-1..1) -> mountain amplitude (blocks). The ridged
 # `peaks` noise (0..1) scales this, so low-erosion areas grow tall ranges and
 # high-erosion areas stay flat.
 erosion_spline:
-- [-1.00, 44]
-- [-0.50, 32]
-- [-0.10, 16]
-- [0.20, 6]
-- [0.50, 2]
+- [-1.00, 70]
+- [-0.50, 52]
+- [-0.10, 28]
+- [0.20, 12]
+- [0.50, 4]
 - [1.00, 0]
 
 # --- Biomes -----------------------------------------------------------------
@@ -147,7 +147,7 @@ biomes:
 - name: mountain
   temp: [-2, 2]
   humidity: [-2, 2]
-  elevation: [34, 10000]
+  elevation: [60, 10000]
   top: stone
   filler: stone
   trees: 0.003

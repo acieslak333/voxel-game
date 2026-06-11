@@ -68,7 +68,7 @@ int runWorldGenSelfTest(const std::string& assetDir) {
     cfg.streaming     = false; // fixed grid: no threads, no disk, fully deterministic
     cfg.streamWorkers = 0;
     cfg.viewRadius    = 4;      // 9x9 chunks
-    cfg.heightChunks  = 8;      // 128 tall: sea level 64 in the middle (biome pipeline)
+    cfg.heightChunks  = 16;     // 256 tall: sea level 128 in the middle (biome pipeline)
     cfg.chunksX = cfg.chunksZ = 2 * cfg.viewRadius + 1;
     cfg.chunksY = cfg.heightChunks;
     // Everything else keeps the documented WorldConfig.h defaults (stable).
@@ -77,10 +77,10 @@ int runWorldGenSelfTest(const std::string& assetDir) {
 
     // Recorded golden. NOTE: the selftest reads assets/biomes.yaml, so TUNING the
     // generation (e.g. via tools/genmap_tool.py) intentionally changes this hash —
-    // rebaseline when the config settles. Last set for worldgen-richness C: ravines
-    // (thin slot canyons) + cave fluid pools (deep lava, shallow water films) carved
-    // in caveAt/the column fill. Bump ONLY for an intentional worldgen change (per WORLD_GEN_AGENT_TIPS §6).
-    constexpr uint64_t kGolden = 0xdbd0fc426c20e6deull;
+    // rebaseline when the config settles. Last set for the 256-tall world (height
+    // 16 chunks, sea level 128, biomes.yaml splines/cave/ore depths scaled for
+    // dramatic mountains). Bump ONLY for an intentional worldgen change (per WORLD_GEN_AGENT_TIPS §6).
+    constexpr uint64_t kGolden = 0x44839fef385a5627ull;
 
     uint64_t h1 = 0, h2 = 0;
     try {
