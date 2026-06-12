@@ -1,0 +1,21 @@
+# Normalize line endings: text files are stored with LF in the repo and checked
+# out per-platform. This kills the "LF will be replaced by CRLF" warning wall
+# the repo accumulated from mixed-tool edits.
+* text=auto
+
+# Shell scripts must stay LF (bash chokes on CRLF); Windows batch must stay CRLF.
+*.sh   text eol=lf
+*.cmd  text eol=crlf
+*.bat  text eol=crlf
+
+# Binary content — never normalize or diff as text.
+*.png    binary
+*.jpg    binary
+*.bin    binary
+*.spv    binary
+*.cache  binary
+*.ttf    binary
+
+# Blockbench saves are JSON but can embed base64 textures on enormous single
+# lines; keep their bytes exactly as Blockbench wrote them.
+*.bbmodel -text
