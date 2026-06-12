@@ -46,7 +46,8 @@ public:
         int   ringCells  = 14;   // cells from inner to outer edge, per ring side
         int   ringCount  = 4;    // number of LOD rings (each 2x coarser)
         float skirtDepth = 28.0f;// how far ring-boundary skirts drop (blocks)
-        int   underlap   = 24;   // blocks the shell reaches back under the window
+        int   underlap   = 32;   // blocks the shell reaches in under the window edge
+                                 // (covers chunks still meshing at the leading edge)
         float yBias      = 1.5f; // shell sits this far below the true surface so
                                  // the near chunks always win the seam overlap
         bool  trees      = true; // scatter low-poly tree impostors (cones/blobs)

@@ -116,14 +116,15 @@ int FarTerrainRenderer::outerExtentBlocks(const World& world) const {
     const int base = std::max(1, config_.baseStep);
     const glm::ivec3 counts = world.chunkCounts();
     const int windowHalf = (counts.x / 2) * Chunk::kSize;
-    int holeHalf = windowHalf - config_.underlap;
-    if (holeHalf < 0) holeHalf = 0;
-    holeHalf = ((holeHalf + base - 1) / base) * base;
-    int inner = holeHalf;
+    // Mirror buildMesh's rings: inner starts at 0; ring 0 spans past the window
+    // (+ a safety margin for the player being off-centre during fast flight).
+    int inner = 0;
     for (int L = 0; L < config_.ringCount; ++L) {
         const int step = base << L;
         const int innerL = ((inner + step - 1) / step) * step;
-        inner = innerL + config_.ringCells * step;
+        const int span = (L == 0) ? (windowHalf + config_.ringCells * base + 96)
+                                   : config_.ringCells * step;
+        inner = innerL + span;
     }
     return inner; // outermost ring's outer half-extent
 }
@@ -182,13 +183,26 @@ std::vector<FarTerrainRenderer::FarVertex> FarTerrainRenderer::buildMesh(const W
     const int centerX = center.x;
     const int centerZ = center.y;
 
-    // Start the shell just outside the voxel window (minus a small underlap so the
-    // near chunks always cover the seam). The window is (2*view_radius+1) chunks.
     const glm::ivec3 counts = world.chunkCounts();
     const int windowHalf = (counts.x / 2) * Chunk::kSize;
-    int holeHalf = windowHalf - config_.underlap;
-    if (holeHalf < 0) holeHalf = 0;
-    holeHalf = ((holeHalf + base - 1) / base) * base;
+
+    // The HOLE (where the shell is skipped because voxel chunks cover it) is the
+    // loaded window box shrunk by `underlap` — NOT a player-centred radius. Tying
+    // it to the actual window keeps it aligned with the real chunks even when the
+    // player is off-centre during fast flight, and the `underlap` band means the
+    // shell still fills the window's leading edge while those chunks are streaming
+    // in: a chunk being meshed shows coarse ground (not void), then draws ON TOP of
+    // the shell (overwrite, not delete). A skirt rings the hole to hide the seam.
+    const int hx0 = winBox.x + config_.underlap, hx1 = winBox.z - config_.underlap;
+    const int hz0 = winBox.y + config_.underlap, hz1 = winBox.w - config_.underlap;
+    auto inHole = [&](int cellX, int cellZ, int step) -> bool {
+        const int ccx = cellX + step / 2, ccz = cellZ + step / 2;
+        return ccx >= hx0 && ccx < hx1 && ccz >= hz0 && ccz < hz1;
+    };
+    // How far the player sits from the farthest window-box edge (Chebyshev): ring 0
+    // must reach past this so it bridges to the chunks on every side, off-centre or not.
+    const int winReach = std::max(std::max(std::abs(winBox.x - centerX), std::abs(winBox.z - centerX)),
+                                  std::max(std::abs(winBox.y - centerZ), std::abs(winBox.w - centerZ)));
 
     // Per-build cache: corners are shared between adjacent cells, so memoise the
     // (expensive) generator sample per world column.
@@ -216,24 +230,31 @@ std::vector<FarTerrainRenderer::FarVertex> FarTerrainRenderer::buildMesh(const W
         mesh.push_back({p2, n, glm::vec2(p2.x, p2.z), layer, tint});
     };
 
-    int inner = holeHalf;
+    int inner = 0;
     for (int L = 0; L < config_.ringCount; ++L) {
         const int step = base << L;
         const int innerL = ((inner + step - 1) / step) * step; // snap to this ring's grid
-        const int outerL = innerL + config_.ringCells * step;
+        // Ring 0 spans from the player out past the window box (+ one ring band), so
+        // the fine shell always bridges to the chunks; coarser rings add a band each.
+        const int span = (L == 0) ? (winReach + config_.ringCells * base) : config_.ringCells * step;
+        const int outerL = innerL + span;
         inner = outerL; // the next coarser ring takes over here
 
-        auto inAnnulus = [&](int cellX, int cellZ) -> bool {
+        // A cell is emitted if it's in this ring's distance band AND not in the hole
+        // (the loaded window). Skirts fire wherever a neighbour is NOT emitted — so
+        // a skirt also rings the hole, hiding the shell/voxel seam.
+        auto emit = [&](int cellX, int cellZ) -> bool {
             const int ccx = cellX + step / 2, ccz = cellZ + step / 2;
             const int cheb = std::max(std::abs(ccx - centerX), std::abs(ccz - centerZ));
-            return cheb >= innerL && cheb < outerL;
+            if (cheb < innerL || cheb >= outerL) return false;
+            return !inHole(cellX, cellZ, step);
         };
 
         const int startX = floorDiv(centerX - outerL, step) * step;
         const int startZ = floorDiv(centerZ - outerL, step) * step;
         for (int cx = startX; cx < centerX + outerL; cx += step) {
             for (int cz = startZ; cz < centerZ + outerL; cz += step) {
-                if (!inAnnulus(cx, cz)) continue;
+                if (!emit(cx, cz)) continue;
 
                 const Surf a = H(cx, cz);
                 const Surf b = H(cx + step, cz);
@@ -258,10 +279,10 @@ std::vector<FarTerrainRenderer::FarVertex> FarTerrainRenderer::buildMesh(const W
                     pushTri(t0, t1, b1, layer, tint, false);
                     pushTri(t0, b1, b0, layer, tint, false);
                 };
-                if (!inAnnulus(cx - step, cz)) skirt(pa, pd); // -X
-                if (!inAnnulus(cx + step, cz)) skirt(pb, pc); // +X
-                if (!inAnnulus(cx, cz - step)) skirt(pa, pb); // -Z
-                if (!inAnnulus(cx, cz + step)) skirt(pd, pc); // +Z
+                if (!emit(cx - step, cz)) skirt(pa, pd); // -X
+                if (!emit(cx + step, cz)) skirt(pb, pc); // +X
+                if (!emit(cx, cz - step)) skirt(pa, pb); // -Z
+                if (!emit(cx, cz + step)) skirt(pd, pc); // +Z
             }
         }
     }
