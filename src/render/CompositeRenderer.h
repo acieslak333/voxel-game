@@ -39,6 +39,8 @@ public:
         glm::vec4 camPos;        // xyz camera world position
         glm::vec4 color;         // rgb haze colour, w = distance-fog density
         glm::vec4 params;        // x heightFalloff, y groundFogDensity, z fogTopY, w maxFog
+        float     noiseAmount = 0.0f; // dark-grain max opacity (0 = off)
+        float     noiseTime   = 0.0f; // seconds, reseeds the grain so it flickers
         float     submerged = 0.0f; // 0 = above water, 1 = camera underwater (blue murk)
     };
     // Point the pass at the offscreen colour + depth images to read this frame.

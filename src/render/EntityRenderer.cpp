@@ -23,7 +23,8 @@ std::vector<char> readFile(const std::string& path) {
 
 EntityRenderer::EntityRenderer(VulkanContext& ctx, VkRenderPass renderPass,
                                uint32_t framesInFlight, const std::string& shaderDir,
-                               VkImageView textureView, VkSampler textureSampler)
+                               VkImageView textureView, VkSampler textureSampler,
+                               VkImageView skinView, VkSampler skinSampler)
     : ctx_(ctx), framesInFlight_(framesInFlight) {
     createPipeline(renderPass, shaderDir);
     createUniformBuffers(framesInFlight);
@@ -36,7 +37,7 @@ EntityRenderer::EntityRenderer(VulkanContext& ctx, VkRenderPass renderPass,
                                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
                                         VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
     }
-    createDescriptorSets(framesInFlight, textureView, textureSampler);
+    createDescriptorSets(framesInFlight, textureView, textureSampler, skinView, skinSampler);
 }
 
 EntityRenderer::~EntityRenderer() {
@@ -73,10 +74,15 @@ void EntityRenderer::createPipeline(VkRenderPass renderPass, const std::string& 
     samplerBinding.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     samplerBinding.descriptorCount = 1;
     samplerBinding.stageFlags      = VK_SHADER_STAGE_FRAGMENT_BIT;
-    VkDescriptorSetLayoutBinding bindings[] = {uboBinding, samplerBinding};
+    VkDescriptorSetLayoutBinding skinBinding{};       // binding 2: Blockbench skin atlas
+    skinBinding.binding            = 2;
+    skinBinding.descriptorType     = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    skinBinding.descriptorCount    = 1;
+    skinBinding.stageFlags         = VK_SHADER_STAGE_FRAGMENT_BIT;
+    VkDescriptorSetLayoutBinding bindings[] = {uboBinding, samplerBinding, skinBinding};
     VkDescriptorSetLayoutCreateInfo dslInfo{};
     dslInfo.sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    dslInfo.bindingCount = 2;
+    dslInfo.bindingCount = 3;
     dslInfo.pBindings    = bindings;
     if (vkCreateDescriptorSetLayout(ctx_.device(), &dslInfo, nullptr, &descriptorSetLayout_) !=
         VK_SUCCESS) {
@@ -157,9 +163,9 @@ void EntityRenderer::createPipeline(VkRenderPass renderPass, const std::string& 
     dynamicState.pDynamicStates    = dynamicStates;
 
     VkPushConstantRange pushRange{};
-    pushRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    pushRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
     pushRange.offset     = 0;
-    pushRange.size       = sizeof(glm::mat4); // model matrix
+    pushRange.size       = sizeof(glm::mat4) + sizeof(uint32_t); // model matrix + useSkin flag
     VkPipelineLayoutCreateInfo layoutInfo{};
     layoutInfo.sType                  = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     layoutInfo.setLayoutCount         = 1;
@@ -203,10 +209,11 @@ void EntityRenderer::createUniformBuffers(uint32_t n) {
     }
 }
 
-void EntityRenderer::createDescriptorSets(uint32_t n, VkImageView view, VkSampler sampler) {
+void EntityRenderer::createDescriptorSets(uint32_t n, VkImageView view, VkSampler sampler,
+                                          VkImageView skinView, VkSampler skinSampler) {
     std::array<VkDescriptorPoolSize, 2> sizes{};
     sizes[0] = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, n};
-    sizes[1] = {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, n};
+    sizes[1] = {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2 * n}; // block + skin per set
     VkDescriptorPoolCreateInfo poolInfo{};
     poolInfo.sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     poolInfo.poolSizeCount = static_cast<uint32_t>(sizes.size());
@@ -235,7 +242,11 @@ void EntityRenderer::createDescriptorSets(uint32_t n, VkImageView view, VkSample
         imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         imageInfo.imageView   = view;
         imageInfo.sampler     = sampler;
-        std::array<VkWriteDescriptorSet, 2> writes{};
+        VkDescriptorImageInfo skinInfo{};
+        skinInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        skinInfo.imageView   = skinView;
+        skinInfo.sampler     = skinSampler;
+        std::array<VkWriteDescriptorSet, 3> writes{};
         writes[0].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         writes[0].dstSet          = descriptorSets_[i];
         writes[0].dstBinding      = 0;
@@ -248,6 +259,12 @@ void EntityRenderer::createDescriptorSets(uint32_t n, VkImageView view, VkSample
         writes[1].descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         writes[1].descriptorCount = 1;
         writes[1].pImageInfo      = &imageInfo;
+        writes[2].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[2].dstSet          = descriptorSets_[i];
+        writes[2].dstBinding      = 2;
+        writes[2].descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        writes[2].descriptorCount = 1;
+        writes[2].pImageInfo      = &skinInfo;
         vkUpdateDescriptorSets(ctx_.device(), static_cast<uint32_t>(writes.size()),
                                writes.data(), 0, nullptr);
     }
@@ -264,7 +281,7 @@ void EntityRenderer::record(VkCommandBuffer cmd, uint32_t frameIndex, VkExtent2D
 
     // Concatenate every entity's baked mesh into this frame's vertex buffer,
     // remembering each draw's first vertex + count. Clamp to the buffer cap.
-    struct Span { uint32_t first; uint32_t count; glm::mat4 model; };
+    struct Span { uint32_t first; uint32_t count; glm::mat4 model; uint32_t useSkin; };
     std::vector<Span> spans;
     spans.reserve(draws.size());
     std::vector<EntityVertex> all;
@@ -273,7 +290,7 @@ void EntityRenderer::record(VkCommandBuffer cmd, uint32_t frameIndex, VkExtent2D
         if (all.size() + d.mesh->size() > kMaxVerts) break; // drop overflow
         const uint32_t first = static_cast<uint32_t>(all.size());
         all.insert(all.end(), d.mesh->begin(), d.mesh->end());
-        spans.push_back({first, static_cast<uint32_t>(d.mesh->size()), d.model});
+        spans.push_back({first, static_cast<uint32_t>(d.mesh->size()), d.model, d.useSkin});
     }
     if (all.empty()) return;
     vertexBuffers_[frameIndex].upload(all.data(), all.size() * sizeof(EntityVertex));
@@ -295,9 +312,14 @@ void EntityRenderer::record(VkCommandBuffer cmd, uint32_t frameIndex, VkExtent2D
     VkBuffer     vb   = vertexBuffers_[frameIndex].handle();
     VkDeviceSize zero = 0;
     vkCmdBindVertexBuffers(cmd, 0, 1, &vb, &zero);
+    const VkShaderStageFlags pcStages =
+        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
     for (const Span& s : spans) {
-        vkCmdPushConstants(cmd, pipelineLayout_, VK_SHADER_STAGE_VERTEX_BIT, 0,
-                           sizeof(glm::mat4), &s.model);
+        // Push the mat4 then the uint flag separately so the bytes are tightly packed
+        // (a {mat4,uint} struct would pad to 80B and overrun the 68B push range).
+        vkCmdPushConstants(cmd, pipelineLayout_, pcStages, 0, sizeof(glm::mat4), &s.model);
+        vkCmdPushConstants(cmd, pipelineLayout_, pcStages, sizeof(glm::mat4),
+                           sizeof(uint32_t), &s.useSkin);
         vkCmdDraw(cmd, s.count, 1, s.first, 0);
     }
 }

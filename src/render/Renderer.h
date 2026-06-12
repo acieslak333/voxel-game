@@ -86,6 +86,14 @@ public:
     // loop (and after waitIdle). Used by the --screenshot flag for verification.
     void saveScreenshot(const std::string& path) const;
 
+    // Where drawFrame() spent its time last frame, in milliseconds. `wait` is the
+    // fence wait on this slot's previous submission — when it dominates, the CPU
+    // is outrunning the GPU (GPU-bound); when ~0 and `record` dominates, the frame
+    // is CPU-bound in command recording. Filled every frame (4 clock reads, ~free);
+    // read by the VG_FRAME_TIME profiler in App::run.
+    struct PhaseTimes { double wait = 0, acquire = 0, record = 0, submit = 0; };
+    [[nodiscard]] const PhaseTimes& phaseTimes() const { return phaseTimes_; }
+
     static constexpr int kMaxFramesInFlight = 2;
 
 private:
@@ -139,6 +147,7 @@ private:
 
     uint32_t currentFrame_   = 0;
     uint32_t lastImageIndex_ = 0; // swapchain image rendered most recently
+    PhaseTimes phaseTimes_;       // last frame's drawFrame() phase split (ms)
 
     std::array<float, 4> clearColor_ = {0.45f, 0.70f, 1.0f, 1.0f}; // sky blue
 

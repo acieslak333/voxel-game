@@ -96,8 +96,38 @@ public:
     TerrainGenerator(uint32_t seed, const BlockRegistry& registry,
                      const std::string& assetDir, int worldHeight);
 
-    // Surface block Y at a world column (clamped to [1, worldHeight-1]).
+    // Surface block Y at a world column (clamped to [1, worldHeight-1]). This is the
+    // heightmap "base surface" — biome/water/LOD use it; the actual voxels come from
+    // the 3D density below (overhangs/floating bits perturb this base).
     [[nodiscard]] int height(int wx, int wz) const;
+
+    // --- Worldgen v2: 3D volumetric terrain --------------------------------------
+    // Is the voxel (wx,wy,wz) solid? `surfaceH` is the column's heightmap height
+    // (height()/columnInfo().height). Solid where the heightmap gradient
+    // (surfaceH - y) plus a 3D weighted-noise perturbation is positive — giving
+    // overhangs, cliffs and (sparsely, far above the surface) floating islands.
+    // A pure function of seed+coords, so streaming-safe. Falls back to a pure
+    // heightmap (y <= surfaceH) when 3D terrain is disabled.
+    [[nodiscard]] bool isSolid(int surfaceH, int wx, int wy, int wz) const;
+    // How far (blocks) terrain can poke ABOVE the heightmap surface: the column fill
+    // must scan up to surfaceH + this for overhang/float tops. 0 when 3D is off.
+    [[nodiscard]] int overhangReach() const;
+    // The actual 3D GROUND surface Y (topmost main-terrain solid, ignoring floating
+    // islands). Use this — NOT height() — to place features (trees/plants), since the
+    // 3D density moves the real surface up/down from the heightmap by ±amplitude.
+    [[nodiscard]] int surfaceY(int wx, int wz) const;
+
+    // --- Split solidity tests (isSolid == mainTerrainSolid || floatSolid) --------
+    // World::generateColumn evaluates the density band ONCE per column cell and
+    // derives BOTH the solid mask and the ground surface from that single pass —
+    // surfaceY() would re-evaluate the same cells a second time (the density stack
+    // is the most expensive noise in worldgen). Same pure functions, same results.
+    [[nodiscard]] bool mainTerrainSolid(int surfaceH, int wx, int wy, int wz) const;
+    [[nodiscard]] bool floatSolid(int surfaceH, int wx, int wy, int wz) const;
+    // Highest Y surfaceY() would probe for a column of heightmap height `surfaceH`:
+    // the topmost main-terrain solid cell lies at or below this. The first
+    // mainTerrainSolid cell scanning DOWN from here (to 1) IS surfaceY's result.
+    [[nodiscard]] int surfaceScanTop(int surfaceH) const;
 
     // Full surface description for a column (height + biome + surface blocks +
     // feature densities).
@@ -105,6 +135,15 @@ public:
 
     [[nodiscard]] int seaLevel() const { return seaLevel_; }
     [[nodiscard]] int worldHeight() const { return worldHeight_; }
+
+    // Biome names in table order (the index ColumnInfo::biome refers to). Used to
+    // resolve feature scatter biome allow-lists to indices.
+    [[nodiscard]] std::vector<std::string> biomeNames() const {
+        std::vector<std::string> n;
+        n.reserve(biomes_.size());
+        for (const BiomeDef& b : biomes_) n.push_back(b.name);
+        return n;
+    }
 
     // --- Debug / tuning introspection (headless genmap only; NOT used by the
     //     generation path, so adding/calling this never changes world output). ---
@@ -128,6 +167,9 @@ private:
     // this to pick their level, so it must not recurse back into them).
     [[nodiscard]] int shapeHeight(int wx, int wz) const;
 
+    // Main-terrain (no floating islands) solidity, shared by isSolid() + surfaceY().
+    [[nodiscard]] bool mainSolid(int surfaceH, int wx, int wy, int wz) const;
+
     // A perched lake covering this column, if any. `level` = water surface Y,
     // `bed` = the carved terrain height for this column (the bowl).
     struct LakeInfo { bool in = false; int level = 0; int bed = 0; };
@@ -149,6 +191,27 @@ private:
     // above runs unchanged — so adding this feature does NOT alter existing worlds
     // (the --selftest golden is stable until a `layers:` block is authored).
     NoiseStack contStack_, eroStack_, peakStack_, tempStack_, humStack_, riverStack_;
+
+    // --- Worldgen v2: 3D volumetric density (overhangs / cliffs / floating isles) -
+    // The main density noise perturbs the heightmap gradient to carve overhangs and
+    // cliffs; the float noise sparsely adds solid blobs high above the surface.
+    // Each is a weighted-sum NoiseStack when authored in biomes.yaml (`terrain3d:
+    // density.layers` / `float.layers`), else a scalar fbm fallback — the user's
+    // "sum of weighted noises so we get small and big changes" request.
+    bool  density3DEnabled_ = true;
+    Noise densityNoise_, floatNoise_;
+    NoiseStack densityStack_, floatStack_;
+    float densityFreqXZ_ = 0.011f; // horizontal noise frequency (wide features)
+    float densityFreqY_  = 0.050f; // vertical: high enough that density folds +/- within
+                                   // the band -> the surface is multi-valued = overhangs
+    int   densityOct_    = 4;
+    float densityAmp_    = 28.0f;  // overhang/cliff/swell intensity, in blocks (dramatic)
+    float floatFreq_     = 0.0058f;// lower freq -> bigger, chunkier island masses
+    float floatThresh_   = 0.40f;  // lower -> larger contiguous islands (still sparse,
+                                   // since the low-freq peaks only clear it in patches)
+    int   floatGap_      = 6;      // min blocks above the surface a float isle can start
+    int   floatReach_    = 64;     // how far above the surface float isles can appear
+
     // Sample a noise field: the stack blend if one was authored, else the scalar fbm.
     // All take raw world coords (the per-layer frequency is applied inside the stack).
     [[nodiscard]] float sampleCont(float x, float z) const;

@@ -2,7 +2,10 @@
 
 #include "world/Noise.h"
 
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <vector>
 
 namespace vg {
@@ -42,7 +45,41 @@ public:
 
     // Append a layer with its own seeded noise. Seeds should differ per layer so the
     // layers are independent (TerrainGenerator salts by layer index).
-    void addLayer(const Layer& l, uint32_t seed) { entries_.push_back({l, Noise(seed)}); }
+    //
+    // A large, seed-derived domain shift is baked in so the layer never samples the
+    // noise lattice ORIGIN at world (0,0,0): Perlin is *exactly* 0 there (and along
+    // the integer lattice), which would otherwise flatten the terrain right where the
+    // player spawns — most visibly on a high-weight low-frequency layer with no
+    // authored offset. Authored offX/offZ stay purely additive on top of this base.
+    void addLayer(const Layer& l, uint32_t seed) {
+        auto off = [](uint32_t h) {
+            h ^= h >> 16; h *= 0x7feb352du; h ^= h >> 15; h *= 0x846ca68bu; h ^= h >> 16;
+            return 4096.0f + static_cast<float>(h & 0xFFFFu); // [4096, 69631] blocks
+        };
+        Entry e{l, Noise(seed), off(seed ^ 0xA53Cu), off(seed ^ 0xB17Du), off(seed ^ 0xC92Eu)};
+        // Clamp the octave count to the octaves that can actually be SEEN at block
+        // resolution — each extra octave costs a full Perlin eval per sampled cell
+        // (this runs millions of times during worldgen), and an editor-authored
+        // layer can ask for far more than contribute anything visible:
+        //   * amplitude: octave i contributes gain^i of the layer; below ~1/512
+        //     it is invisible in a field that moves whole blocks.
+        //   * frequency: octave i samples at frequency*lacunarity^i per BLOCK;
+        //     past ~1 cycle/block the wavelength is sub-voxel — pure aliasing dust.
+        // Worlds regenerate with imperceptibly different micro-detail (the dropped
+        // octaves also leave fbm's normalisation), which random-seed launches never
+        // notice; the speedup on octave-heavy configs is large.
+        e.cfg.octaves = std::max(1, std::min(e.cfg.octaves,
+                                             std::min(ampOctaveCap(e.cfg.gain),
+                                                      freqOctaveCap(e.cfg.frequency,
+                                                                    e.cfg.lacunarity))));
+        if (e.cfg.octaves != l.octaves) {
+            std::fprintf(stderr,
+                         "[noise] layer octaves clamped %d -> %d (freq %.4f): higher "
+                         "octaves are sub-block / sub-1/512-amplitude, invisible\n",
+                         l.octaves, e.cfg.octaves, static_cast<double>(l.frequency));
+        }
+        entries_.push_back(e);
+    }
 
     [[nodiscard]] bool empty() const { return entries_.empty(); }
     [[nodiscard]] std::size_t size() const { return entries_.size(); }
@@ -53,7 +90,19 @@ public:
     [[nodiscard]] float value(float x, float y, float z) const;
 
 private:
-    struct Entry { Layer cfg; Noise noise; };
+    // How many octaves stay above the 1/512 amplitude floor (gain^i >= 1/512).
+    static int ampOctaveCap(float gain) {
+        if (gain >= 1.0f) return 64; // no decay: nothing to cap on amplitude
+        if (gain <= 0.0f) return 1;
+        return 1 + static_cast<int>(std::log(1.0f / 512.0f) / std::log(gain));
+    }
+    // How many octaves stay at or below ~1 cycle per block (freq*lac^i <= 1).
+    static int freqOctaveCap(float freq, float lacunarity) {
+        if (freq >= 1.0f) return 1;
+        if (lacunarity <= 1.0f) return 64; // frequencies never grow: no cap
+        return 1 + static_cast<int>(std::log(1.0f / freq) / std::log(lacunarity));
+    }
+    struct Entry { Layer cfg; Noise noise; float baseX = 0.0f, baseY = 0.0f, baseZ = 0.0f; };
     [[nodiscard]] static float shape(Type t, float v); // remap an fbm sample by type
     std::vector<Entry> entries_;
 };

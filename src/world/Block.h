@@ -39,6 +39,9 @@ enum class RenderType : uint8_t {
     // it is non-opaque and emitted in the mesher's non-cube pass (cube faces are
     // culled against opaque neighbours and other LeafCube cells of the same id).
     LeafCube = 3,
+    // A single horizontal cutout quad near the cell floor: a lilypad floating on
+    // the water surface. Non-opaque; double-sided so it reads from above and below.
+    Flat = 4,
 };
 
 // The six faces of a cube, ordered so that index = axis*2 + (positive ? 1 : 0).

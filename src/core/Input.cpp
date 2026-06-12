@@ -39,6 +39,11 @@ InputState Input::poll() {
     in.toggleGameMode = gKey && !prevGKey_;
     prevGKey_ = gKey;
 
+    // Q throws (drops) the selected hotbar stack (edge-triggered).
+    const bool dropKey = down(GLFW_KEY_Q);
+    in.drop = dropKey && !prevDropKey_;
+    prevDropKey_ = dropKey;
+
     // F1 toggles the debug info overlay (edge-triggered).
     const bool f1Key = down(GLFW_KEY_F1);
     in.toggleDebug = f1Key && !prevF1Key_;

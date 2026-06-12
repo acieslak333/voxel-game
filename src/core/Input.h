@@ -27,6 +27,7 @@ struct InputState {
     int  hotbarScroll = 0;      // mouse wheel: hotbar slots to advance (+ = next,
                                 // - = previous); 0 if the wheel didn't move
 
+    bool drop       = false;    // Q pressed this frame: throw the selected stack (edge)
     bool toggleMenu = false;    // Esc pressed this frame (open/close the menu)
     bool toggleInventory = false; // E pressed this frame (open/close the inventory)
     bool toggleGameMode = false;  // G pressed this frame (creative <-> survival)
@@ -67,6 +68,7 @@ private:
     bool   prevPlaceBtn_    = false; // right mouse, for edge detection
     bool   prevEscKey_      = false; // Esc, for edge detection
     bool   prevInvKey_      = false; // E (inventory), for edge detection
+    bool   prevDropKey_     = false; // Q (drop), for edge detection
     bool   prevGKey_        = false; // G (game mode), for edge detection
     bool   prevF1Key_       = false; // F1, for edge detection
     bool   prevF11Key_      = false; // F11, for edge detection

@@ -3,6 +3,7 @@
 #include <yaml-cpp/yaml.h>
 
 #include <algorithm>
+#include <filesystem>
 #include <stdexcept>
 #include <string>
 
@@ -97,27 +98,21 @@ EquipSlot parseEquip(const YAML::Node& node, const char* key) {
 
 BlockRegistry::BlockRegistry(const std::string& blocksFile) {
     // -------------------------------------------------------------------------
-    //  Load the block definitions. The file is a YAML sequence of blocks; each
-    //  block's id is its position in the sequence (so id 0 == the first entry,
-    //  which must be "air"). To add a block: append an entry to the file naming
-    //  its textures -- no recompile needed. internTexture() deduplicates, so a
-    //  texture shared by several blocks costs a single texture-array layer.
+    //  Load the block definitions, then the item definitions. blocks.yaml is a
+    //  YAML sequence of world blocks (id 0 == its first entry, which must be
+    //  "air"); items.yaml (a sibling file) is a continuation of the SAME id space
+    //  for the non-placeable hotbar items (tools, equipment) — loaded right after,
+    //  so item ids follow the last block id. To add a block/item: append an entry
+    //  to the matching file naming its textures -- no recompile needed.
+    //  internTexture() deduplicates, so a texture shared by several entries costs
+    //  a single texture-array layer.
     // -------------------------------------------------------------------------
-    YAML::Node root;
-    try {
-        root = YAML::LoadFile(blocksFile);
-    } catch (const YAML::Exception& e) {
-        throw std::runtime_error("BlockRegistry: failed to load '" + blocksFile +
-                                 "': " + e.what());
-    }
-    if (!root.IsSequence() || root.size() == 0) {
-        throw std::runtime_error("BlockRegistry: '" + blocksFile +
-                                 "' must be a non-empty sequence of blocks");
-    }
 
-    for (const YAML::Node& entry : root) {
+    // Parse one YAML entry into a BlockProperties and register it. `source` names
+    // the file for error messages. Shared by blocks.yaml and items.yaml.
+    auto addEntry = [&](const YAML::Node& entry, const std::string& source) {
         if (!entry["name"]) {
-            throw std::runtime_error("BlockRegistry: a block in '" + blocksFile +
+            throw std::runtime_error("BlockRegistry: an entry in '" + source +
                                      "' is missing its 'name'");
         }
         BlockProperties props;
@@ -127,6 +122,11 @@ BlockRegistry::BlockRegistry(const std::string& blocksFile) {
         props.emission = static_cast<uint8_t>(
             std::min(15, std::max(0, valueOr(entry, "light", 0))));
         props.emissionColor = parseColor(entry, "light_color", props.emissionColor);
+        // Sky-light blocking, decoupled from `opaque`: solid cubes block fully (15)
+        // by default, everything else passes light (0); foliage overrides this with
+        // `light_opacity:` to cast a shadow while staying non-opaque for meshing.
+        props.lightOpacity = static_cast<uint8_t>(std::min(15, std::max(0,
+            valueOr(entry, "light_opacity", props.opaque ? 15 : 0))));
 
         // Survival: mining time, tool role, combat, placeability (all optional).
         props.hardness      = valueOr(entry, "hardness", 0.0f);
@@ -155,6 +155,8 @@ BlockRegistry::BlockRegistry(const std::string& blocksFile) {
             props.renderType = RenderType::Cross;
         } else if (render == "leafcube") {
             props.renderType = RenderType::LeafCube;
+        } else if (render == "flat") {
+            props.renderType = RenderType::Flat; // a horizontal pad (lilypad)
         } else if (render == "model") {
             props.renderType = RenderType::Model;
             // model.width is the rendered column width in 1/16-of-a-block pixels
@@ -168,7 +170,7 @@ BlockRegistry::BlockRegistry(const std::string& blocksFile) {
         } else if (render != "cube") {
             throw std::runtime_error("BlockRegistry: block '" + props.name +
                                      "' has unknown render type '" + render +
-                                     "' (expected cube/cross/leafcube/model)");
+                                     "' (expected cube/cross/leafcube/flat/model)");
         }
 
         // Shapeable: can the hammer reshape this into a slab/stairs/post/wall?
@@ -190,18 +192,51 @@ BlockRegistry::BlockRegistry(const std::string& blocksFile) {
 
         const auto id = static_cast<uint16_t>(blocks_.size());
         if (nameToId_.count(props.name)) {
-            throw std::runtime_error("BlockRegistry: duplicate block name '" +
-                                     props.name + "' in '" + blocksFile + "'");
+            throw std::runtime_error("BlockRegistry: duplicate name '" +
+                                     props.name + "' in '" + source + "'");
         }
         nameToId_.emplace(props.name, id);
         blocks_.push_back(std::move(props));
-    }
+    };
+
+    // Load a YAML sequence file and feed every entry through addEntry. `optional`
+    // tolerates a missing file (items.yaml is optional — a blocks-only world still
+    // works); a present-but-malformed file always throws.
+    auto loadSeq = [&](const std::string& path, bool optional) {
+        YAML::Node root;
+        try {
+            root = YAML::LoadFile(path);
+        } catch (const YAML::Exception& e) {
+            if (optional && !std::filesystem::exists(path)) return;
+            throw std::runtime_error("BlockRegistry: failed to load '" + path +
+                                     "': " + e.what());
+        }
+        if (!root.IsSequence() || root.size() == 0) {
+            if (optional) return;
+            throw std::runtime_error("BlockRegistry: '" + path +
+                                     "' must be a non-empty sequence");
+        }
+        for (const YAML::Node& entry : root) addEntry(entry, path);
+    };
+
+    loadSeq(blocksFile, /*optional=*/false);
+    // items.yaml sits beside blocks.yaml and continues the same id space.
+    const std::string itemsFile =
+        (std::filesystem::path(blocksFile).parent_path() / "items.yaml").string();
+    loadSeq(itemsFile, /*optional=*/true);
 
     // Id 0 is the default-constructed Block and is treated as empty space by the
     // chunk storage and mesher, so the first block must be a non-solid "air".
     if (blocks_[0].name != "air" || blocks_[0].solid || blocks_[0].opaque) {
         throw std::runtime_error("BlockRegistry: the first block in '" + blocksFile +
                                  "' must be a non-solid, non-opaque block named 'air'");
+    }
+
+    // Prerendered inventory icons: one 16x16 sprite per item (assets/textures/
+    // icons/<name>.png, baked by scripts/gen_icons.py), interned as its own layer
+    // so the UI can draw it flat in a slot. Air (id 0) keeps icon layer 0.
+    for (uint16_t id = 1; id < static_cast<uint16_t>(blocks_.size()); ++id) {
+        blocks_[id].iconLayer = internTexture("icons/" + blocks_[id].name + ".png");
     }
 
     // Block-break crack overlays: extra texture-array layers not owned by any block.

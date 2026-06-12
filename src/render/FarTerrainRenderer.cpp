@@ -60,9 +60,9 @@ FarTerrainRenderer::FarTerrainRenderer(VulkanContext& ctx, VkRenderPass renderPa
                                        VkImageView textureView, VkSampler textureSampler,
                                        const Config& config)
     : ctx_(ctx), config_(config), framesInFlight_(framesInFlight) {
-    if (!config_.enabled) {
-        return; // inert: no pipeline/buffers created
-    }
+    // Always build the GPU resources (even when starting disabled) so the LOD
+    // on/off toggle can flip config_.enabled at runtime without lazy pipeline
+    // creation. config_.enabled gates update()/record()/outerExtentBlocks().
     createPipeline(renderPass, shaderDir);
     createUniformBuffers(framesInFlight);
     createDescriptorSets(framesInFlight, textureView, textureSampler);

@@ -1,6 +1,7 @@
-#include "core/App.h"
+﻿#include "core/App.h"
 #include "core/Input.h"
 #include "entity/Armature.h"
+#include "entity/BlockbenchModel.h"
 #include "entity/ItemEntity.h"
 #include "player/ChestStore.h"
 #include "player/Crafting.h"
@@ -19,7 +20,9 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
+#include <cstdio>
 #include <cstring>
+#include <fstream>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -30,7 +33,7 @@
 
 namespace {
 
-// FNV-1a over 8 bytes — a cheap, stable spatial hash for snapshot testing.
+// FNV-1a over 8 bytes â€” a cheap, stable spatial hash for snapshot testing.
 inline uint64_t fnv1a(uint64_t h, uint64_t v) {
     for (int i = 0; i < 8; ++i) {
         h = (h ^ (v & 0xffu)) * 0x100000001b3ull;
@@ -61,7 +64,7 @@ uint64_t hashWorld(const vg::World& w) {
 // (independent of assets/world.yaml) so the golden hash is stable, generates the
 // world twice, and checks (a) regeneration is bit-identical and (b) the output
 // matches the recorded golden. Bump kGolden only for an intentional worldgen
-// change (per WORLD_GEN_AGENT_TIPS §6).
+// change (per docs/WORLD_GEN_AGENT_TIPS.md Â§6).
 int runWorldGenSelfTest(const std::string& assetDir) {
     vg::WorldConfig cfg;
     cfg.seed          = 1337u;
@@ -76,11 +79,12 @@ int runWorldGenSelfTest(const std::string& assetDir) {
     const std::string blocks = assetDir + "/blocks.yaml";
 
     // Recorded golden. NOTE: the selftest reads assets/biomes.yaml, so TUNING the
-    // generation (e.g. via tools/genmap_tool.py) intentionally changes this hash —
-    // rebaseline when the config settles. Last set for structures (assets/
-    // structures/*.yaml stamped on land via the seam-safe per-column gather in
-    // generateColumn). Bump ONLY for an intentional worldgen change (per WORLD_GEN_AGENT_TIPS §6).
-    constexpr uint64_t kGolden = 0x1c4b38cf6a1b8067ull;
+    // generation (e.g. via tools/genmap_tool.py) intentionally changes this hash â€”
+    // rebaseline when the config settles. Last set for the half-height world: the
+    // world dropped 256 -> 128 tall (world.yaml height_chunks 16 -> 8), so biomes.yaml
+    // sea_level/splines/snow_line + the caves/ores max_y were all halved to match.
+    // Bump ONLY for an intentional worldgen change (per docs/WORLD_GEN_AGENT_TIPS.md Â§6).
+    constexpr uint64_t kGolden = 0x96e2b5877af345f1ull;
 
     uint64_t h1 = 0, h2 = 0;
     try {
@@ -106,7 +110,7 @@ int runWorldGenSelfTest(const std::string& assetDir) {
     if (ok) {
         std::cout << "[selftest] PASS";
         if (kGolden == 0) {
-            std::cout << " (golden not locked — set kGolden to 0x" << std::hex << h1
+            std::cout << " (golden not locked â€” set kGolden to 0x" << std::hex << h1
                       << std::dec << ")";
         }
         std::cout << '\n';
@@ -120,7 +124,7 @@ int runWorldGenSelfTest(const std::string& assetDir) {
 // over a grid and writes a PNG coloured by surface block + water depth + hillshade,
 // so the whole world can be inspected/tuned at a glance. This is the engine the
 // live generation tool drives (it edits assets/biomes.yaml, re-runs this, shows the
-// PNG) — so the tool always matches the game's real generation. Uses a FIXED seed
+// PNG) â€” so the tool always matches the game's real generation. Uses a FIXED seed
 // so a parameter change is comparable run-to-run.
 int runGenMap(const std::string& assetDir, int pixels, int step, const std::string& outPath) {
     pixels = std::clamp(pixels, 64, 4096);
@@ -170,6 +174,148 @@ int runGenMap(const std::string& assetDir, int pixels, int step, const std::stri
     }
     std::cout << "[genmap] wrote " << outPath << " (" << pixels << "x" << pixels
               << ", " << step << " blocks/px, seed " << seed << ")\n";
+    return EXIT_SUCCESS;
+}
+
+// Headless heightfield export for the live 3D terrain view (tools/genmap_tool.py).
+// Writes an RGBA PNG: RGB = the flat surface-block colour (NO hillshade â€” the browser
+// lights the 3D mesh itself), A = the surface height normalised over the world's full
+// vertical range. The web tool meshes a displaced, vertex-coloured plane from it and
+// orbits it live, re-running this on every parameter change. Same fixed seed as the
+// 2D map so the two views match. Keep `pixels` modest (a slice) â€” it's a grid mesh.
+int runGenHeight(const std::string& assetDir, int pixels, int step, const std::string& outPath) {
+    pixels = std::clamp(pixels, 16, 1024); // a mesh grid; smaller than the 2D map
+    step   = std::max(1, step);
+    const vg::WorldConfig cfg = vg::WorldConfig::load(assetDir + "/world.yaml");
+    const std::uint32_t seed = 1337u;
+    const int worldHeight = cfg.chunksY * 16;
+
+    vg::BlockRegistry reg(assetDir + "/blocks.yaml");
+    vg::TerrainGenerator gen(seed, reg, assetDir, worldHeight);
+    auto bid = [&](const char* n) -> int {
+        try { return static_cast<int>(reg.idByName(n)); } catch (...) { return -1; }
+    };
+    const int snowId = bid("snow"), sandId = bid("sand"), stoneId = bid("stone");
+
+    // One pass: colour each cell + record its height (and the sea level), tracking
+    // the actual min/max so the height is normalised over the SLICE's real range â€”
+    // the relief reads well whatever the world's height/sea-level config is.
+    std::vector<unsigned char> img(static_cast<size_t>(pixels) * pixels * 4);
+    std::vector<int> heights(static_cast<size_t>(pixels) * pixels);
+    const int half = pixels / 2;
+    int minH = 0, maxH = 0, seaLevel = worldHeight / 2;
+    bool first = true;
+    for (int py = 0; py < pixels; ++py) {
+        for (int px = 0; px < pixels; ++px) {
+            const int wx = (px - half) * step, wz = (py - half) * step;
+            const vg::ColumnInfo ci = gen.columnInfo(wx, wz);
+            float r, g, b;
+            if (ci.height < ci.waterLevel) {
+                const float t = std::min(1.0f, static_cast<float>(ci.waterLevel - ci.height) / 40.0f);
+                r = 60.0f - 30.0f * t; g = 130.0f - 70.0f * t; b = 200.0f - 80.0f * t;
+            } else if (ci.topId == snowId)       { r = 236; g = 241; b = 248; }
+            else if (ci.topId == sandId)         { r = 224; g = 205; b = 150; }
+            else if (ci.topId == stoneId)        { r = 132; g = 129; b = 124; }
+            else                                 { r = 86;  g = 140; b = 70;  }
+            const size_t idx = static_cast<size_t>(py) * pixels + px, o = idx * 4;
+            img[o + 0] = static_cast<unsigned char>(std::clamp(r, 0.0f, 255.0f));
+            img[o + 1] = static_cast<unsigned char>(std::clamp(g, 0.0f, 255.0f));
+            img[o + 2] = static_cast<unsigned char>(std::clamp(b, 0.0f, 255.0f));
+            heights[idx] = ci.height;
+            if (first) { minH = maxH = ci.height; seaLevel = ci.waterLevel; first = false; }
+            minH = std::min(minH, ci.height);
+            maxH = std::max(maxH, ci.height);
+        }
+    }
+    const float range = static_cast<float>(std::max(1, maxH - minH));
+    for (size_t idx = 0; idx < heights.size(); ++idx) {
+        const float hn = std::clamp((heights[idx] - minH) / range, 0.0f, 1.0f);
+        img[idx * 4 + 3] = static_cast<unsigned char>(hn * 255.0f);
+    }
+    if (!stbi_write_png(outPath.c_str(), pixels, pixels, 4, img.data(), pixels * 4)) {
+        std::cerr << "[genmap] failed to write " << outPath << '\n';
+        return EXIT_FAILURE;
+    }
+    // Sidecar: sea level as a fraction of the same [minH,maxH] range, so the web view
+    // floats its water plane correctly (no duplicated math on the Python side).
+    const float seaY = std::clamp((seaLevel - minH) / range, 0.0f, 1.0f);
+    std::ofstream(outPath + ".sea") << seaY << '\n';
+    std::cout << "[genmap] wrote " << outPath << " (height " << pixels << "x" << pixels
+              << ", " << step << " blocks/px, seed " << seed << ", seaY " << seaY << ")\n";
+    return EXIT_SUCCESS;
+}
+
+// Headless VOXEL-slice export for the live 3D terrain view â€” unlike the heightfield,
+// this shows real overhangs / caves / floating islands, because it queries the
+// generator's full 3D solidity (TerrainGenerator::isSolid) for every block in an
+// N x N x worldHeight slice. To keep it light it emits ONLY exposed voxels (a solid
+// block with at least one air neighbour) as a tight binary the browser instances as
+// cubes:  int32 N, int32 H, int32 count, then count * { u8 x, y, z, r, g, b }.
+// (little-endian). A sidecar (.sea) carries the sea level in block units.
+int runGenVoxels(const std::string& assetDir, int footprint, const std::string& outPath) {
+    const int N = std::clamp(footprint, 16, 96); // N x N block footprint (a slice)
+    const vg::WorldConfig cfg = vg::WorldConfig::load(assetDir + "/world.yaml");
+    const std::uint32_t seed = 1337u;
+    const int H = std::min(255, cfg.chunksY * 16); // y packs into a byte
+    vg::BlockRegistry reg(assetDir + "/blocks.yaml");
+    vg::TerrainGenerator gen(seed, reg, assetDir, cfg.chunksY * 16);
+    auto bid = [&](const char* n) -> int {
+        try { return static_cast<int>(reg.idByName(n)); } catch (...) { return -1; }
+    };
+    const int snowId = bid("snow"), sandId = bid("sand"), stoneId = bid("stone");
+    const int sea = gen.seaLevel();
+    const int half = N / 2;
+
+    // Occupancy (1 = solid) + per-column surface colour, sampled once.
+    std::vector<unsigned char> solid(static_cast<size_t>(N) * N * H, 0);
+    std::vector<unsigned char> surf(static_cast<size_t>(N) * N * 3);
+    auto col = [&](int x, int z) { return static_cast<size_t>(z) * N + x; };
+    auto vox = [&](int x, int y, int z) { return (static_cast<size_t>(z) * N + x) * H + y; };
+    for (int z = 0; z < N; ++z) {
+        for (int x = 0; x < N; ++x) {
+            const int wx = x - half, wz = z - half;
+            const int sh = gen.height(wx, wz);
+            const vg::ColumnInfo ci = gen.columnInfo(wx, wz);
+            unsigned char r, g, b;
+            if (ci.topId == snowId)       { r = 236; g = 241; b = 248; }
+            else if (ci.topId == sandId)  { r = 224; g = 205; b = 150; }
+            else if (ci.topId == stoneId) { r = 132; g = 129; b = 124; }
+            else                          { r = 86;  g = 140; b = 70;  }
+            surf[col(x, z) * 3 + 0] = r; surf[col(x, z) * 3 + 1] = g; surf[col(x, z) * 3 + 2] = b;
+            for (int y = 0; y < H; ++y) solid[vox(x, y, z)] = gen.isSolid(sh, wx, y, wz) ? 1 : 0;
+        }
+    }
+
+    auto sol = [&](int x, int y, int z) -> bool {
+        if (x < 0 || x >= N || z < 0 || z >= N || y < 0 || y >= H) return false; // outside = air
+        return solid[vox(x, y, z)] != 0;
+    };
+    std::vector<unsigned char> data; // x,y,z,r,g,b per exposed voxel
+    for (int z = 0; z < N; ++z)
+        for (int x = 0; x < N; ++x)
+            for (int y = 0; y < H; ++y) {
+                if (!sol(x, y, z)) continue;
+                if (sol(x + 1, y, z) && sol(x - 1, y, z) && sol(x, y + 1, z) &&
+                    sol(x, y - 1, z) && sol(x, y, z + 1) && sol(x, y, z - 1)) continue; // buried
+                unsigned char r, g, b;
+                if (y < sea)            { r = 46;  g = 110; b = 170; }   // submerged -> blue-ish
+                else if (!sol(x, y + 1, z)) {                            // a TOP face -> biome colour
+                    r = surf[col(x, z) * 3]; g = surf[col(x, z) * 3 + 1]; b = surf[col(x, z) * 3 + 2];
+                } else                  { r = 120; g = 116; b = 110; }   // side/underside -> stone
+                const unsigned char rec[6] = {static_cast<unsigned char>(x),
+                                              static_cast<unsigned char>(y),
+                                              static_cast<unsigned char>(z), r, g, b};
+                data.insert(data.end(), rec, rec + 6);
+            }
+
+    const std::int32_t header[3] = {N, H, static_cast<std::int32_t>(data.size() / 6)};
+    std::ofstream f(outPath, std::ios::binary);
+    if (!f) { std::cerr << "[genmap] failed to write " << outPath << '\n'; return EXIT_FAILURE; }
+    f.write(reinterpret_cast<const char*>(header), sizeof header);
+    f.write(reinterpret_cast<const char*>(data.data()), static_cast<std::streamsize>(data.size()));
+    std::ofstream(outPath + ".sea") << sea << '\n'; // sea level in block units
+    std::cout << "[genmap] wrote " << outPath << " (voxels " << N << "x" << N << "x" << H
+              << ", " << header[2] << " exposed, seed " << seed << ", sea " << sea << ")\n";
     return EXIT_SUCCESS;
 }
 
@@ -249,7 +395,7 @@ int runGenNoise(const std::string& assetDir, int pixels, int step,
 // Headless vertical cross-section export (no window/Vulkan). Slices the world along
 // the world-X axis through Z=0 (the island centre) and draws a side-on profile:
 // surface height, water column, and the soil/stone/snow layering the generator
-// places — so the vertical shape (oceans, coasts, hills, snow caps) can be read at a
+// places â€” so the vertical shape (oceans, coasts, hills, snow caps) can be read at a
 // glance. Caves/ores live in World's per-voxel pass and are intentionally omitted
 // here (this uses only the streaming-safe TerrainGenerator surface model). The image
 // is `pixels` wide (world X) by a vertical band sized to the world height.
@@ -356,6 +502,21 @@ int runLogicTest(const std::string& assetDir) {
         check(reg.placeable(torch),                    "torch is placeable");
         check(reg.emission(torch) > 0,                 "torch emits block light");
         check(!reg.isSolid(torch),                     "torch is walk-through");
+
+        // Foliage shadows: light_opacity is decoupled from `opaque`, so thin,
+        // non-opaque foliage still dims the sky passing through it (a solid cube
+        // blocks fully, ground/air passes light). See World::computeSkyLight.
+        const uint16_t oakLeaves = reg.idByName("oak_leaves");
+        const uint16_t oakTrunk  = reg.idByName("oak_trunk");
+        check(reg.lightOpacity(stone) == 15,     "stone blocks sky light fully (opaque default)");
+        check(reg.lightOpacity(air) == 0,        "air passes sky light");
+        check(reg.lightOpacity(oakLeaves) == 3,  "leaves dim the sky a little");
+        check(reg.lightOpacity(oakTrunk) == 4,   "trunk dims the sky below it");
+        check(reg.lightOpacity(bush) == 2,       "bush casts a faint shadow");
+        check(!reg.isOpaque(oakTrunk) && reg.lightOpacity(oakTrunk) > 0,
+              "trunk shadows the sky yet stays non-opaque (decoupled from meshing)");
+        check(!reg.isOpaque(oakLeaves) && reg.lightOpacity(oakLeaves) > 0,
+              "leaves shadow the sky yet stay non-opaque (decoupled from meshing)");
 
         // Tool-tier harvest gating (ISSUES #13I): a block drops only with a matching
         // tool of high enough tier; below tier it still breaks but yields nothing.
@@ -469,7 +630,7 @@ int runLogicTest(const std::string& assetDir) {
             check(held.feetPosition().y > 99.5f, "sneak edge-stop keeps the player on the pillar");
         }
 
-        // Box-rig + animation core (ISSUES #13E) — pure math, no Vulkan.
+        // Box-rig + animation core (ISSUES #13E) â€” pure math, no Vulkan.
         {
             auto worldPos = [](const glm::mat4& m) {
                 return glm::vec3(m * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
@@ -705,21 +866,208 @@ int runLogicTest(const std::string& assetDir) {
             // Auto-step: full cubes below y=0, and the whole y=0 layer is bottom-slabs
             // except the start cell. Walking forward bumps a slab side and should climb
             // onto it (~y=0.5) instead of stopping dead.
-            vg::PlayerController climb(glm::vec3(0.5f, 0.0f, 0.5f));
-            climb.setSolidFn([](int x, int y, int z) {
+            auto climb_solid = [](int x, int y, int z) {
                 return y < 0 || (y == 0 && !(x == 0 && z == 0));
-            });
-            climb.setCollisionBoxesFn([](int x, int y, int z, vg::ShapeBox out[]) {
+            };
+            auto climb_boxes = [](int x, int y, int z, vg::ShapeBox out[]) {
                 if (y < 0) { out[0] = {glm::vec3(x, y, z), glm::vec3(x + 1, y + 1, z + 1)}; return 1; }
                 if (y == 0 && !(x == 0 && z == 0)) {
                     out[0] = {glm::vec3(x, 0, z), glm::vec3(x + 1, 0.5f, z + 1)};
                     return 1;
                 }
                 return 0;
-            });
+            };
+            vg::PlayerController climb(glm::vec3(0.5f, 0.0f, 0.5f));
+            climb.setSolidFn(climb_solid);
+            climb.setCollisionBoxesFn(climb_boxes);
             vg::InputState walkFwd{}; walkFwd.move = {0.0f, 1.0f};
             stepFor(climb, walkFwd, 1.0f);
             check(climb.feetPosition().y > 0.4f, "auto-step climbs onto a half-slab while walking");
+
+            // Camera step-smoothing: the body pops up a slab in one frame, but the
+            // *rendered* eye should ease up over a few frames (not snap). Re-run the
+            // climb frame-by-frame (view-bob off so it doesn't perturb the eye), and
+            // the frame the feet jump, the camera must still lag the true eye height â€”
+            // then converge to it shortly after.
+            vg::PlayerController smooth(glm::vec3(0.5f, 0.0f, 0.5f));
+            smooth.setSolidFn(climb_solid);
+            smooth.setCollisionBoxesFn(climb_boxes);
+            smooth.setViewBob(false);
+            stepFor(smooth, idle, 0.2f); // settle on the ground first
+            float camAtStep = smooth.camera().position.y, feetAtStep = 0.0f;
+            for (int i = 0; i < 180; ++i) {
+                const float yPrev = smooth.feetPosition().y;
+                smooth.update(1.0f / 60.0f, walkFwd);
+                if (smooth.feetPosition().y > yPrev + 0.2f) { // the step happened this frame
+                    camAtStep  = smooth.camera().position.y;
+                    feetAtStep = smooth.feetPosition().y;
+                    break;
+                }
+            }
+            check(camAtStep < feetAtStep + 1.62f - 0.05f,
+                  "camera eases over an auto-step (lags the instant body pop)");
+            stepFor(smooth, walkFwd, 1.5f); // generous: tolerant of soft/slow ease rates
+            check(std::fabs(smooth.camera().position.y -
+                            (smooth.feetPosition().y + 1.62f)) < 0.02f,
+                  "stepped camera converges to true eye height");
+        }
+
+        // ---- Foliage shadows survive edits (relight == gen-time flood) ---------
+        // computeSkyLight dims sky light through foliage (light_opacity), so canopies
+        // shade the ground. The incremental edit-time relight (relightField) must use
+        // the SAME model, or breaking a block near a tree would relight its box WITHOUT
+        // the canopy shadow (the reported bug). A NO-OP edit (set a block to itself)
+        // reruns relightField over its box; if the two models agree, the sky-light
+        // field is byte-identical before and after. (A small fixed headless world,
+        // origin {0,0,0} like --selftest.)
+        {
+            vg::WorldConfig wcfg;
+            wcfg.seed = 1337u;
+            wcfg.streaming = false;
+            wcfg.streamWorkers = 0;
+            wcfg.viewRadius = 4;
+            wcfg.heightChunks = 16;
+            wcfg.chunksX = wcfg.chunksZ = 2 * wcfg.viewRadius + 1;
+            wcfg.chunksY = wcfg.heightChunks;
+            vg::World w(wcfg, assetDir + "/blocks.yaml");
+            const glm::ivec3 sz = w.sizeInBlocks();
+
+            // Any leaves species counts as a canopy to centre the edit on.
+            std::vector<uint16_t> leafIds;
+            for (const char* n : {"oak_leaves", "birch_leaves", "pine_leaves",
+                                  "maple_leaves", "willow_leaves"}) {
+                try { leafIds.push_back(w.registry().idByName(n)); } catch (...) {}
+            }
+            auto isLeaf = [&](uint16_t id) {
+                for (uint16_t l : leafIds) if (id == l) return true;
+                return false;
+            };
+
+            // Centre the relight box on a canopy if one grew in-window; else on any
+            // partial-shade cell (1..14) â€” a foliage/relief shadow the edit must keep.
+            glm::ivec3 c{sz.x / 2, sz.y / 2, sz.z / 2};
+            bool foundLeaves = false, partialShade = false;
+            for (int x = 0; x < sz.x; ++x)
+                for (int z = 0; z < sz.z; ++z)
+                    for (int y = sz.y - 1; y >= 0; --y) {
+                        const uint16_t id = w.blockAt(x, y, z).id;
+                        if (isLeaf(id) && !foundLeaves) {
+                            c = {x, y, z};
+                            foundLeaves = true;
+                        }
+                        const uint8_t sl = w.skyLightAt(x, y, z);
+                        if (sl >= 1 && sl <= 14) {
+                            partialShade = true;
+                            if (!foundLeaves) c = {x, y, z}; // fallback centre
+                        }
+                    }
+            check(partialShade, "foliage/relief casts a partial sky shadow (skylight 1..14)");
+            check(foundLeaves || partialShade, "found a shaded region to relight-test");
+
+            // The box a setBlock at c relights: c +/- 16 in X/Z, full height.
+            const int R = 16;
+            const int x0 = std::max(0, c.x - R), x1 = std::min(sz.x - 1, c.x + R);
+            const int z0 = std::max(0, c.z - R), z1 = std::min(sz.z - 1, c.z + R);
+            std::vector<uint8_t> before;
+            before.reserve(static_cast<size_t>(x1 - x0 + 1) * sz.y * (z1 - z0 + 1));
+            for (int x = x0; x <= x1; ++x)
+                for (int y = 0; y < sz.y; ++y)
+                    for (int z = z0; z <= z1; ++z)
+                        before.push_back(w.skyLightAt(x, y, z));
+
+            // No-op edit: set the centre block to itself -> reruns relightField.
+            w.setBlock(c.x, c.y, c.z, w.blockAt(c.x, c.y, c.z));
+
+            bool identical = true;
+            size_t i = 0;
+            for (int x = x0; x <= x1; ++x)
+                for (int y = 0; y < sz.y; ++y)
+                    for (int z = z0; z <= z1; ++z)
+                        if (w.skyLightAt(x, y, z) != before[i++]) identical = false;
+            check(identical,
+                  "no-op edit preserves sky light (edit relight matches gen-time flood)");
+        }
+
+        // ---- Blockbench (.bbmodel) loader (ISSUES #13E) ------------------------
+        // Parses a Blockbench box model into the armature Skeleton: outliner groups
+        // -> joints, elements -> per-face-UV boxes, in Blockbench units (16 = 1 block).
+        {
+            // Structural invariants of the LOADER (not the specific art, so an edit
+            // to hammer.bbmodel â€” more elements, a different skin resolution â€” doesn't
+            // break the test): a skin, positive resolution, a parent-ordered skeleton
+            // with the root + at least one group joint and at least one per-face-UV
+            // box, all UVs normalised into [0,1], and Blockbench units (16=1 block).
+            const vg::BlockbenchModel bb =
+                vg::loadBlockbenchModel(assetDir + "/models/hammer/hammer.bbmodel");
+            check(bb.skin == "hammer.png", "bbmodel reads its skin filename");
+            check(bb.texW > 0 && bb.texH > 0, "bbmodel reads a positive skin resolution");
+            check(bb.skeleton.joints.size() >= 2, "bbmodel outliner group -> a joint");
+            check(bb.skeleton.boxes.size() >= 1, "bbmodel elements -> boxes");
+            check(bb.skeleton.isTopologicallyOrdered(), "bbmodel skeleton is parent-ordered");
+            check(bb.skeleton.joints[1].parent == 0, "bbmodel group joint parents to root");
+            check(bb.skeleton.boxes[0].perFaceUV, "bbmodel boxes carry per-face UVs");
+            bool uvNormalised = true;
+            for (const vg::Box& bx : bb.skeleton.boxes)
+                for (const glm::vec4& f : bx.faceUV)
+                    if (f.x < 0.0f || f.y < 0.0f || f.z > 1.0001f || f.w > 1.0001f)
+                        uvNormalised = false;
+            check(uvNormalised, "bbmodel per-face UVs are normalised into [0,1]");
+            // The handle's from=[7.5,0,7.5] about its [8,0,8] pivot -> min ~ -1/32 block.
+            check(near(bb.skeleton.boxes[0].min.x, -0.03125f) &&
+                  near(bb.skeleton.boxes[0].min.y, 0.0f),
+                  "bbmodel converts Blockbench units to block space");
+        }
+
+        // ---- box_uv + embedded base64 textures (Blockbench-native save support) ----
+        // Models saved (not exported) from Blockbench use a single per-element (u,v)
+        // offset (box_uv) and embed the skin as a base64 data URI. Write tiny fixtures
+        // and confirm the loader unwraps the box UV + decodes the embedded PNG.
+        {
+            auto writeFixture = [](const std::string& path, const char* json) {
+                std::ofstream f(path);
+                f << json;
+            };
+            // box_uv: an 8^3 cube at uv (0,0) on a 64^2 skin. The cross layout puts the
+            // top face at [8,0,16,8] and the south face at [24,8,32,16] (pixels).
+            const std::string boxPath = assetDir + "/_lt_boxuv.bbmodel";
+            writeFixture(boxPath, R"({
+              "meta":{"format_version":"4.5","model_format":"free","box_uv":true},
+              "name":"boxuv","resolution":{"width":64,"height":64},
+              "elements":[{"name":"c","from":[0,0,0],"to":[8,8,8],"origin":[4,0,4],
+                "uuid":"u1","box_uv":true,"uv_offset":[0,0],
+                "faces":{"north":{"texture":0},"south":{"texture":0},"east":{"texture":0},
+                         "west":{"texture":0},"up":{"texture":0},"down":{"texture":0}}}],
+              "outliner":[{"name":"g","origin":[4,0,4],"uuid":"go","children":["u1"]}],
+              "textures":[{"name":"t","id":"0","path":"t.png"}]})");
+            const vg::BlockbenchModel box = vg::loadBlockbenchModel(boxPath);
+            std::remove(boxPath.c_str());
+            check(box.skeleton.boxes.size() == 1 && box.skeleton.boxes[0].perFaceUV,
+                  "box_uv element -> per-face UV box");
+            const glm::vec4 up = box.skeleton.boxes[0].faceUV[2];   // +Y
+            const glm::vec4 south = box.skeleton.boxes[0].faceUV[4]; // +Z
+            check(near(up.x, 0.125f) && near(up.y, 0.0f) && near(up.z, 0.25f) && near(up.w, 0.125f),
+                  "box_uv unwraps the top face rect");
+            check(up != south, "box_uv gives distinct faces different rects");
+            bool boxUVNorm = true;
+            for (const glm::vec4& f : box.skeleton.boxes[0].faceUV)
+                if (f.x < 0.0f || f.y < 0.0f || f.z > 1.0001f || f.w > 1.0001f) boxUVNorm = false;
+            check(boxUVNorm, "box_uv rects are normalised into [0,1]");
+
+            // Embedded skin: a 1x1 PNG as a base64 data URI -> decoded PNG bytes.
+            const std::string emPath = assetDir + "/_lt_embed.bbmodel";
+            writeFixture(emPath, R"({
+              "meta":{"format_version":"4.5","model_format":"free","box_uv":false},
+              "name":"embed","resolution":{"width":1,"height":1},
+              "elements":[{"name":"c","from":[0,0,0],"to":[1,1,1],"origin":[0,0,0],
+                "uuid":"e1","faces":{"north":{"uv":[0,0,1,1],"texture":0}}}],
+              "outliner":["e1"],
+              "textures":[{"name":"t","id":"0","path":"t.png","source":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="}]})");
+            const vg::BlockbenchModel em = vg::loadBlockbenchModel(emPath);
+            std::remove(emPath.c_str());
+            check(!em.embeddedPNG.empty(), "embedded base64 texture is decoded");
+            check(em.embeddedPNG.size() >= 8 && em.embeddedPNG[0] == 0x89 &&
+                  em.embeddedPNG[1] == 'P' && em.embeddedPNG[2] == 'N' && em.embeddedPNG[3] == 'G',
+                  "decoded embedded texture is a real PNG (signature)");
         }
     } catch (const std::exception& e) {
         std::cerr << "[logic] FAIL: exception: " << e.what() << '\n';
@@ -771,10 +1119,10 @@ int main(int argc, char** argv) {
         } else if (std::strcmp(argv[i], "--flycam") == 0) {
             flycam = true;
         } else if (std::strcmp(argv[i], "--selftest") == 0) {
-            // Headless worldgen determinism/golden test — no window/Vulkan.
+            // Headless worldgen determinism/golden test â€” no window/Vulkan.
             return runWorldGenSelfTest(VG_ASSET_DIR);
         } else if (std::strcmp(argv[i], "--logictest") == 0) {
-            // Headless game-logic tests (mining/tools/…) — no window/Vulkan.
+            // Headless game-logic tests (mining/tools/â€¦) â€” no window/Vulkan.
             return runLogicTest(VG_ASSET_DIR);
         } else if (std::strcmp(argv[i], "--genmap") == 0) {
             genMap = true; // headless top-down map (run after all flags are parsed)
@@ -798,8 +1146,10 @@ int main(int argc, char** argv) {
         const int px = static_cast<int>(mapPixels), st = static_cast<int>(mapStep);
         if (mapMode == "noise") return runGenNoise(VG_ASSET_DIR, px, st, mapOut, mapLayer);
         if (mapMode == "cross") return runGenCross(VG_ASSET_DIR, px, st, mapOut);
+        if (mapMode == "height") return runGenHeight(VG_ASSET_DIR, px, st, mapOut);
+        if (mapMode == "voxels") return runGenVoxels(VG_ASSET_DIR, px, mapOut);
         if (mapMode != "top") {
-            std::cerr << "Unknown --mode '" << mapMode << "' (use top|noise|cross)\n";
+            std::cerr << "Unknown --mode '" << mapMode << "' (use top|noise|cross|height|voxels)\n";
             return EXIT_FAILURE;
         }
         return runGenMap(VG_ASSET_DIR, px, st, mapOut);

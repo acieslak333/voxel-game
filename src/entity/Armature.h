@@ -43,6 +43,12 @@ struct Box {
     glm::vec3 max{0.5f};
     glm::vec2 uvMin{0.0f};
     glm::vec2 uvMax{1.0f};
+    // Per-face UV rects (x=uMin, y=vMin, z=uMax, w=vMax), in bakeMesh's face order
+    // +X, -X, +Y, -Y, +Z, -Z. Filled by the Blockbench loader (a model textures each
+    // face from a different region of its skin). When `perFaceUV` is false the box
+    // uses uvMin/uvMax on every face (the original single-rect behaviour).
+    glm::vec4 faceUV[6]{};
+    bool      perFaceUV = false;
     uint32_t  layer = 0;
 };
 

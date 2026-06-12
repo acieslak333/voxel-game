@@ -18,9 +18,20 @@ struct Settings {
     // falloff is the glow radius of emitters (glowstone, lava). Clamped 1..15.
     int         skyFalloff     = 2;
     int         blockFalloff   = 1;
+    // Render distance in chunks (the loaded voxel window's radius — the world is a
+    // (2*renderDistance+1) square). Higher = sees farther but heavier. Overrides
+    // world.yaml's view_radius. Applied when the world is built, so a change takes
+    // effect on the next launch (the window is allocated once at startup).
+    int         renderDistance = 9;
+    // Low-light grain: max strength of the soft static shown when the player stands
+    // in darkness (caves/night). Any light at the eye (torch/daylight) fades it out;
+    // 0 = off. Applied in composite.frag, kept subtle and near-monochrome.
+    float       darkNoise      = 0.14f;
     float       fov            = 70.0f;      // vertical field of view, degrees
     float       sensitivity    = 0.08f;      // mouse look
     float       flySpeed       = 12.0f;      // free-fly base speed (blocks/s)
+    bool        viewBob        = true;       // subtle head-bob while walking
+    bool        lod            = true;       // distant-terrain LOD shell (FarTerrainRenderer)
     float       dayLengthMinutes = 10.0f;    // real minutes per in-game day
     bool        timeRunning    = true;       // false freezes the time of day
     bool        fullscreen     = false;      // borderless-fullscreen vs windowed (F11)

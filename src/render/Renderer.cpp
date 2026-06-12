@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <limits>
 #include <stdexcept>
 
@@ -282,10 +283,16 @@ void Renderer::recordCommandBuffer(VkCommandBuffer cmd, uint32_t imageIndex,
 void Renderer::drawFrame(const RecordFn& recordPre, const RecordFn& recordScene,
                          const RecordFn& recordUi) {
     VkDevice device = ctx_.device();
+    using clock = std::chrono::steady_clock;
+    auto ms = [](clock::time_point a, clock::time_point b) {
+        return std::chrono::duration<double, std::milli>(b - a).count();
+    };
+    const auto t0 = clock::now();
 
     // 1. Wait for this frame slot's previous submission to finish.
     vkWaitForFences(device, 1, &inFlight_[currentFrame_], VK_TRUE,
                     std::numeric_limits<uint64_t>::max());
+    const auto t1 = clock::now();
 
     // 2. Acquire the next swapchain image.
     uint32_t imageIndex = 0;
@@ -312,11 +319,13 @@ void Renderer::drawFrame(const RecordFn& recordPre, const RecordFn& recordScene,
                         std::numeric_limits<uint64_t>::max());
     }
     imagesInFlight_[imageIndex] = inFlight_[currentFrame_];
+    const auto t2 = clock::now();
 
     // 4. Record this frame's command buffer.
     VkCommandBuffer cmd = commandBuffers_[currentFrame_];
     vkResetCommandBuffer(cmd, 0);
     recordCommandBuffer(cmd, imageIndex, recordPre, recordScene, recordUi);
+    const auto t3 = clock::now();
 
     // 5. Submit: wait on image-available, signal render-finished + the fence.
     //    The swapchain image is first written by the composite's colour output, so
@@ -361,6 +370,11 @@ void Renderer::drawFrame(const RecordFn& recordPre, const RecordFn& recordScene,
     } else if (result != VK_SUCCESS) {
         throw std::runtime_error("Failed to present swapchain image");
     }
+
+    phaseTimes_.wait    = ms(t0, t1);
+    phaseTimes_.acquire = ms(t1, t2);
+    phaseTimes_.record  = ms(t2, t3);
+    phaseTimes_.submit  = ms(t3, clock::now());
 
     currentFrame_ = (currentFrame_ + 1) % kMaxFramesInFlight;
 }

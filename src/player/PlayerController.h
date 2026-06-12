@@ -108,8 +108,10 @@ public:
     // Tunables exposed to the options menu.
     void setMouseSensitivity(float s) { sensitivity_ = s; }
     void setFlySpeed(float s)          { flySpeed_ = s; }
+    void setViewBob(bool v)            { viewBob_ = v; }
     [[nodiscard]] float mouseSensitivity() const { return sensitivity_; }
     [[nodiscard]] float flySpeed()         const { return flySpeed_; }
+    [[nodiscard]] bool  viewBob()          const { return viewBob_; }
 
     // Does the player's AABB overlap the block cell (bx,by,bz)? Used to refuse
     // placing a block inside the player.
@@ -154,6 +156,16 @@ private:
 
     float     sensitivity_ = 0.08f; // mouse look (matches the old kSensitivity)
     float     flySpeed_    = 12.0f; // free-fly base speed (kFlySpeed)
+
+    // Camera feel. The body steps onto slabs/stairs in one frame; camEyeY_ is the
+    // *rendered* eye height, eased toward the true eye for small vertical steps and
+    // snapped for jumps/falls — so stepping reads smooth, not poppy. View bob is a
+    // subtle speed-scaled head sway (toggleable in options; bobAmt_/bobPhase_ drive
+    // its ramp + cycle).
+    float     camEyeY_  = 0.0f;
+    float     bobPhase_ = 0.0f;
+    float     bobAmt_   = 0.0f;
+    bool      viewBob_  = true;
 
     SolidFn isSolid_;
     BoxesFn boxesFn_;        // optional: per-cell collision boxes (slab/stairs/post/wall)

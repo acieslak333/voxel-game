@@ -65,6 +65,9 @@ public:
     FarTerrainRenderer& operator=(const FarTerrainRenderer&) = delete;
 
     [[nodiscard]] bool enabled() const { return config_.enabled; }
+    // Runtime on/off (the LOD toggle in the Esc menu). When turned back on, the
+    // next update() rebuilds the shell mesh, so it reappears within a few frames.
+    void setEnabled(bool e) { config_.enabled = e; }
 
     // The shell's outer Chebyshev half-extent in blocks (how far the LOD reaches
     // from the player). The app uses it to push the scene's far clip plane out so

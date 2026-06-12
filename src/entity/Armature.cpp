@@ -144,6 +144,7 @@ std::vector<EntityVertex> bakeMesh(const Skeleton& skel,
         const glm::vec3 c  = (b.min + b.max) * 0.5f;
         const glm::vec3 h  = (b.max - b.min) * 0.5f;
 
+        int fi = 0;
         for (const Face& f : kFaces) {
             glm::vec3 n(0.0f); n[f.axis] = f.sign;
             glm::vec3 u(0.0f); u[f.u] = 1.0f;
@@ -156,9 +157,11 @@ std::vector<EntityVertex> bakeMesh(const Skeleton& skel,
                 fc - u * hu - v * hv, fc + u * hu - v * hv,
                 fc + u * hu + v * hv, fc - u * hu + v * hv,
             };
+            // Per-face UV (Blockbench skins) or the box's single rect (legacy rigs).
+            const glm::vec4 fuv = b.perFaceUV ? b.faceUV[fi]
+                                              : glm::vec4(b.uvMin, b.uvMax);
             const glm::vec2 uv[4] = {
-                {b.uvMin.x, b.uvMax.y}, {b.uvMax.x, b.uvMax.y},
-                {b.uvMax.x, b.uvMin.y}, {b.uvMin.x, b.uvMin.y},
+                {fuv.x, fuv.w}, {fuv.z, fuv.w}, {fuv.z, fuv.y}, {fuv.x, fuv.y},
             };
             const glm::vec3 wn = glm::normalize(nm * n);
             auto emit = [&](int k) {
@@ -171,6 +174,7 @@ std::vector<EntityVertex> bakeMesh(const Skeleton& skel,
             };
             emit(0); emit(1); emit(2); // two triangles per face
             emit(0); emit(2); emit(3);
+            ++fi;
         }
     }
     return out;

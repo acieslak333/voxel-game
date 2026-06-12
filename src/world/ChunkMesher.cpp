@@ -331,6 +331,24 @@ MeshData ChunkMesher::greedyMesh(const Chunk& chunk, const BlockRegistry& reg,
             // Biome vegetation tint (white for non-foliage). Sampled at the owning
             // cell's column; bakes into the vertices so grass varies by biome.
             m.tint = packColorRGBA8(tint(cell[0], cell[2], blk));
+            // Water depth darkening: the deeper the water column below this surface,
+            // the darker (and slightly bluer) the translucent water reads — so deep
+            // oceans go dark and shallows stay bright. Folded into the otherwise-white
+            // water tint (the chunk shader already multiplies it into the albedo, no
+            // extra vertex data). Depth is scanned down to the seabed (the neighbour
+            // sampler reaches any world block, so it crosses chunk borders) and BANDED
+            // so large same-depth regions still greedy-merge — the cheap path.
+            if (isWater(blk)) {
+                constexpr int kCap = 18, kBand = 3;
+                int depth = 0;
+                while (depth < kCap &&
+                       isWater(sample(cell[0], cell[1] - 1 - depth, cell[2]).id))
+                    ++depth;
+                const float td = static_cast<float>((depth / kBand) * kBand) / kCap; // 0..1
+                const float b  = 1.0f - 0.6f * td;             // 1.0 shallow -> 0.4 deep
+                m.tint = packColorRGBA8(
+                    glm::vec3(b * (1.0f - 0.16f * td), b * (1.0f - 0.08f * td), b));
+            }
             m.baseShade = faceShade(d, positive);
             if (!smoothLighting) {
                 // Simple mode: flat directional shade only (no AO, full sky light).
@@ -738,6 +756,14 @@ MeshData ChunkMesher::greedyMesh(const Chunk& chunk, const BlockRegistry& reg,
                         leafFace(0, -1, 0, glm::vec3(0, 0, 0), glm::vec3(1, 0, 0),
                                  glm::vec3(1, 0, 1), glm::vec3(0, 0, 1), 1, false, FaceNegY);
                     }
+                } else if (rt == RenderType::Flat) {
+                    // A single horizontal cutout quad near the cell floor: a lilypad
+                    // resting on the water surface in the cell below. Lit top-facing.
+                    const float yq = 0.08f; // just clear of the water surface
+                    addNonCubeQuad(o + glm::vec3(0.0f, yq, 0.0f), o + glm::vec3(1.0f, yq, 0.0f),
+                                   o + glm::vec3(1.0f, yq, 1.0f), o + glm::vec3(0.0f, yq, 1.0f),
+                                   fl(FacePosY), glm::vec2(sky, blk),
+                                   static_cast<uint32_t>(FacePosY), col, cellTint);
                 } else { // RenderType::Model — a centred thin box (e.g. trunk)
                     const float lo = reg.modelInset(id), hi = 1.0f - lo;
                     // Per-face block-light shade so the box still reads as 3D.

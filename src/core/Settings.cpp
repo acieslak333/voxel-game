@@ -29,9 +29,13 @@ Settings Settings::load(const std::string& path) {
     get("pixelate", s.pixelate);
     get("skyFalloff", s.skyFalloff);
     get("blockFalloff", s.blockFalloff);
+    get("renderDistance", s.renderDistance);
+    get("darkNoise", s.darkNoise);
     get("fov", s.fov);
     get("sensitivity", s.sensitivity);
     get("flySpeed", s.flySpeed);
+    get("viewBob", s.viewBob);
+    get("lod", s.lod);
     get("dayLengthMinutes", s.dayLengthMinutes);
     get("timeRunning", s.timeRunning);
     get("fullscreen", s.fullscreen);
@@ -45,9 +49,13 @@ void Settings::save(const std::string& path) const {
     root["pixelate"]       = pixelate;
     root["skyFalloff"]     = skyFalloff;
     root["blockFalloff"]   = blockFalloff;
+    root["renderDistance"] = renderDistance;
+    root["darkNoise"]      = darkNoise;
     root["fov"]            = fov;
     root["sensitivity"]    = sensitivity;
     root["flySpeed"]       = flySpeed;
+    root["viewBob"]        = viewBob;
+    root["lod"]            = lod;
     root["dayLengthMinutes"] = dayLengthMinutes;
     root["timeRunning"]    = timeRunning;
     root["fullscreen"]     = fullscreen;

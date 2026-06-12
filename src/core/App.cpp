@@ -6,6 +6,7 @@
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <yaml-cpp/yaml.h>
+#include <stb_image.h> // declarations only; the implementation lives in TextureArray.cpp
 
 #include <algorithm>
 #include <chrono>
@@ -34,6 +35,69 @@
 namespace vg {
 
 namespace {
+// Discover Blockbench models: every assets/models/<name>/ subdir that contains a
+// <name>.bbmodel. Sorted by name so the skin-atlas order is stable and shared by
+// the entitySkins_ texture array and buildModels() (layer index == position here).
+// Adding a model is just dropping a new <name>/<name>.bbmodel + <name>.png folder.
+std::vector<std::string> discoverModelNames(const std::string& modelsDir) {
+    std::vector<std::string> names;
+    std::error_code ec;
+    for (const auto& e : std::filesystem::directory_iterator(modelsDir, ec)) {
+        if (!e.is_directory()) continue;
+        const std::string name = e.path().filename().string();
+        if (std::filesystem::exists(e.path() / (name + ".bbmodel"))) names.push_back(name);
+    }
+    std::sort(names.begin(), names.end());
+    return names;
+}
+// Edge length of the model skin atlas. Source skins of ANY size are resized to this
+// (preserving their [0,1] UV layout), so models needn't share a texture resolution.
+constexpr int kModelAtlasSize = 256;
+
+// Build the skin atlas (layer i == discoverModelNames()[i]): for each model, load the
+// texture its faces reference (any name, from the model's own dir; falls back to
+// <name>.png), nearest-resize it to kModelAtlasSize, and return the RGBA layers. This
+// is what removes the "same size / named <name>.png" rules — drop any .bbmodel + the
+// texture it points at, any size, and it works.
+std::vector<std::vector<unsigned char>> buildModelAtlas(const std::string& modelsDir) {
+    const int size = kModelAtlasSize;
+    const size_t bytes = static_cast<size_t>(size) * size * 4;
+    std::vector<std::vector<unsigned char>> layers;
+    for (const std::string& n : discoverModelNames(modelsDir)) {
+        const std::string dir = modelsDir + "/" + n + "/";
+        BlockbenchModel bb;
+        try { bb = loadBlockbenchModel(dir + n + ".bbmodel"); } catch (...) {}
+        int w = 0, h = 0, ch = 0;
+        stbi_uc* data = nullptr;
+        // Prefer an embedded (base64) skin — Blockbench's native save format — then an
+        // external file the model references, then the <name>.png convention.
+        if (!bb.embeddedPNG.empty())
+            data = stbi_load_from_memory(bb.embeddedPNG.data(),
+                                         static_cast<int>(bb.embeddedPNG.size()),
+                                         &w, &h, &ch, STBI_rgb_alpha);
+        if (!data && !bb.skin.empty())
+            data = stbi_load((dir + bb.skin).c_str(), &w, &h, &ch, STBI_rgb_alpha);
+        if (!data) data = stbi_load((dir + n + ".png").c_str(), &w, &h, &ch, STBI_rgb_alpha);
+        std::vector<unsigned char> layer(bytes, 0); // missing texture -> transparent layer
+        if (data && w > 0 && h > 0) {
+            for (int y = 0; y < size; ++y) {
+                for (int x = 0; x < size; ++x) {
+                    const int sx = x * w / size, sy = y * h / size; // nearest sample
+                    const unsigned char* p = data + (static_cast<size_t>(sy) * w + sx) * 4;
+                    unsigned char* d = layer.data() + (static_cast<size_t>(y) * size + x) * 4;
+                    d[0] = p[0]; d[1] = p[1]; d[2] = p[2]; d[3] = p[3];
+                }
+            }
+            stbi_image_free(data);
+        }
+        layers.push_back(std::move(layer));
+    }
+    // The atlas needs >=1 layer (an empty TextureArray throws); if there are no
+    // models, hand back a single transparent layer so the game still starts.
+    if (layers.empty()) layers.emplace_back(bytes, 0);
+    return layers;
+}
+
 // The shapes the hammer radial offers, in display order (left to right).
 constexpr ShapeKind kPickerShapes[] = {
     ShapeKind::Cube, ShapeKind::Slab, ShapeKind::Stairs,
@@ -171,6 +235,11 @@ WorldConfig worldConfigWithSettings(const std::string& path, const Settings& s) 
     WorldConfig c = WorldConfig::load(path);
     c.skyFalloff   = std::clamp(s.skyFalloff, 1, 15);
     c.blockFalloff = std::clamp(s.blockFalloff, 1, 15);
+    // Render distance is player-driven (Settings), overriding world.yaml's
+    // view_radius. Recompute the derived chunk-grid dims load() set from the YAML
+    // value so the world is allocated at the chosen radius.
+    c.viewRadius = std::clamp(s.renderDistance, 4, 16);
+    c.chunksX = c.chunksZ = 2 * c.viewRadius + 1;
     return c;
 }
 
@@ -230,9 +299,12 @@ App::App()
       worldRenderer_(context_, renderer_.sceneRenderPass(),
                      static_cast<uint32_t>(Renderer::kMaxFramesInFlight), world_,
                      VG_SHADER_DIR, std::string(VG_ASSET_DIR) + "/textures"),
+      entitySkins_(context_, buildModelAtlas(std::string(VG_ASSET_DIR) + "/models"),
+                   kModelAtlasSize, kModelAtlasSize),
       entityRenderer_(context_, renderer_.sceneRenderPass(),
                       static_cast<uint32_t>(Renderer::kMaxFramesInFlight), VG_SHADER_DIR,
-                      worldRenderer_.blockTextureView(), worldRenderer_.blockTextureSampler()),
+                      worldRenderer_.blockTextureView(), worldRenderer_.blockTextureSampler(),
+                      entitySkins_.view(), entitySkins_.sampler()),
       farTerrain_(context_, renderer_.sceneRenderPass(),
                   static_cast<uint32_t>(Renderer::kMaxFramesInFlight), VG_SHADER_DIR,
                   worldRenderer_.blockTextureView(), worldRenderer_.blockTextureSampler(),
@@ -261,6 +333,9 @@ App::App()
                                static_cast<float>(world_.surfaceHeight(ex, ez)) + 1.0f,
                                static_cast<float>(ez));
         buildTestEntity();
+        // Load the Blockbench tool models (hammer/sword/pickaxe/torch) for the held
+        // viewmodel. Not spawned in the world — drawn in-hand when selected.
+        buildModels();
     }
     spawnCritters(); // a few passive wanderers around spawn
     player_.setInvulnerable(creativeMode_); // creative ignores fall/lava/combat damage
@@ -284,15 +359,20 @@ App::App()
     // In survival, mining adds to the inventory and placing consumes the held slot;
     // seed a small starter kit there so there's something to place before you mine.
     if (creativeMode_) {
-        stockCreative();
+        stockCreative(); // places the tools in slots 0-2, then the block palette
     } else {
         Inventory& inv = player_.inventory();
         const BlockRegistry& reg = world_.registry();
+        // First three hotbar slots are the tools (pickaxe/sword/hammer); these are
+        // also what the first-person viewmodel shows when selected. The block starter
+        // kit then fills from slot 3 onward (add() skips the occupied tool slots).
+        int t = 0;
+        for (const char* tool : {"pickaxe", "sword", "hammer"}) {
+            try { inv.slot(t++) = ItemStack{reg.idByName(tool), 1}; } catch (...) {}
+        }
         auto give = [&](const char* name, int n) {
             try { inv.add(reg.idByName(name), n); } catch (const std::out_of_range&) {}
         };
-        give("pickaxe", 1); // survival starts with the two tools
-        give("sword", 1);
         give("dirt", 64);
         give("cobblestone", 64);
         give("planks", 32);
@@ -304,11 +384,6 @@ App::App()
         give("iron_boots", 1); // only armour piece (ISSUES #15: armour trimmed to boots)
         give("swift_charm", 1);
     }
-    // The hammer (block-shape tool) is available in both modes (ISSUES #16).
-    {
-        Inventory& inv = player_.inventory();
-        try { inv.add(world_.registry().idByName("hammer"), 1); } catch (...) {}
-    }
 
     try { chestId_ = world_.registry().idByName("chest"); } catch (...) { chestId_ = 0; }
     try { hammerId_ = world_.registry().idByName("hammer"); } catch (...) { hammerId_ = 0; }
@@ -316,6 +391,15 @@ App::App()
     // bad file leaves the default burst.
     try {
         breakEffect_ = ParticleEffect::load(std::string(VG_ASSET_DIR) + "/particles/break.prtcl");
+    } catch (...) {}
+    try {
+        placeEffect_ = ParticleEffect::load(std::string(VG_ASSET_DIR) + "/particles/place.prtcl");
+    } catch (...) {}
+    try {
+        splashEffect_ = ParticleEffect::load(std::string(VG_ASSET_DIR) + "/particles/splash.prtcl");
+    } catch (...) {}
+    try {
+        emberEffect_ = ParticleEffect::load(std::string(VG_ASSET_DIR) + "/particles/ember.prtcl");
     } catch (...) {}
 
     // Restore a saved player (position/look/health/inventory/mode) if one exists for
@@ -342,6 +426,8 @@ void App::applySettings() {
     player_.camera().fovDegrees = settings_.fov;
     player_.setMouseSensitivity(settings_.sensitivity);
     player_.setFlySpeed(settings_.flySpeed);
+    player_.setViewBob(settings_.viewBob);
+    farTerrain_.setEnabled(settings_.lod);
     window_.setFullscreen(settings_.fullscreen);
     dayNight_.setDayLengthMinutes(settings_.dayLengthMinutes);
     dayNight_.setRunning(settings_.timeRunning);
@@ -381,16 +467,19 @@ void App::toggleInventory() {
 }
 
 void App::stockCreative() {
-    // One full stack of every placeable block (id 1..blockCount-1), in registry
-    // order, starting at slot 0 — so the hotbar holds the first nine block types and
-    // the rest sit in the backpack, all reachable from the inventory screen.
+    // First three hotbar slots are the tools (pickaxe/sword/hammer), then one full
+    // stack of every placeable block in registry order — so the hotbar reads
+    // tool, tool, tool, block, block… and the overflow sits in the backpack.
     Inventory& inv = player_.inventory();
     for (int i = 0; i < Inventory::kSlots; ++i) {
         inv.slot(i).clear();
     }
     const BlockRegistry& reg = world_.registry();
-    const int blocks = static_cast<int>(reg.blockCount());
     int s = 0;
+    for (const char* tool : {"pickaxe", "sword", "hammer"}) {
+        try { inv.slot(s++) = ItemStack{reg.idByName(tool), 1}; } catch (...) {}
+    }
+    const int blocks = static_cast<int>(reg.blockCount());
     for (int id = 1; id < blocks && s < Inventory::kSlots; ++id) {
         if (!reg.placeable(static_cast<uint16_t>(id))) {
             continue; // tools/items aren't part of the creative block palette
@@ -576,6 +665,11 @@ void App::placeBlockAt(const glm::ivec3& t, uint16_t id, uint8_t metadata) {
     }
     worldRenderer_.remeshChunks(dirty);
     seedLiquid(t.x, t.y, t.z);
+    // Place poof: a soft dust puff in the placed block's own colour (ISSUES #13M).
+    const uint32_t layer = placeEffect_.texture.empty()
+        ? world_.registry().faceLayer(id, FacePosY)
+        : world_.registry().textureLayer(placeEffect_.texture);
+    particles_.spawnEffect(placeEffect_, glm::vec3(t) + glm::vec3(0.5f), layer);
 }
 
 void App::reshapeBlockAt(const glm::ivec3& b, uint16_t id, uint8_t metadata) {
@@ -931,6 +1025,81 @@ void App::buildTestEntity() {
     swing(4, +1.0f); // armR counter-swings legR
 }
 
+void App::buildModels() {
+    // Load each Blockbench tool model and bake its static (rest-pose) mesh once. Its
+    // boxes carry per-face UVs; we stamp each model's boxes with its skin-atlas slice
+    // (layer index MUST match the entitySkins_ filename list) so the EntityRenderer
+    // samples the right PNG with useSkin=1. A missing/bad model is non-fatal — that
+    // tool is just skipped.
+    // Discovery order == the entitySkins_ texture order, so model i's boxes sample
+    // skin-atlas layer i. "hand" is the first-person arm drawn alongside any tool.
+    const std::string base = std::string(VG_ASSET_DIR) + "/models/";
+    const std::vector<std::string> names = discoverModelNames(base);
+    toolModels_.clear();
+    std::unordered_map<std::string, size_t> byName;
+    for (uint32_t i = 0; i < names.size(); ++i) {
+        const std::string& n = names[i];
+        try {
+            BlockbenchModel m = loadBlockbenchModel(base + n + "/" + n + ".bbmodel");
+            for (Box& b : m.skeleton.boxes) b.layer = i; // skin-atlas layer (matches entitySkins_)
+            std::vector<EntityVertex> mesh =
+                bakeMesh(m.skeleton, worldMatrices(m.skeleton, restPose(m.skeleton)));
+            // AABB of the baked rest pose, so a world-dropped item can be centred on
+            // its position and scaled to a uniform size (held draw ignores these).
+            glm::vec3 lo(1e9f), hi(-1e9f);
+            for (const EntityVertex& v : mesh) { lo = glm::min(lo, v.pos); hi = glm::max(hi, v.pos); }
+            glm::vec3 center = mesh.empty() ? glm::vec3(0.0f) : 0.5f * (lo + hi);
+            glm::vec3 size = mesh.empty() ? glm::vec3(1.0f) : (hi - lo);
+            float span = std::max(size.x, std::max(size.y, size.z));
+            // The "critter" model is a mob rig: keep its loaded Skeleton (its leg
+            // groups became joints) so the wandering critters animate, rather than a
+            // static held/dropped bake. Centre it on the entity pos: xz-centre at the
+            // origin, feet (AABB bottom) at y=0 (the critter's ground position).
+            if (n == "critter" && !m.skeleton.joints.empty()) {
+                critterRig_    = m.skeleton; // boxes already carry the skin layer (stamped above)
+                critterOffset_ = glm::vec3(-center.x, -lo.y, -center.z);
+                critterWalk_ = AnimationClip{};
+                critterWalk_.name = "walk"; critterWalk_.duration = 0.8f; critterWalk_.loop = true;
+                auto swingLeg = [&](const char* jn, float dir) {
+                    const int ji = critterRig_.find(jn);
+                    if (ji < 0) return;
+                    AnimChannel ch; ch.joint = ji; ch.times = {0.0f, 0.4f, 0.8f};
+                    const float a = dir * glm::radians(26.0f);
+                    ch.rotations = {glm::angleAxis(a, glm::vec3(1, 0, 0)),
+                                    glm::angleAxis(-a, glm::vec3(1, 0, 0)),
+                                    glm::angleAxis(a, glm::vec3(1, 0, 0))};
+                    critterWalk_.channels.push_back(ch);
+                };
+                swingLeg("legFL", +1.0f); swingLeg("legBR", +1.0f); // diagonal gait
+                swingLeg("legFR", -1.0f); swingLeg("legBL", -1.0f);
+                hasCritterModel_ = !critterWalk_.channels.empty();
+            }
+            byName[n] = toolModels_.size();
+            toolModels_.push_back({std::move(mesh), n, center, span > 1e-4f ? span : 1.0f});
+        } catch (const std::exception& e) {
+            std::fprintf(stderr, "[models] %s load failed: %s\n", n.c_str(), e.what());
+        }
+    }
+
+    // Held viewmodel binding: a model whose name matches an item is drawn in-hand
+    // when that item is selected (so dropping assets/models/<item>/ "just works");
+    // all pickaxe tiers share the one pickaxe model. The "hand" model is the arm.
+    heldModelByItem_.clear();
+    const BlockRegistry& reg = world_.registry();
+    auto bind = [&](const std::string& item, const std::string& model) {
+        auto mi = byName.find(model);
+        if (mi == byName.end()) return;
+        try { heldModelByItem_[reg.idByName(item)] = mi->second; } catch (...) {}
+    };
+    for (const auto& kv : byName) bind(kv.first, kv.first); // model name == item name
+    for (const char* p : {"wood_pickaxe", "stone_pickaxe", "mythril_pickaxe"})
+        bind(p, "pickaxe"); // tiers share the pickaxe model
+
+    // The first-person arm (drawn alongside any held tool, sharing its transform).
+    auto hi = byName.find("hand");
+    handModel_ = hi != byName.end() ? static_cast<int>(hi->second) : -1;
+}
+
 void App::spawnCritters() {
     // Seed a handful of wanderers on the surface near spawn (placeholder box rig;
     // real mob models arrive with the glTF loader). Each drops onto the terrain.
@@ -946,6 +1115,28 @@ void App::spawnCritters() {
 void App::run(long maxFrames, const std::string& screenshotPath) {
     double lastTime = glfwGetTime();
     long frame = 0;
+
+    // Gated frame profiler (VG_FRAME_TIME=1, inert otherwise): averages where each
+    // frame goes — game update (input/physics/streaming), UI build, and the draw
+    // split from Renderer::phaseTimes() — and prints once every 120 frames. `wait`
+    // dominating means GPU-bound; `record` dominating means CPU-bound recording.
+    const bool profFrames = std::getenv("VG_FRAME_TIME") != nullptr;
+    double pUpdate = 0, pUi = 0, pWait = 0, pAcq = 0, pRec = 0, pSub = 0, pTotal = 0;
+    double pMax = 0, pMaxUpdate = 0;
+    long   pN = 0;
+
+    // Debug hook (streaming perf): VG_AUTOWALK=<speed> flies the player along +X at
+    // that many blocks/sec, crossing a chunk boundary every 16/speed seconds — the
+    // way to measure recenter/streaming frame spikes headlessly. Inert unless set.
+    float autoWalk = 0.0f;
+    if (const char* aw = std::getenv("VG_AUTOWALK")) {
+        autoWalk = static_cast<float>(std::atof(aw));
+        player_.setMode(PlayerController::Mode::FreeFly);
+        // Glide above the terrain so the path never tunnels through a mountain.
+        glm::vec3 p = player_.feetPosition();
+        p.y = static_cast<float>(world_.sizeInBlocks().y) * 0.8f;
+        player_.teleport(p);
+    }
 
     // Debug hook for sky/cloud verification screenshots (headless): VG_HOUR sets
     // and freezes the time of day and aims the camera at the sun/moon; VG_PITCH /
@@ -977,6 +1168,27 @@ void App::run(long maxFrames, const std::string& screenshotPath) {
         }
     }
 
+    // Debug hook (headless screenshots): VG_MODEL_DEMO selects a hotbar tool so the
+    // first-person held viewmodel is visible; VG_HELD=<item> picks which (default
+    // sword). Stays in normal first-person play so the in-hand placement is exact.
+    if (std::getenv("VG_MODEL_DEMO")) {
+        player_.setMode(PlayerController::Mode::Walking);
+        const char* want = std::getenv("VG_HELD");
+        uint16_t id = 0;
+        try { id = world_.registry().idByName(want ? want : "sword"); } catch (...) {}
+        Inventory& inv = player_.inventory();
+        if (id != 0) {
+            int slot = -1; // find it in the hotbar, else drop it into slot 0
+            for (int i = 0; i < Inventory::kHotbarSlots; ++i)
+                if (inv.slot(i).blockId == id) { slot = i; break; }
+            if (slot < 0) { inv.slot(0) = ItemStack{id, 1}; slot = 0; }
+            inv.setSelected(slot);
+        }
+        // Aim at the open sky for a clean backdrop (the viewmodel is camera-locked, so
+        // its on-screen placement is unaffected by where the camera looks).
+        player_.camera().pitch = 40.0f;
+    }
+
     // Debug hook (headless screenshots): VG_SHAPES_DEMO places a row of stone in
     // each shape on the surface near spawn and frames it, to verify shaped geometry
     // and 16px/block textures. Inert unless the variable is set.
@@ -996,12 +1208,14 @@ void App::run(long maxFrames, const std::string& screenshotPath) {
             {{bx + 5, gy, bz}, ShapeKind::VerticalSlab, 0},  // vertical slab
             {{bx + 6, gy, bz}, ShapeKind::Cube, 0},          // full cube (reference)
         };
+        // Barrier BEFORE the setBlock loop: startup meshing now runs on the worker
+        // pool, so the world must not be mutated while workers are mid-read.
+        worldRenderer_.streamBarrier();
         std::vector<glm::ivec3> dirty;
         for (const DemoBlock& d : demo) {
             auto dd = world_.setBlock(d.p.x, d.p.y, d.p.z, Block{stone, packShape(d.k, d.o)});
             dirty.insert(dirty.end(), dd.begin(), dd.end());
         }
-        worldRenderer_.streamBarrier();
         worldRenderer_.remeshChunks(dirty);
         player_.setMode(PlayerController::Mode::FreeFly);
         player_.teleport(glm::vec3(bx + 3.0f, gy + 2.0f, bz + 7.0f));
@@ -1009,7 +1223,89 @@ void App::run(long maxFrames, const std::string& screenshotPath) {
         player_.camera().pitch = -10.0f;
     }
 
+    // Debug hook (headless screenshots): VG_WATER_DEMO carves a pool whose floor
+    // ramps from 1 block deep to ~16 deep and fills it with source water, to verify
+    // depth darkening (shallow = bright, deep = dark). Inert unless set.
+    if (std::getenv("VG_WATER_DEMO")) {
+        const glm::ivec3 size = world_.sizeInBlocks();
+        const int bx = size.x / 2, bz = size.z / 2;
+        const int gy = world_.surfaceHeight(bx, bz);
+        uint16_t water = 0, floor = 0;
+        try { water = world_.registry().idByName("water"); } catch (...) {}
+        try { floor = world_.registry().idByName("snow"); } catch (...) {} // bright floor for contrast
+        std::vector<glm::ivec3> dirty;
+        auto put = [&](int x, int y, int z, uint16_t id) {
+            auto dd = world_.setBlock(x, y, z, Block{id, 0});
+            dirty.insert(dirty.end(), dd.begin(), dd.end());
+        };
+        // An elevated stepped pool in clear air: a constant water TOP over a bright
+        // floor that ramps from 1 block deep (near) to W deep (far). Seen from above,
+        // the water TOP face is tinted by the column depth, so shallow reads bright
+        // (floor shows through) and deep reads dark — the depth gradient at a glance.
+        const int W = 16, D = 12;
+        // Keep the whole structure under the world ceiling (high-terrain seeds put gy
+        // near the top, so an unclamped lift would write out of bounds).
+        const int topY  = std::min(gy + 40, world_.sizeInBlocks().y - 2);
+        const int baseY = topY - W - 1;
+        // Barrier BEFORE the puts: startup meshing now runs on the worker pool, so
+        // the world must not be mutated while workers are mid-read.
+        worldRenderer_.streamBarrier();
+        for (int i = 0; i < W; ++i) {              // column i is (i+1) blocks deep
+            const int floorY = topY - 1 - i;
+            for (int z = 0; z < D; ++z) {
+                for (int y = baseY; y < floorY; ++y) put(bx + i, y, bz + z, floor); // solid base
+                put(bx + i, floorY, bz + z, floor);                                 // pool floor
+                for (int y = floorY + 1; y <= topY; ++y) put(bx + i, y, bz + z, water);
+                put(bx + i, topY + 1, bz + z, 0);                                    // clear above
+            }
+        }
+        worldRenderer_.remeshChunks(dirty);
+        player_.setMode(PlayerController::Mode::FreeFly);
+        player_.teleport(glm::vec3(bx + W * 0.5f - 0.5f, topY + 15.0f, bz + D * 0.5f - 0.5f));
+        player_.camera().yaw   = -90.0f;
+        player_.camera().pitch = -82.0f;  // near-straight-down onto the water surface
+    }
+
+    // Debug hook (headless screenshots): VG_DROP_DEMO spawns one of each tool as a
+    // dropped ItemEntity in a row near spawn and frames them, to verify dropped
+    // items render as their Blockbench model (not a block cube). Inert unless set.
+    if (std::getenv("VG_DROP_DEMO")) {
+        const glm::ivec3 size = world_.sizeInBlocks();
+        const int bx = size.x / 2, bz = size.z / 2;
+        const int gy = world_.surfaceHeight(bx, bz);
+        const float sky = gy + 30.0f; // lift into clear sky for an unoccluded shot
+        const char* tools[] = {"pickaxe", "sword", "hammer", "torch"};
+        for (int i = 0; i < 4; ++i) {
+            uint16_t id = 0;
+            try { id = world_.registry().idByName(tools[i]); } catch (...) {}
+            if (id != 0)
+                droppedItems_.spawn(glm::vec3(bx + i * 1.2f, sky, bz), ItemStack{id, 1});
+        }
+        player_.setMode(PlayerController::Mode::FreeFly);
+        player_.teleport(glm::vec3(bx + 1.8f, sky + 0.2f, bz + 4.5f));
+        player_.camera().yaw   = -90.0f; // look toward -Z, at the row
+        player_.camera().pitch = 0.0f;
+    }
+
+    // Debug hook (headless screenshots): VG_CRITTER_DEMO spawns a few critters in a
+    // row lifted into clear sky and frames them, to verify the .bbmodel mob rig (and
+    // its walk pose). Inert unless set.
+    if (std::getenv("VG_CRITTER_DEMO")) {
+        const glm::ivec3 size = world_.sizeInBlocks();
+        const int bx = size.x / 2, bz = size.z / 2;
+        const int gy = world_.surfaceHeight(bx, bz);
+        const float sky = gy + 24.0f;
+        for (int i = 0; i < 3; ++i) {
+            critters_.spawn(glm::vec3(bx + i * 1.6f, sky, bz));
+        }
+        player_.setMode(PlayerController::Mode::FreeFly);
+        player_.teleport(glm::vec3(bx + 1.6f, sky + 0.35f, bz + 3.4f));
+        player_.camera().yaw   = -90.0f; // look toward -Z, at the row
+        player_.camera().pitch = -6.0f;
+    }
+
     while (!window_.shouldClose()) {
+        const auto profT0 = std::chrono::steady_clock::now();
         window_.pollEvents();
 
         // Delta time, clamped so a hitch (or a slow first frame) cannot launch
@@ -1019,6 +1315,13 @@ void App::run(long maxFrames, const std::string& screenshotPath) {
         lastTime = now;
 
         const InputState in = input_.poll();
+
+        if (autoWalk != 0.0f && !paused_) {
+            // VG_AUTOWALK: constant glide along +X (streaming-spike measurement).
+            glm::vec3 p = player_.feetPosition();
+            p.x += autoWalk * dt;
+            player_.teleport(p);
+        }
 
         if (in.toggleMenu) {
             // Esc closes an open chest / inventory / shape picker first, else menu.
@@ -1061,6 +1364,18 @@ void App::run(long maxFrames, const std::string& screenshotPath) {
         if (in.toggleGameMode && !paused_ && !inventoryOpen_ && !chestOpen_) {
             toggleGameMode();
         }
+        // Q throws the selected hotbar stack out in front of the player (a little
+        // outward + upward pop); the pickup delay keeps it from instantly re-collecting.
+        if (in.drop && !paused_ && !inventoryOpen_ && !chestOpen_ && !shapePickerOpen_) {
+            ItemStack& sel = player_.inventory().slot(player_.inventory().selected());
+            if (!sel.empty()) {
+                const Camera& cam = player_.camera();
+                const glm::vec3 dir = cam.front();
+                droppedItems_.spawn(cam.position + dir * 0.8f, sel,
+                                    dir * 6.0f + glm::vec3(0.0f, 2.0f, 0.0f));
+                sel.clear(); // threw the whole held stack
+            }
+        }
         if (in.toggleDebug) {
             debugOverlay_ = !debugOverlay_;
         }
@@ -1079,6 +1394,61 @@ void App::run(long maxFrames, const std::string& screenshotPath) {
             player_.update(dt, in);
             editBlocks(in, dt);
             updateSurvival(dt);
+            // Juice (ISSUES #13M): a splash when the player drops into water, and a
+            // screen shake when they take damage (fall / lava / future combat). The
+            // shake decays fast; the view jitter is applied in the scene record below.
+            const bool nowInWater = player_.inWater();
+            if (nowInWater && !wasInWater_) {
+                uint32_t wlayer = 0;
+                try { wlayer = world_.registry().textureLayer(splashEffect_.texture); } catch (...) {}
+                particles_.spawnEffect(splashEffect_,
+                                       player_.feetPosition() + glm::vec3(0.0f, 0.3f, 0.0f), wlayer);
+            }
+            wasInWater_ = nowInWater;
+            const float hp = player_.health();
+            if (hp < prevHealth_ - 0.01f) {
+                const float dmg = prevHealth_ - hp;
+                shakeMag_ = std::min(0.30f, shakeMag_ + dmg * 0.012f);
+                if (damageNumbers_.size() < 24) // cheap cap
+                    damageNumbers_.push_back({player_.feetPosition() + glm::vec3(0.0f, 1.7f, 0.0f),
+                                              dmg, 0.0f});
+            }
+            prevHealth_ = hp;
+            shakeMag_ *= std::exp(-dt * 9.0f); // settle quickly
+            // Float the damage numbers up and age them out.
+            for (FloatText& d : damageNumbers_) { d.age += dt; d.pos.y += dt * 0.8f; }
+            damageNumbers_.erase(
+                std::remove_if(damageNumbers_.begin(), damageNumbers_.end(),
+                               [](const FloatText& d) { return d.age > 1.1f; }),
+                damageNumbers_.end());
+            // Lava embers: every ~0.12s probe a small region near the player for an
+            // exposed lava surface and pop a few rising sparks off one of them.
+            emberTimer_ += dt;
+            if (emberTimer_ >= 0.12f) {
+                emberTimer_ = 0.0f;
+                uint16_t lavaId = 0;
+                try { lavaId = world_.registry().idByName("lava"); } catch (...) {}
+                if (lavaId != 0) {
+                    const glm::ivec3 fp = glm::ivec3(glm::floor(player_.feetPosition()));
+                    std::vector<glm::ivec3> spots;
+                    for (int dx = -6; dx <= 6; ++dx)
+                        for (int dz = -6; dz <= 6; ++dz)
+                            for (int dy = -2; dy <= 2; ++dy) {
+                                const int x = fp.x + dx, y = fp.y + dy, z = fp.z + dz;
+                                if (world_.blockAt(x, y, z).id == lavaId &&
+                                    world_.blockAt(x, y + 1, z).id == 0) {
+                                    spots.push_back({x, y + 1, z});
+                                }
+                            }
+                    if (!spots.empty()) {
+                        const glm::ivec3& s = spots[emberCounter_++ % spots.size()];
+                        uint32_t elayer = 0;
+                        try { elayer = world_.registry().textureLayer(emberEffect_.texture); } catch (...) {}
+                        particles_.spawnEffect(emberEffect_,
+                                               glm::vec3(s) + glm::vec3(0.5f, 0.1f, 0.5f), elayer);
+                    }
+                }
+            }
             entityAnimTime_ += dt; // drive the test biped's walk cycle
             // Dropped-item entities: fall, magnetise to the player, walk-over pickup
             // (rendered as little spinning block cubes by the EntityRenderer pass).
@@ -1109,24 +1479,73 @@ void App::run(long maxFrames, const std::string& screenshotPath) {
                 const int pcz = static_cast<int>(std::floor(p.z / Chunk::kSize));
 
                 if (world_.streamAsync()) {
-                    // Generate + move the window on the main thread (fast); flood the
-                    // light on a background thread (the big per-boundary cost) so the
-                    // frame never blocks on it. Recenter ONLY when the mesh workers are
-                    // idle (and no relight is in flight), so streamBarrier() drains an
-                    // already-empty pool instead of stalling the frame on the previous
-                    // crossing's backlog — that wait was the streaming hitch.
-                    if (!relightFuture_.valid() && worldRenderer_.streamWorkersIdle() &&
-                        world_.needsRecenter(pcx, pcz)) {
-                        worldRenderer_.streamBarrier(); // already idle: returns immediately
-                        std::vector<glm::ivec4> boxes;
-                        std::vector<glm::ivec3> dirty = world_.recenter(pcx, pcz, boxes);
+                    // Streaming pipeline with every heavy stage off the main thread:
+                    //   pregen (background noise) -> apply strip (cheap chunk swap,
+                    //   main thread) -> relight (background flood) -> remesh (worker
+                    //   pool). One column per cycle. The window may only be mutated
+                    //   when no relight is in flight AND the mesh workers are idle,
+                    //   so streamBarrier() drains an already-empty pool. The strip
+                    //   generation used to run synchronously inside recenter() —
+                    //   that was the ~90ms per-boundary frame spike.
+                    const glm::ivec3 org = world_.chunkOrigin();
+                    const glm::ivec3 cnt = world_.chunkCounts();
+                    const int viewR   = (cnt.x - 1) / 2;
+                    const int targetX = pcx - viewR, targetZ = pcz - viewR;
+                    auto launchRelight = [this](std::vector<glm::ivec4>&& boxes,
+                                                std::vector<glm::ivec3>&& dirty) {
                         relightFuture_ = std::async(
                             std::launch::async,
                             [this, boxes = std::move(boxes),
                              dirty = std::move(dirty)]() mutable -> std::vector<glm::ivec3> {
-                                world_.relightBoxes(boxes, dirty); // heavy flood, off the main thread
+                                world_.relightBoxes(boxes, dirty); // heavy flood, off-thread
                                 return std::move(dirty);
                             });
+                    };
+                    if (pregenFuture_.valid()) {
+                        // A strip is generating in the background; apply it once it is
+                        // ready and the window may be mutated. A stale strip (player
+                        // turned around) applies as a no-op and is simply dropped.
+                        if (pregenFuture_.wait_for(std::chrono::milliseconds(0)) ==
+                                std::future_status::ready &&
+                            !relightFuture_.valid() && worldRenderer_.streamWorkersIdle()) {
+                            World::PregenStrip strip = pregenFuture_.get();
+                            worldRenderer_.streamBarrier(); // already idle: returns immediately
+                            std::vector<glm::ivec4> boxes;
+                            std::vector<glm::ivec3> dirty =
+                                world_.recenterWithStrip(pcx, pcz, std::move(strip), boxes);
+                            if (!boxes.empty()) {
+                                launchRelight(std::move(boxes), std::move(dirty));
+                            }
+                        }
+                    } else if (world_.needsRecenter(pcx, pcz)) {
+                        if (std::abs(targetX - org.x) >= cnt.x ||
+                            std::abs(targetZ - org.z) >= cnt.z) {
+                            // Teleport: nothing in the window is reusable — take the
+                            // synchronous full-regen path (rare, inherently a load).
+                            if (!relightFuture_.valid() && worldRenderer_.streamWorkersIdle()) {
+                                worldRenderer_.streamBarrier();
+                                std::vector<glm::ivec4> boxes;
+                                std::vector<glm::ivec3> dirty = world_.recenter(pcx, pcz, boxes);
+                                launchRelight(std::move(boxes), std::move(dirty));
+                            }
+                        } else {
+                            // Kick the next column's strip in the background (X axis
+                            // first, matching recenter's step order). Safe alongside a
+                            // running relight: pregen reads no window state.
+                            int  dir;
+                            bool alongX;
+                            if (targetX != org.x) {
+                                alongX = true;
+                                dir    = targetX > org.x ? 1 : -1;
+                            } else {
+                                alongX = false;
+                                dir    = targetZ > org.z ? 1 : -1;
+                            }
+                            pregenFuture_ = std::async(std::launch::async,
+                                                       [this, dir, alongX] {
+                                                           return world_.pregenStrip(dir, alongX);
+                                                       });
+                        }
                     }
                 } else if (world_.needsRecenter(pcx, pcz)) {
                     // Synchronous: generate, relight, and enqueue on the main thread.
@@ -1148,9 +1567,11 @@ void App::run(long maxFrames, const std::string& screenshotPath) {
             clouds_.update(dt, dayNight_); // weather drifts with it
         }
 
+        const auto profT1 = std::chrono::steady_clock::now();
         // Build the UI for this frame (handles menu clicks, which may apply
         // settings that touch the GPU — safe here, between frames).
         buildUi(in);
+        const auto profT2 = std::chrono::steady_clock::now();
 
         renderer_.drawFrame(
             [this](VkCommandBuffer cmd, uint32_t, VkExtent2D) {
@@ -1165,6 +1586,13 @@ void App::run(long maxFrames, const std::string& screenshotPath) {
                                          : static_cast<float>(extent.width) /
                                                static_cast<float>(extent.height);
                 glm::mat4 view = cam.viewMatrix();
+                // Camera shake (ISSUES #13M juice): a tiny decaying view jitter when
+                // the player was hurt. Per-frame pseudo-random offset scaled by shakeMag_.
+                if (shakeMag_ > 0.001f) {
+                    const float a = entityAnimTime_ * 131.0f;
+                    const glm::vec3 j(std::sin(a), std::cos(a * 1.7f), std::sin(a * 0.7f));
+                    view = glm::translate(glm::mat4(1.0f), j * (shakeMag_ * 0.05f)) * view;
+                }
                 // Push the far clip plane out to cover the LOD shell (its diagonal
                 // corners reach ~1.5x its Chebyshev extent). Near terrain stays
                 // well within float-depth precision, and the depth-based fog uses
@@ -1237,19 +1665,69 @@ void App::run(long maxFrames, const std::string& screenshotPath) {
                     std::vector<EntityRenderer::Draw> draws{
                         {&bipedMesh, glm::translate(glm::mat4(1.0f), entityPos_)}};
 
+                    // First-person held tool (sword/pickaxe/torch/hammer): the selected
+                    // hotbar item, if it has a Blockbench model, drawn in front of the
+                    // camera (lower-right, angled across the view). Placed in VIEW space
+                    // — model = inverse(view) * offset — so it stays locked to the camera.
+                    // Only in normal first-person play (not free-fly / menus). A subtle
+                    // bob on the forward/up axes gives it life as the player moves.
+                    const bool showHeld = player_.mode() == PlayerController::Mode::Walking &&
+                                          !inventoryOpen_ && !chestOpen_ && !paused_;
+                    if (showHeld) {
+                        const uint16_t held = player_.inventory().selectedStack().blockId;
+                        auto hm = heldModelByItem_.find(held);
+                        if (hm != heldModelByItem_.end() && !toolModels_[hm->second].mesh.empty()) {
+                            const float bob = std::sin(entityAnimTime_ * 1.7f) * 0.010f;
+                            // Held-tool placement. Rotation (deg): Z screen tilt, Y outward
+                            // turn, X pitch (wrist toward camera). Position: TX right, TY up,
+                            // TZ toward camera (less negative = closer). HS scale. Defaults
+                            // chosen from the v8 grid pick, nudged right/closer/more-outward.
+                            // All overridable via env (VG_HZ/HY/HX, VG_TX/TY/TZ, VG_HS) for tuning.
+                            float hz = 75.0f, hy = -50.0f, hx = -35.0f;
+                            float tx = 0.42f, ty = -0.30f, tz = -0.42f, hs = 0.36f;
+                            auto envf = [](const char* k, float& v) {
+                                if (const char* e = std::getenv(k)) v = static_cast<float>(std::atof(e));
+                            };
+                            envf("VG_HZ", hz); envf("VG_HY", hy); envf("VG_HX", hx);
+                            envf("VG_TX", tx); envf("VG_TY", ty); envf("VG_TZ", tz); envf("VG_HS", hs);
+                            glm::mat4 vm(1.0f);
+                            vm = glm::translate(vm, glm::vec3(tx, ty + bob, tz + bob));
+                            vm = glm::rotate(vm, glm::radians(hz), glm::vec3(0, 0, 1)); // screen tilt
+                            vm = glm::rotate(vm, glm::radians(hy), glm::vec3(0, 1, 0)); // outward turn
+                            vm = glm::rotate(vm, glm::radians(hx), glm::vec3(1, 0, 0)); // pitch (wrist->cam)
+                            vm = glm::scale(vm, glm::vec3(hs));
+                            const glm::mat4 model = glm::inverse(view) * vm;
+                            // The arm is authored in the tool's own space (handle at the
+                            // origin), so the SAME transform makes the fist grip the handle.
+                            if (handModel_ >= 0 && !toolModels_[handModel_].mesh.empty())
+                                draws.push_back({&toolModels_[handModel_].mesh, model, 1u});
+                            draws.push_back({&toolModels_[hm->second].mesh, model, 1u});
+                        }
+                    }
+
                     // Passive critters: the SAME box rig, each baked at its own walk
                     // phase and placed by its position + heading. Reserve so the held
                     // meshes don't reallocate (draws hold pointers into this vector).
                     std::vector<std::vector<EntityVertex>> critterMeshes;
                     critterMeshes.reserve(critters_.size());
                     for (const Critter& cr : critters_.all()) {
-                        critterMeshes.push_back(bakeMesh(
-                            testEntity_,
-                            worldMatrices(testEntity_,
-                                          sampleClip(testEntity_, testWalk_, cr.animTime))));
                         glm::mat4 m = glm::translate(glm::mat4(1.0f), cr.pos);
                         m = glm::rotate(m, cr.yaw, glm::vec3(0.0f, 1.0f, 0.0f));
-                        draws.push_back({&critterMeshes.back(), m});
+                        if (hasCritterModel_) {
+                            // .bbmodel mob rig, walk-cycled by the critter's phase, skin path.
+                            critterMeshes.push_back(bakeMesh(
+                                critterRig_,
+                                worldMatrices(critterRig_,
+                                              sampleClip(critterRig_, critterWalk_, cr.animTime))));
+                            m = glm::translate(m, critterOffset_);
+                            draws.push_back({&critterMeshes.back(), m, 1u});
+                        } else {
+                            critterMeshes.push_back(bakeMesh(
+                                testEntity_,
+                                worldMatrices(testEntity_,
+                                              sampleClip(testEntity_, testWalk_, cr.animTime))));
+                            draws.push_back({&critterMeshes.back(), m});
+                        }
                     }
 
                     // One cube mesh per distinct block id (reused across items +
@@ -1263,10 +1741,26 @@ void App::run(long maxFrames, const std::string& screenshotPath) {
                         return &it->second;
                     };
 
-                    // Dropped items: a small block, bobbing and spinning about Y.
+                    // Dropped items, bobbing and spinning about Y. A tool/item with a
+                    // Blockbench model (pickaxe/sword/hammer/torch) renders as that model
+                    // (centred on its AABB, scaled to a uniform size, skin path); anything
+                    // else falls back to a small block cube.
                     for (const ItemEntity& it : droppedItems_.items()) {
                         if (it.stack.blockId == 0) continue;
                         const float bob = 0.09f * std::sin(it.spin * 1.5f);
+                        auto dm = heldModelByItem_.find(it.stack.blockId);
+                        if (dm != heldModelByItem_.end() && !toolModels_[dm->second].mesh.empty()) {
+                            const ToolModel& tm = toolModels_[dm->second];
+                            const float target = 0.55f;                 // world size across
+                            const float s = target / tm.span;
+                            glm::mat4 m = glm::translate(glm::mat4(1.0f),
+                                                         it.pos + glm::vec3(0.0f, bob, 0.0f));
+                            m = glm::rotate(m, it.spin, glm::vec3(0.0f, 1.0f, 0.0f));
+                            m = glm::scale(m, glm::vec3(s));
+                            m = glm::translate(m, -tm.center);          // centre the AABB on pos
+                            draws.push_back({&tm.mesh, m, 1u});
+                            continue;
+                        }
                         glm::mat4 m = glm::translate(glm::mat4(1.0f),
                                                      it.pos + glm::vec3(0.0f, bob, 0.0f));
                         m = glm::rotate(m, it.spin, glm::vec3(0.0f, 1.0f, 0.0f));
@@ -1357,21 +1851,66 @@ void App::run(long maxFrames, const std::string& screenshotPath) {
                 const int eyeZ = static_cast<int>(std::floor(cam.position.z));
                 fog.submerged =
                     (world_.blockAt(eyeX, eyeY, eyeZ).id == waterId) ? 1.0f : 0.0f;
+                // Low-light grain: static creeps in only when the player actually
+                // stands in darkness, and any light (a torch's block-light, or
+                // daylight reaching the spot) eliminates it. Brightness at the eye =
+                // the stronger of block-light and sky-light scaled by the time of day
+                // (so open ground is bright at noon, dark at night, caves stay dark).
+                const float skyL = world_.skyLightAt(eyeX, eyeY, eyeZ) / 15.0f;
+                const float blkL = world_.blockLightAt(eyeX, eyeY, eyeZ) / 15.0f;
+                const float eyeBright = std::max(blkL, skyL * sky.skyIntensity);
+                const float darkness  = 1.0f - glm::smoothstep(0.12f, 0.5f, eyeBright);
+                fog.noiseAmount = settings_.darkNoise * darkness;
+                fog.noiseTime   = static_cast<float>(glfwGetTime());
                 renderer_.setFog(fog);
             },
             [this](VkCommandBuffer cmd, uint32_t frameIndex, VkExtent2D extent) {
                 ui_.record(cmd, frameIndex, extent);
             });
 
+        if (profFrames) {
+            const auto profT3 = std::chrono::steady_clock::now();
+            auto ms = [](auto a, auto b) {
+                return std::chrono::duration<double, std::milli>(b - a).count();
+            };
+            const Renderer::PhaseTimes& ph = renderer_.phaseTimes();
+            pUpdate += ms(profT0, profT1);
+            pUi     += ms(profT1, profT2);
+            pWait   += ph.wait;
+            pAcq    += ph.acquire;
+            pRec    += ph.record;
+            pSub    += ph.submit;
+            pTotal  += ms(profT0, profT3);
+            pMax       = std::max(pMax, ms(profT0, profT3));
+            pMaxUpdate = std::max(pMaxUpdate, ms(profT0, profT1));
+            if (++pN == 120) {
+                std::printf("[frame] avg %.2fms (%.0f fps) | max %.1f (update %.1f) | "
+                            "update %.2f | ui %.2f | draw: wait %.2f acq %.2f rec %.2f "
+                            "sub %.2f | %zu chunks %.1fM tris drawn\n",
+                            pTotal / pN, 1000.0 * pN / pTotal, pMax, pMaxUpdate,
+                            pUpdate / pN, pUi / pN,
+                            pWait / pN, pAcq / pN, pRec / pN, pSub / pN,
+                            worldRenderer_.drawnChunkCount(),
+                            static_cast<double>(worldRenderer_.triangleCount()) / 1e6);
+                pUpdate = pUi = pWait = pAcq = pRec = pSub = pTotal = 0;
+                pMax = pMaxUpdate = 0;
+                pN = 0;
+            }
+        }
+
         if (maxFrames >= 0 && ++frame >= maxFrames) {
             break;
         }
     }
 
-    // Join any in-flight background relight before tearing down (its result is no
-    // longer needed), then make sure the GPU is finished before destructors free.
+    // Join any in-flight background relight/pregen before tearing down (their
+    // results are no longer needed), then make sure the GPU is finished before
+    // destructors free.
     if (relightFuture_.valid()) {
         relightFuture_.get();
+    }
+    if (pregenFuture_.valid()) {
+        pregenFuture_.get();
     }
     renderer_.waitIdle();
 
@@ -1447,6 +1986,21 @@ void App::buildUi(const InputState& in) {
 
         buildBlockIndicator(ui, view, proj, W, H); // first, so the crosshair sits on top
         buildCrosshair(ui, W, H);
+        buildDamageNumbers(ui, view, proj, W, H);
+    }
+}
+
+void App::buildDamageNumbers(Ui& ui, const glm::mat4& view, const glm::mat4& proj,
+                             float w, float h) {
+    for (const FloatText& d : damageNumbers_) {
+        const glm::vec4 c = proj * view * glm::vec4(d.pos, 1.0f);
+        if (c.w <= 1e-4f) continue; // behind the camera
+        const glm::vec2 ndc = glm::vec2(c) / c.w;
+        const glm::vec2 s = (ndc * 0.5f + 0.5f) * glm::vec2(w, h);
+        const float fade = 1.0f - d.age / 1.1f; // 1 -> 0 over its life
+        const std::string txt = "-" + std::to_string(static_cast<int>(d.value + 0.5f));
+        ui.labelCentered(s.x + 1.0f, s.y + 1.0f, txt, 0.6f, glm::vec4(0.0f, 0.0f, 0.0f, 0.6f * fade));
+        ui.labelCentered(s.x, s.y, txt, 0.6f, glm::vec4(0.95f, 0.28f, 0.22f, fade));
     }
 }
 
@@ -1460,6 +2014,25 @@ void App::buildCrosshair(Ui& ui, float w, float h) {
     };
     dot(rc + o, kCharcoal); // outline
     dot(rc, kCream);        // core
+
+    // Target feedback (ISSUES #13M): when aimed at a targetable block, expand the
+    // crosshair into four little ticks so you can tell you've got something in reach.
+    const Camera& cam = player_.camera();
+    const RaycastHit hit = raycastVoxel(
+        cam.position, cam.front(), kReach,
+        [this](int x, int y, int z) { return world_.isTargetable(x, y, z); },
+        [this](int x, int y, int z, ShapeBox out[]) { return world_.collisionBoxesAt(x, y, z, out); });
+    if (hit.hit) {
+        const float g = 5.0f, len = 4.0f, th = 2.0f; // gap from centre, tick length/thickness
+        auto tick = [&](float x, float y, float tw, float thh) {
+            ui.roundRect(x - 1.0f, y - 1.0f, tw + 2.0f, thh + 2.0f, 1.5f, kCharcoal);
+            ui.roundRect(x, y, tw, thh, 1.5f, kCream);
+        };
+        tick(cx - g - len, cy - th * 0.5f, len, th); // left
+        tick(cx + g, cy - th * 0.5f, len, th);       // right
+        tick(cx - th * 0.5f, cy - g - len, th, len); // up
+        tick(cx - th * 0.5f, cy + g, th, len);       // down
+    }
 
     // Mining feedback: a horizontal break meter just under the crosshair that fills
     // left-to-right as the held block breaks (a cheap stand-in until the crack-stage
@@ -1768,9 +2341,9 @@ void App::buildCrafting(Ui& ui, float x, float y, float w, const InputState& in)
 
 void App::buildEquipment(Ui& ui, float rightX, float y, const InputState& in) {
     const BlockRegistry& reg = world_.registry();
-    const float S = 1.7f; // match the inventory screen scale
-    const float slot = 54.0f * S, gap = 8.0f * S, radius = 16.0f * S;
-    const float pad = 15.0f * S, titleH = 26.0f * S, secGap = 20.0f * S, subH = 16.0f * S;
+    // Match the inventory grid's slots exactly (60/8/20) so gear reads the same size.
+    const float slot = 60.0f, gap = 8.0f, radius = 20.0f;
+    const float pad = 24.0f, titleH = 34.0f, secGap = 20.0f, subH = 18.0f;
     // Boots (the lone armour slot) above the trinkets laid out in a compact 2-wide
     // grid (ISSUES #15 — trimmed armour + tighter trinket space).
     const int   cols = 2;
@@ -2075,6 +2648,15 @@ void App::buildMenu(Ui& ui, float px, float py, float pw, float ph) {
         settings_.pixelate = pv;
         renderer_.setPixelScale(static_cast<uint32_t>(std::max(1, pv)));
     }
+    // Render distance (chunks). The voxel window is allocated once at startup, so a
+    // change only persists here and takes effect on the next launch — hence the
+    // "(restart)" hint in the label.
+    const int rd = static_cast<int>(std::lround(
+        sliderRow("Render dist (restart)", static_cast<float>(settings_.renderDistance),
+                  4.0f, 16.0f, 12, -1)));
+    if (rd != settings_.renderDistance) {
+        settings_.renderDistance = rd;
+    }
     // Light falloff (levels lost per block of spread; higher = darker caves /
     // tighter glow). Applying a change relights the world and rebuilds every
     // chunk, so only act when the slider actually lands on a new integer.
@@ -2088,6 +2670,11 @@ void App::buildMenu(Ui& ui, float px, float py, float pw, float ph) {
         if (world_.setLightFalloff(skyF, blkF)) {
             worldRenderer_.remeshAll();
         }
+    }
+    // Dark-area sensor grain (0 = off .. 0.5 = strong static in near-black).
+    const float dn = sliderRow("Dark noise", settings_.darkNoise, 0.0f, 0.5f, 0, 2);
+    if (std::abs(dn - settings_.darkNoise) > 1e-4f) {
+        settings_.darkNoise = dn;
     }
     // Field of view.
     const float fov = sliderRow("FOV", settings_.fov, 50.0f, 110.0f, 60, -1);
@@ -2122,6 +2709,18 @@ void App::buildMenu(Ui& ui, float px, float py, float pw, float ph) {
     if (button(std::string("Time: ") + (settings_.timeRunning ? "Running" : "Paused"))) {
         settings_.timeRunning = !settings_.timeRunning;
         dayNight_.setRunning(settings_.timeRunning);
+    }
+    // View bob: subtle head-bob while walking (off for a locked camera).
+    if (button(std::string("View bob: ") + (settings_.viewBob ? "On" : "Off"))) {
+        settings_.viewBob = !settings_.viewBob;
+        player_.setViewBob(settings_.viewBob);
+    }
+    // LOD terrain: the distant low-poly shell + tree impostors past the loaded
+    // window (FarTerrainRenderer). Off = the world fades to haze at the window edge
+    // (cheaper; no far ground). Re-enabling rebuilds the shell within a few frames.
+    if (button(std::string("LOD terrain: ") + (settings_.lod ? "On" : "Off"))) {
+        settings_.lod = !settings_.lod;
+        farTerrain_.setEnabled(settings_.lod);
     }
     // Day-sky colour (cycles the palette; tints the daytime zenith).
     if (button("Sky: " + settings_.skyColor)) {

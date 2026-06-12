@@ -183,30 +183,12 @@ void Ui::line(const glm::vec2& a, const glm::vec2& b, float thickness,
     r_.triangle(a + n, b - n, b + n, color);
 }
 
-void Ui::isoCube(float cx, float cy, float r, uint32_t topLayer, uint32_t sideLayer) {
-    // 2:1 isometric cube. The silhouette is a hexagon; `q` is the quarter-height
-    // that gives the classic dimetric look. Six outline points plus the centre O
-    // where the three visible faces meet:
-    const float q = r * 0.5f;
-    const glm::vec2 A{cx,     cy - 2 * q}; // top apex
-    const glm::vec2 B{cx + r, cy - q};     // upper-right
-    const glm::vec2 C{cx - r, cy - q};     // upper-left
-    const glm::vec2 O{cx,     cy};         // centre
-    const glm::vec2 D{cx + r, cy + q};     // lower-right
-    const glm::vec2 E{cx - r, cy + q};     // lower-left
-    const glm::vec2 F{cx,     cy + 2 * q}; // bottom apex
-
-    // Per-face shade (white = unchanged), brightest on top, right brighter than
-    // left, mirroring the in-world directional shading so the cube reads as 3D.
-    const glm::vec4 topS  {1.00f, 1.00f, 1.00f, 1.0f};
-    const glm::vec4 rightS{0.82f, 0.82f, 0.82f, 1.0f};
-    const glm::vec4 leftS {0.60f, 0.60f, 0.60f, 1.0f};
-
-    // Each face is a parallelogram, corners given top-left -> bottom-left so the
-    // texture sits upright. Top: A-B-O-C; right: O-B-D-F; left: C-O-F-E.
-    r_.blockFace(A, B, O, C, topLayer, topS);
-    r_.blockFace(O, B, D, F, sideLayer, rightS);
-    r_.blockFace(C, O, F, E, sideLayer, leftS);
+void Ui::itemIcon(float cx, float cy, float r, uint32_t iconLayer) {
+    // The icon is fully prerendered (the isometric shading is baked into the PNG by
+    // scripts/gen_icons.py), so we just blit the layer as a flat square. Spanning
+    // 2r each way keeps the same on-screen size the old runtime isoCube produced.
+    r_.sprite(cx - r, cy - r, 2.0f * r, 2.0f * r, iconLayer,
+              0.0f, 0.0f, 1.0f, 1.0f, glm::vec4(1.0f));
 }
 
 void Ui::label(float x, float y, const std::string& s, float scale, const glm::vec4& color) {

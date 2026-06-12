@@ -196,6 +196,12 @@ private:
     std::unique_ptr<Pipeline>     waterPipeline_;       // translucent water (2nd pass)
 
     std::vector<ChunkMesh> meshes_;          // indexed by chunkIndex(); may be empty
+    // Outer-ring chunks buildMeshes() skipped (streaming only): the ctor hands them
+    // to the streaming pipeline, nearest-first, so they melt in over the first
+    // frames instead of blocking startup. startupMelt_ keeps streamPump() at a
+    // boosted budget until that initial backlog has fully drained.
+    std::vector<glm::ivec3> deferredStartup_;
+    bool                    startupMelt_ = false;
     std::deque<glm::ivec3> pendingRemesh_;    // streaming remesh backlog (drained per frame)
     glm::ivec3             counts_{0};        // chunk grid dimensions
     std::size_t            drawnChunks_    = 0; // slots with geometry

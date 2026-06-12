@@ -59,6 +59,34 @@ TextureArray::TextureArray(VulkanContext& ctx, const std::vector<std::string>& f
         stbi_image_free(data);
     }
 
+    uploadPixels(pixels, width, height, layerCount);
+}
+
+// In-memory constructor: each `layers[i]` is a tightly-packed width*height RGBA8
+// image (all the same size). Lets callers build an array from resized/generated
+// pixels (e.g. the model skin atlas) without going through files of equal size.
+TextureArray::TextureArray(VulkanContext& ctx,
+                           const std::vector<std::vector<unsigned char>>& layers,
+                           int width, int height)
+    : ctx_(&ctx) {
+    if (layers.empty() || width <= 0 || height <= 0) {
+        throw std::runtime_error("TextureArray: empty in-memory layers");
+    }
+    const auto layerCount = static_cast<uint32_t>(layers.size());
+    const size_t layerBytes = static_cast<size_t>(width) * height * 4;
+    std::vector<unsigned char> pixels(layerBytes * layerCount);
+    for (uint32_t i = 0; i < layerCount; ++i) {
+        if (layers[i].size() != layerBytes) {
+            throw std::runtime_error("TextureArray: in-memory layer has wrong size");
+        }
+        std::memcpy(pixels.data() + i * layerBytes, layers[i].data(), layerBytes);
+    }
+    uploadPixels(pixels, width, height, layerCount);
+}
+
+void TextureArray::uploadPixels(const std::vector<unsigned char>& pixels, int width,
+                                int height, uint32_t layerCount) {
+    VulkanContext& ctx = *ctx_;
     // --- Stage and upload to a device-local array image ----------------------
     const VkDeviceSize imageBytes = pixels.size();
     Buffer staging(ctx, imageBytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,

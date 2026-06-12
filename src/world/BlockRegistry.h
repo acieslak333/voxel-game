@@ -58,6 +58,23 @@ struct BlockProperties {
     // (UI icons, particles). A non-air block always has at least one entry.
     std::array<std::vector<uint32_t>, FaceCount> faceLayers{};
 
+    // Texture-array layer of this item's prerendered 16x16 inventory icon
+    // (assets/textures/icons/<name>.png, baked by scripts/gen_icons.py). A cube /
+    // model / leafcube block bakes an isometric cube of its faces; a flat item
+    // (tool, charm) or cross-plant bakes its upright sprite. The UI draws this as a
+    // flat sprite in the slot — no runtime cube assembly. 0 for air.
+    uint32_t iconLayer = 0;
+
+    // How much SKY LIGHT this block subtracts as it passes through (0..15),
+    // independent of `opaque` (which is about meshing / face-culling). 0 = fully
+    // transparent to light (air, water, ground plants); 15 = fully blocks it (a
+    // solid cube). The decoupling lets thin, non-opaque foliage still cast a
+    // shadow: leaves dim a few levels, a trunk blocks fully, even though neither
+    // is `opaque` (they must stay non-opaque so the mesher doesn't cull/solidify
+    // them). Defaults to 15 for opaque blocks, 0 otherwise; override per block
+    // with `light_opacity:` in blocks.yaml. Used by World::computeSkyLight.
+    uint8_t lightOpacity = 0;
+
     // How this block becomes geometry (see RenderType). Cube => greedy meshing;
     // Cross/Model => the mesher's non-cube pass emits their own quads. Parsed from
     // the `render:` key in blocks.yaml.
@@ -132,6 +149,8 @@ public:
     [[nodiscard]] bool isSolid(uint16_t id) const { return get(id).solid; }
     [[nodiscard]] bool isOpaque(uint16_t id) const { return get(id).opaque; }
     [[nodiscard]] uint8_t emission(uint16_t id) const { return get(id).emission; }
+    // Sky-light levels this block subtracts as light passes through it (0..15).
+    [[nodiscard]] uint8_t lightOpacity(uint16_t id) const { return get(id).lightOpacity; }
     [[nodiscard]] glm::vec3 emissionColor(uint16_t id) const { return get(id).emissionColor; }
     [[nodiscard]] RenderType renderType(uint16_t id) const { return get(id).renderType; }
     [[nodiscard]] float modelInset(uint16_t id) const { return get(id).modelInset; }
@@ -141,6 +160,8 @@ public:
         const auto& v = get(id).faceLayers[static_cast<size_t>(face)];
         return v.empty() ? 0u : v.front();
     }
+    // Prerendered inventory-icon layer for this item (see BlockProperties::iconLayer).
+    [[nodiscard]] uint32_t iconLayer(uint16_t id) const { return get(id).iconLayer; }
     // Variant-aware layer: for a face with several texture variants, `selector`
     // (a hash of the block's world position; see ChunkMesher) chooses which one —
     // so a field of grass/stone doesn't tile. A single-variant face ignores it.

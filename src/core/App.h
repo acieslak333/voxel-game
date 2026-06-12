@@ -3,6 +3,7 @@
 #include "clouds/CloudSystem.h"
 #include "core/DayNight.h"
 #include "entity/Armature.h"
+#include "entity/BlockbenchModel.h"
 #include "entity/Critters.h"
 #include "entity/ItemEntity.h"
 #include "entity/Particles.h"
@@ -19,6 +20,7 @@
 #include "render/Swapchain.h"
 #include "render/EntityRenderer.h"
 #include "render/FarTerrainRenderer.h"
+#include "render/TextureArray.h"
 #include "render/UiRenderer.h"
 #include "render/VulkanContext.h"
 #include "render/WorldRenderer.h"
@@ -27,6 +29,7 @@
 #include <deque>
 #include <future>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace vg {
@@ -117,6 +120,9 @@ private:
     void buildDebugOverlay(class Ui& ui);
     // Centre-screen aiming reticle (pixel-art outlined plus).
     void buildCrosshair(class Ui& ui, float w, float h);
+    // Floating damage numbers projected from world space to the HUD.
+    void buildDamageNumbers(class Ui& ui, const glm::mat4& view, const glm::mat4& proj,
+                            float w, float h);
     // Wireframe box around the block under the crosshair, projected into the HUD.
     void buildBlockIndicator(class Ui& ui, const glm::mat4& view, const glm::mat4& proj,
                              float w, float h);
@@ -156,6 +162,7 @@ private:
     SkyRenderer      skyRenderer_; // atmosphere + volumetric clouds, first in the scene pass
     World            world_;
     WorldRenderer    worldRenderer_;
+    TextureArray     entitySkins_;    // Blockbench-model skin atlas (assets/models/*.png)
     EntityRenderer   entityRenderer_; // animated box-rig entities (ISSUES #13E)
     FarTerrainRenderer farTerrain_;   // coarse heightmap LOD shell beyond the window
     UiRenderer       ui_;        // 2D HUD/menu renderer (after renderer_)
@@ -167,6 +174,20 @@ private:
     ItemEntities      droppedItems_; // dropped-item entities (physics + walk-over pickup)
     Particles         particles_;    // block-break chip particles (ISSUES #13M)
     ParticleEffect    breakEffect_;  // data-driven break burst (assets/particles/break.prtcl)
+    ParticleEffect    placeEffect_;  // soft dust poof on placing a block (place.prtcl)
+    ParticleEffect    splashEffect_; // droplets when the player enters water (splash.prtcl)
+    // Game-feel juice (ISSUES #13H/M): a decaying screen-shake magnitude (blocks of
+    // camera jitter) and a brief hit-stop freeze, triggered by hard landings / damage.
+    float             shakeMag_  = 0.0f;
+    float             hitStop_   = 0.0f;   // seconds of frozen gameplay remaining
+    float             prevHealth_ = 100.0f; // to detect damage (drives shake + hit-stop)
+    bool              wasInWater_ = false; // edge-detect water entry for the splash
+    ParticleEffect    emberEffect_;        // glowing sparks rising off nearby lava (ember.prtcl)
+    float             emberTimer_   = 0.0f;
+    uint32_t          emberCounter_ = 0;   // rotates which nearby lava cell emits
+    // Floating damage numbers (ISSUES #13M): rise + fade from where damage was taken.
+    struct FloatText { glm::vec3 pos; float value; float age; };
+    std::vector<FloatText> damageNumbers_;
 
     // Test entity (ISSUES #13E E4): a procedural animated biped proving the rig +
     // EntityRenderer pipeline end to end. Built once; animated by entityAnimTime_.
@@ -176,7 +197,31 @@ private:
     float             entityAnimTime_ = 0.0f;
     void buildTestEntity();
 
-    Critters          critters_;          // passive wandering critters (placeholder box rig)
+    // Blockbench tool viewmodels (ISSUES #13E): the hammer/sword/pickaxe/torch .bbmodels
+    // (each from its own skin-atlas slice) rendered as the first-person HELD item — the
+    // selected hotbar tool is drawn in front of the camera via the EntityRenderer skin
+    // path. Each mesh is baked once at rest pose; the held draw transforms it by the
+    // inverse view. `heldModelByItem_` maps a held item id -> its toolModels_ index.
+    struct ToolModel {
+        std::vector<EntityVertex> mesh;    // baked rest pose (skin layer baked into verts)
+        std::string               name;    // source .bbmodel filename (for logging)
+        glm::vec3                 center{0.0f}; // AABB centre (for centring a world drop)
+        float                     span = 1.0f;  // largest AABB dimension (for scaling a drop)
+    };
+    std::vector<ToolModel>                  toolModels_;
+    std::unordered_map<uint16_t, size_t>    heldModelByItem_; // item id -> toolModels_ index
+    int                                     handModel_ = -1;  // toolModels_ index of the first-person arm
+
+    // Mob rig from a .bbmodel (ISSUES #13E stage 2): if assets/models/critter exists,
+    // its loaded Skeleton (legs as joints) drives the wandering critters with a
+    // procedural walk clip, replacing the hand-coded biped. Empty -> biped fallback.
+    Skeleton          critterRig_;
+    AnimationClip     critterWalk_;
+    glm::vec3         critterOffset_{0.0f}; // centres the rig on the entity pos (feet at y)
+    bool              hasCritterModel_ = false;
+    void buildModels();
+
+    Critters          critters_;          // passive wandering critters (.bbmodel rig or box fallback)
     void spawnCritters();                 // seed a few around spawn on the surface
 
     // UI state.
@@ -233,6 +278,13 @@ private:
     // running. Declared last so it is destroyed first — its destructor joins the
     // task while world_/worldRenderer_ are still alive.
     std::future<std::vector<glm::ivec3>> relightFuture_;
+    // The in-flight background strip pregeneration (World::pregenStrip): the next
+    // entering edge column's chunks, generated off-thread so the window step itself
+    // is just a swap (the per-boundary frame spike was this generation). Reads only
+    // the immutable generator + save files, so it may overlap the relight — but the
+    // window must not move while it runs (all recenter paths are gated on it).
+    // Declared last, like relightFuture_, so its destructor joins first.
+    std::future<World::PregenStrip> pregenFuture_;
 };
 
 } // namespace vg

@@ -141,6 +141,7 @@ DayNight::DayNight(const std::string& skyFile, const Palette& palette) {
     sunIntensity_   = num("sunIntensity", sunIntensity_);
     exposure_       = num("exposure", exposure_);
     sunsetStrength_ = num("sunsetStrength", sunsetStrength_);
+    duskBrightness_ = std::max(0.0f, num("duskBrightness", duskBrightness_));
     dayVariation_   = std::max(0.0f, num("dayVariation", dayVariation_));
 
     // Multi-band sunset (issue #10 A): ozone, cloud dusk glow, and the per-day
@@ -358,6 +359,14 @@ DayNight::SkyState DayNight::state() const {
             glm::mix(sunlightSunset_ * warmTint, sunlightDayJ, smoothstepf(0.05f, 0.35f, elev)),
             day);
     }
+    // Temper the dusk blackout: the raw day->moonlight terrain blend drops fast as
+    // the sun crosses the horizon, so the ground goes near-black under a still-bright
+    // dusk sky. Lift the terrain light + ambient through the sunset band (peaks at
+    // the horizon, fades to nothing by full day / full night, so noon and deep night
+    // are untouched). duskBrightness_ == 0 restores the old, steeper falloff.
+    const float duskLift = 1.0f + duskBrightness_ * sunset;
+    s.lightColor *= duskLift;
+    s.ambient    *= duskLift;
     // Night sky-light scales with the moon's phase: a full moon lights the ground,
     // a new moon leaves it near-black (issue #10 F).
     s.skyIntensity = glm::mix(moonIntensity_ * moonLit, 1.0f, day);

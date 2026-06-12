@@ -35,11 +35,14 @@ public:
     struct Draw {
         const std::vector<EntityVertex>* mesh;  // not owned; valid for the record call
         glm::mat4                        model; // world transform of the whole rig
+        uint32_t                         useSkin = 0; // 0 = block atlas, 1 = skin atlas
     };
 
+    // `textureView/Sampler` is the block atlas (entities reusing block textures);
+    // `skinView/Sampler` is the Blockbench-model skin atlas (its own PNG layers).
     EntityRenderer(VulkanContext& ctx, VkRenderPass renderPass, uint32_t framesInFlight,
                    const std::string& shaderDir, VkImageView textureView,
-                   VkSampler textureSampler);
+                   VkSampler textureSampler, VkImageView skinView, VkSampler skinSampler);
     ~EntityRenderer();
 
     EntityRenderer(const EntityRenderer&) = delete;
@@ -62,7 +65,8 @@ private:
 
     void createPipeline(VkRenderPass renderPass, const std::string& shaderDir);
     void createUniformBuffers(uint32_t n);
-    void createDescriptorSets(uint32_t n, VkImageView view, VkSampler sampler);
+    void createDescriptorSets(uint32_t n, VkImageView view, VkSampler sampler,
+                              VkImageView skinView, VkSampler skinSampler);
     VkShaderModule loadShader(const std::string& path) const;
 
     // Per-frame host-visible vertex buffer, sized to kMaxVerts up front so it is

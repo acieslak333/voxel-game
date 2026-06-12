@@ -60,11 +60,12 @@ public:
     void line(const glm::vec2& a, const glm::vec2& b, float thickness,
               const glm::vec4& color);
 
-    // An isometric block icon centred at (cx, cy): three textured rhombus faces
-    // (top, left, right) sampling the block texture array. `topLayer` textures the
-    // top face, `sideLayer` the two side faces (darkened differently for depth).
-    // `r` is the half-width of the cube's bounding box (icon spans 2r each way).
-    void isoCube(float cx, float cy, float r, uint32_t topLayer, uint32_t sideLayer);
+    // An inventory item icon centred at (cx, cy): a flat sprite of the item's
+    // prerendered 16x16 icon layer (assets/textures/icons/<name>.png — an
+    // isometric cube for blocks, an upright sprite for tools/plants; see
+    // scripts/gen_icons.py and BlockRegistry::iconLayer). `r` is the half-extent,
+    // so the icon spans 2r each way (matching the old runtime isoCube sizing).
+    void itemIcon(float cx, float cy, float r, uint32_t iconLayer);
     void label(float x, float y, const std::string& s, float scale, const glm::vec4& color);
     void labelCentered(float cx, float y, const std::string& s, float scale,
                        const glm::vec4& color);

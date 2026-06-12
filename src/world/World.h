@@ -4,6 +4,7 @@
 #include "world/Chunk.h"
 #include "world/Noise.h"
 #include "world/Shape.h"
+#include "world/Feature.h"
 #include "world/Structure.h"
 #include "world/TerrainGenerator.h"
 #include "world/WorldConfig.h"
@@ -139,6 +140,31 @@ public:
     std::vector<glm::ivec3> recenter(int centerChunkX, int centerChunkZ,
                                      std::vector<glm::ivec4>& relightBoxesOut);
 
+    // --- Background strip pregeneration (streaming) ---------------------------
+    // Generating the entering edge columns is the expensive part of a window step
+    // (~90ms of noise/features even in parallel) and recenter() runs it on the
+    // main thread — the per-boundary frame spike. pregenStrip() does ONLY that
+    // generation, into staging chunks, without touching the window: it reads just
+    // the immutable generator + save files, so it is SAFE on a background thread
+    // while the game renders (the caller must not move the window or write save
+    // files for the entering columns while it runs — see App's orchestration).
+    // recenterWithStrip() then performs the single column step the strip was made
+    // for by MOVING the staged chunks into their ring slots (a few ms of memcpy)
+    // — byte-identical to generating them in place. If the strip no longer
+    // matches the step needed (the player turned around), it returns empty and
+    // the caller simply pregens the right strip next cycle.
+    struct PregenStrip {
+        bool       valid  = false;
+        int        dir    = 0;     // +1/-1 along the axis
+        bool       alongX = true;
+        glm::ivec2 origin{0};      // window origin (x,z) the strip was computed for
+        std::vector<Chunk> chunks; // entering columns x chunksY, edge order
+    };
+    [[nodiscard]] PregenStrip pregenStrip(int dir, bool alongX) const;
+    std::vector<glm::ivec3> recenterWithStrip(int centerChunkX, int centerChunkZ,
+                                              PregenStrip&& strip,
+                                              std::vector<glm::ivec4>& relightBoxesOut);
+
     // Flood-relight the boxes recorded by recenter() and append every chunk whose
     // light changed to `dirty` (then dedups it). SAFE to run on a background thread:
     // it only reads the just-generated edge chunks and writes the edge light slab,
@@ -168,6 +194,13 @@ private:
     // chunks load from disk instead. Each call writes only its own ring slots, so
     // distinct columns generate in parallel safely.
     void generateColumn(int cx, int cz);
+    // The actual column generation, writing through caller-provided destinations:
+    // stack[cy] = the chunk to fill, dirtyFlags[cy] = its dirty flag to clear.
+    // generateColumn() passes the ring slots; pregenStrip() passes staging chunks
+    // — which is why this is const (it touches NO window state, so it can run on
+    // a background thread while the main thread reads the window).
+    void generateColumnInto(int cx, int cz, Chunk* const* stack,
+                            uint8_t* const* dirtyFlags) const;
 
     // (Re)compute the sky-light field from the current blocks (flood fill from
     // sky-exposed columns). Called after generation and after every edit.
@@ -189,8 +222,10 @@ private:
     // dir +/-1 along X (alongX) or Z: generate the entering edge column and record
     // its relight box into `relightBoxes` (the flood is deferred to relightBoxes()),
     // appending the dirtied chunks to `dirty`.
+    // `strip`, when non-null, is a matching pregenerated edge (pregenStrip): its
+    // chunks are moved into the ring slots instead of being generated here.
     void shiftColumn(int dir, bool alongX, std::vector<glm::ivec3>& dirty,
-                     std::vector<glm::ivec4>& relightBoxes);
+                     std::vector<glm::ivec4>& relightBoxes, PregenStrip* strip = nullptr);
     // Relight both light fields inside the block-box [x0,x1] x [z0,z1] (full height)
     // and append every chunk whose light changed to `dirty` (diffed vs a snapshot).
     void relightBox(int x0, int x1, int z0, int z1, std::vector<glm::ivec3>& dirty);
@@ -240,6 +275,8 @@ private:
     Noise         caveNoise_;     // 3D noise for carving cave tunnels
     TerrainGenerator gen_;        // data-driven shape + biome pipeline (assets/biomes.yaml)
     StructureSet     structures_; // hand-authored templates stamped on land (assets/structures/)
+    Noise            featureNoise_; // 3D noise for procedural-feature noise/shell fills
+    FeatureSet       features_;   // procedural scatter objects (assets/features/)
     std::vector<Chunk>   chunks_;     // flat ring buffer, indexed by chunkIndex()
     std::vector<uint8_t> skyLight_;   // per-block sky light, indexed by lightIndex()
     std::vector<uint8_t> blockLight_; // per-block emitted light, same indexing
@@ -266,6 +303,7 @@ private:
     // Flora expansion: extra ground plants, scattered by biome `plant:` theme.
     uint16_t tallGrassId_, fernId_, flowerRedId_, flowerYellowId_,
              redMushroomId_, cactusId_;
+    uint16_t vineId_, lilypadId_; // hanging vines (cross) + lilypads (flat) — #13F
     uint16_t waterId_;  // sea-level liquid fill
     uint16_t lavaId_;   // deep lava
     // Ores (replace stone in veins; see assets/world.yaml `ores`).

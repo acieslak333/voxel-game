@@ -2,6 +2,7 @@
 
 #include "render/VulkanContext.h"
 
+#include <algorithm>
 #include <array>
 #include <fstream>
 #include <stdexcept>
@@ -45,8 +46,9 @@ struct PushConstants {
     glm::vec4 camPos;
     glm::vec4 fogColor;
     glm::vec4 fogParams;
-    float     lowRes[2];
+    float     noise[2];  // x = dark-grain max opacity (0 = off), y = time (s)
     float     submerged; // 0 = above water, 1 = camera underwater
+    float     pixel;     // grain cell size in screen px (= pixelate block size)
 };
 } // namespace
 
@@ -252,9 +254,13 @@ void CompositeRenderer::record(VkCommandBuffer cmd, VkExtent2D screen, VkExtent2
     pc.camPos      = fog.camPos;
     pc.fogColor    = fog.color;
     pc.fogParams   = fog.params;
-    pc.lowRes[0]   = static_cast<float>(lowRes.width);
-    pc.lowRes[1]   = static_cast<float>(lowRes.height);
+    pc.noise[0]    = fog.noiseAmount;
+    pc.noise[1]    = fog.noiseTime;
     pc.submerged   = fog.submerged;
+    // Screen px per offscreen texel == the pixelate factor, so the grain cells line
+    // up with the chunky upscaled blocks rather than being finer 1-px static.
+    pc.pixel       = static_cast<float>(screen.width) /
+                     static_cast<float>(std::max(1u, lowRes.width));
     vkCmdPushConstants(cmd, pipelineLayout_, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pc), &pc);
 
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout_, 0, 1, &set_,

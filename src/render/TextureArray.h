@@ -30,9 +30,14 @@ class VulkanContext;
 // -----------------------------------------------------------------------------
 class TextureArray {
 public:
-    // Loads `filenames` (resolved relative to `textureDir`) into the array.
+    // Loads `filenames` (resolved relative to `textureDir`) into the array. All
+    // files must share dimensions.
     TextureArray(VulkanContext& ctx, const std::vector<std::string>& filenames,
                  const std::string& textureDir);
+    // In-memory: each `layers[i]` is a width*height RGBA8 image (caller-resized so
+    // they all match). For atlases built from arbitrary-size source images.
+    TextureArray(VulkanContext& ctx, const std::vector<std::vector<unsigned char>>& layers,
+                 int width, int height);
     ~TextureArray();
 
     TextureArray(const TextureArray&) = delete;
@@ -42,6 +47,10 @@ public:
     [[nodiscard]] VkSampler   sampler() const { return sampler_; }
 
 private:
+    // Stage `pixels` (layerCount tightly-packed width*height RGBA8 images) into the
+    // device-local array image + mip chain. Shared by both constructors.
+    void uploadPixels(const std::vector<unsigned char>& pixels, int width, int height,
+                      uint32_t layerCount);
     void createSampler();
     void generateMipmaps(int width, int height, uint32_t layerCount);
     static uint32_t mipLevelsFor(int width, int height);

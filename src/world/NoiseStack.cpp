@@ -18,7 +18,8 @@ float NoiseStack::value(float x, float z) const {
     float sum = 0.0f, total = 0.0f;
     for (const Entry& e : entries_) {
         const Layer& c = e.cfg;
-        const float v = e.noise.fbm((x + c.offX) * c.frequency, (z + c.offZ) * c.frequency,
+        const float v = e.noise.fbm((x + c.offX + e.baseX) * c.frequency,
+                                    (z + c.offZ + e.baseZ) * c.frequency,
                                     c.octaves, c.lacunarity, c.gain);
         sum   += c.weight * shape(c.type, v);
         total += std::fabs(c.weight);
@@ -30,8 +31,10 @@ float NoiseStack::value(float x, float y, float z) const {
     float sum = 0.0f, total = 0.0f;
     for (const Entry& e : entries_) {
         const Layer& c = e.cfg;
-        const float v = e.noise.fbm((x + c.offX) * c.frequency, y * c.frequency,
-                                    (z + c.offZ) * c.frequency, c.octaves, c.lacunarity, c.gain);
+        const float v = e.noise.fbm((x + c.offX + e.baseX) * c.frequency,
+                                    (y + e.baseY) * c.frequency,
+                                    (z + c.offZ + e.baseZ) * c.frequency,
+                                    c.octaves, c.lacunarity, c.gain);
         sum   += c.weight * shape(c.type, v);
         total += std::fabs(c.weight);
     }

@@ -11,6 +11,9 @@
 #include <algorithm>
 #include <array>
 #include <cstring>
+#include <chrono>
+#include <cstdio>
+#include <cstdlib>
 #include <execution>
 #include <iostream>
 #include <stdexcept>
@@ -124,6 +127,15 @@ WorldRenderer::WorldRenderer(VulkanContext& ctx, VkRenderPass renderPass,
     if (world_.streaming() && world_.streamWorkers() > 0) {
         startWorkers(world_.streamWorkers());
     }
+    // Hand the outer rings buildMeshes() skipped to the streaming pipeline (worker
+    // pool, or the main-thread backlog without workers). streamPump() pumps at a
+    // boosted budget until this initial backlog drains.
+    if (!deferredStartup_.empty()) {
+        streamRemesh(deferredStartup_);
+        deferredStartup_.clear();
+        deferredStartup_.shrink_to_fit();
+        startupMelt_ = true;
+    }
 }
 
 WorldRenderer::~WorldRenderer() {
@@ -220,7 +232,7 @@ void WorldRenderer::installMesh(int cx, int cy, int cz, MeshData&& mesh, bool de
     // Main-thread immediate path (one GPU submit+wait in createDeviceLocal) — fine
     // for the rare, small sync remeshes (block edits, falloff). The streaming path
     // uses installMeshBatch(). Vertices + indices share ONE allocation (halves the
-    // device allocation count vs a buffer each — see WORLD_GEN_AGENT_TIPS §5).
+    // device allocation count vs a buffer each — see docs/WORLD_GEN_AGENT_TIPS.md §5).
     if (mesh.empty()) {
         swapChunkBuffers(cx, cy, cz, Buffer{}, 0, 0, 0, 0, 0, deferOldBuffers);
         return;
@@ -322,16 +334,38 @@ void WorldRenderer::buildMeshes() {
     // bulk of startup. greedyMesh() only READS the world, so mesh every chunk in
     // parallel into CPU mesh data first, then install serially (Vulkan is main-
     // thread only). The window is generated at origin {0,0,0} at construction.
+    // When streaming, only the columns within kCoreRadius of the window centre
+    // (where the player spawns) are meshed + uploaded synchronously here; the
+    // outer rings are handed to the streaming pipeline at the end of the ctor
+    // (nearest-first) and melt in over the first frames — the same machinery a
+    // window recenter uses. The full window still fills in either way; startup
+    // just stops paying ~85% of the mesh+upload bill before the first frame.
+    constexpr int kCoreRadius = 5;
+    const glm::ivec3 c0 = counts_ / 2;
     std::vector<glm::ivec3> coords;
     coords.reserve(meshes_.size());
     for (int cz = 0; cz < counts_.z; ++cz) {
         for (int cy = 0; cy < counts_.y; ++cy) {
             for (int cx = 0; cx < counts_.x; ++cx) {
-                coords.push_back({cx, cy, cz});
+                const bool core = std::max(std::abs(cx - c0.x), std::abs(cz - c0.z)) <=
+                                  kCoreRadius;
+                if (world_.streaming() && !core) {
+                    deferredStartup_.push_back({cx, cy, cz});
+                } else {
+                    coords.push_back({cx, cy, cz});
+                }
             }
         }
     }
+    // Nearest columns first, so the melt-in grows outward from the player.
+    std::sort(deferredStartup_.begin(), deferredStartup_.end(),
+              [c0](const glm::ivec3& a, const glm::ivec3& b) {
+                  const int da = std::max(std::abs(a.x - c0.x), std::abs(a.z - c0.z));
+                  const int db = std::max(std::abs(b.x - c0.x), std::abs(b.z - c0.z));
+                  return da < db;
+              });
     std::vector<MeshData> meshed(coords.size());
+    const auto _t0 = std::chrono::steady_clock::now();
     std::transform(std::execution::par, coords.begin(), coords.end(), meshed.begin(),
                    [this](const glm::ivec3& c) {
                        return ChunkMesher::greedyMesh(
@@ -339,6 +373,13 @@ void WorldRenderer::buildMeshes() {
                            makeSampler(c.x, c.y, c.z), makeLightSampler(c.x, c.y, c.z), true,
                            c * kChunkSize, makeTintSampler(c.x, c.y, c.z));
                    });
+    const bool _timeMesh = std::getenv("VG_MESH_TIME") != nullptr;
+    const auto _t1 = std::chrono::steady_clock::now();
+    if (_timeMesh) {
+        const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(_t1 - _t0).count();
+        std::printf("[mesh] parallel greedyMesh: %lldms (%zu chunks)\n",
+                    static_cast<long long>(ms), coords.size());
+    }
 
     // Upload in slices: record every chunk's staging->device copy into ONE command
     // buffer and submit+wait once per slice, instead of installMesh()'s submit+wait
@@ -376,8 +417,17 @@ void WorldRenderer::buildMeshes() {
         }
         ctx_.endSingleTimeCommands(cmd); // one submit+wait for the whole slice
     }
+    if (_timeMesh) {
+        const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            std::chrono::steady_clock::now() - _t1).count();
+        std::printf("[mesh] GPU upload: %lldms\n", static_cast<long long>(ms));
+    }
     std::cout << "[world] meshed " << drawnChunks_ << " non-empty chunks, "
-              << totalTriangles_ << " triangles\n";
+              << totalTriangles_ << " triangles";
+    if (!deferredStartup_.empty()) {
+        std::cout << " (" << deferredStartup_.size() << " outer chunks streaming in)";
+    }
+    std::cout << "\n";
 }
 
 void WorldRenderer::remeshChunk(int cx, int cy, int cz) {
@@ -558,8 +608,17 @@ void WorldRenderer::processMeshResults(int budget) {
     std::vector<MeshResult> batch;
     batch.reserve(static_cast<size_t>(budget));
     {
+        // Only results with geometry count against the budget — an empty result
+        // (an all-air chunk) costs no buffer build or upload, and most of a
+        // freshly streamed window edge is open sky. Letting empties ride free
+        // keeps the budget meaning "uploads per frame", which is the cost it
+        // actually bounds.
         std::lock_guard<std::mutex> lk(resultMutex_);
-        while (static_cast<int>(batch.size()) < budget && !resultQueue_.empty()) {
+        int nonEmpty = 0;
+        while (nonEmpty < budget && !resultQueue_.empty()) {
+            if (!resultQueue_.front().data.empty()) {
+                ++nonEmpty;
+            }
             batch.push_back(std::move(resultQueue_.front()));
             resultQueue_.pop_front();
         }
@@ -585,6 +644,25 @@ void WorldRenderer::streamRemesh(const std::vector<glm::ivec3>& chunks) {
 }
 
 void WorldRenderer::streamPump(int budget) {
+    // While the deferred startup rings are still melting in, pump well above the
+    // steady-state budget: the per-frame cost is a few extra buffer uploads, and
+    // it's the first seconds after launch — filling the view fast matters more
+    // than a perfectly level frame time. Back to the caller's budget for good
+    // once the initial backlog has drained.
+    if (startupMelt_) {
+        bool drained;
+        if (!workers_.empty()) {
+            std::lock_guard<std::mutex> lk(resultMutex_);
+            drained = jobsOutstanding_.load() == 0 && resultQueue_.empty();
+        } else {
+            drained = pendingRemesh_.empty();
+        }
+        if (drained) {
+            startupMelt_ = false;
+        } else {
+            budget = std::max(budget, 64);
+        }
+    }
     if (!workers_.empty()) {
         processMeshResults(budget);
     } else {

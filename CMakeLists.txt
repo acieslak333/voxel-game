@@ -1,7 +1,7 @@
-# =============================================================================
+﻿# =============================================================================
 #  Voxel Survival Game - top-level build script
 # =============================================================================
-#  Design goals (see AGENT_README.md):
+#  Design goals (see docs/AGENT_README.md):
 #    * Cross-platform (Windows / Linux / macOS).
 #    * Single `cmake` + build command on a clean machine. All third-party
 #      libraries are pulled with FetchContent so there is nothing to install
@@ -126,7 +126,7 @@ endif()
 
 # -----------------------------------------------------------------------------
 #  GLSL -> SPIR-V shader compiler
-#    1. Prefer a compiler already on the system (glslc or glslangValidator —
+#    1. Prefer a compiler already on the system (glslc or glslangValidator â€”
 #       both ship with the Vulkan SDK).
 #    2. Otherwise build glslang from source so the project is fully
 #       self-contained (no SDK required just to compile shaders).
@@ -240,6 +240,7 @@ add_executable(voxelgame
     src/world/BlockRegistry.cpp
     src/world/ChunkMesher.cpp
     src/world/Noise.cpp
+    src/world/Feature.cpp
     src/world/NoiseStack.cpp
     src/world/Raycast.cpp
     src/world/Shape.cpp
@@ -254,6 +255,7 @@ add_executable(voxelgame
     src/player/ChestStore.cpp
     src/entity/ItemEntity.cpp
     src/entity/Armature.cpp
+    src/entity/BlockbenchModel.cpp
     src/entity/Particles.cpp
     src/entity/Critters.cpp
 )

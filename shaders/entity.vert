@@ -18,6 +18,7 @@ layout(set = 0, binding = 0) uniform CameraUBO {
 // transforms are already baked into inPos on the CPU).
 layout(push_constant) uniform Push {
     mat4 model;
+    uint useSkin; // 0 = sample the block atlas (binding 1), 1 = the skin atlas (binding 2)
 } push;
 
 layout(location = 0) out vec3      fragNormal;

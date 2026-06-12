@@ -191,6 +191,12 @@ private:
     float     sunIntensity_ = 18.0f;             // HDR sun radiance scale
     float     exposure_     = 0.4f;              // sky tonemap exposure
     float     sunsetStrength_ = 1.3f;            // sun-path filter exponent
+    // Tempers how dark the ground gets through dusk. The day->moonlight terrain
+    // blend collapses fast as the sun crosses the horizon, blacking the ground out
+    // under a still-bright dusk sky. This lifts terrain light + ambient through the
+    // sunset band (peaks at the horizon, fades to 0 by full day/night). 0 = the old
+    // steep falloff; ~0.45 keeps a gentle dusk glow. Fraction, so 0.45 = +45%.
+    float     duskBrightness_ = 0.6f;
     glm::vec3 dayZenithRef_{};                   // yaml dayZenith: tint reference
 
     float t_          = 9.0f / 24.0f; // fraction of a day [0,1)

@@ -44,6 +44,18 @@ constexpr float kWaterHorizontalScale = 0.62f; // horizontal speed multiplier
 // Drowning: breath drains while the head is submerged; once empty you take HP/s.
 constexpr float kAirRefillRate     = 4.0f; // breath/s recovered with the head out
 constexpr float kDrownDamagePerSec = 4.0f; // HP/s once breath hits 0
+
+// --- Camera feel (smoothing, inertia, bob) ----------------------------------
+// Exponential rates: higher = snappier, lower = softer/slower. ~9 reaches ~85% in
+// ~0.22s (a gentle glide rather than a snap).
+constexpr float kMoveAccel      = 9.0f;  // horizontal velocity ease toward target
+constexpr float kStepSmoothRate = 9.0f;  // camera ease over an auto-step / small drop
+// View bob: subtle + soft. Vertical sways at twice the lateral frequency (foot-fall
+// cadence); phase advances with distance travelled so it tracks speed. Blocks.
+constexpr float kBobRamp     = 6.0f;   // how gently the bob fades in/out with motion
+constexpr float kBobPerBlock = 1.8f;   // bob-phase radians per block walked (slower cadence)
+constexpr float kBobVert     = 0.028f; // vertical bob amplitude (small)
+constexpr float kBobHoriz    = 0.020f; // lateral bob amplitude (small)
 } // namespace
 
 PlayerController::PlayerController(glm::vec3 feetPosition) : feet_(feetPosition) {
@@ -51,14 +63,18 @@ PlayerController::PlayerController(glm::vec3 feetPosition) : feet_(feetPosition)
 }
 
 void PlayerController::syncCameraToBody() {
+    // Snap the smoothed eye to the true eye (used for spawn/teleport/free-fly, where
+    // there's nothing to ease). The walking path eases camEyeY_ itself, see update().
     const float eye = kEyeHeight - (sneaking_ ? kCrouchDrop : 0.0f);
-    camera_.position = feet_ + glm::vec3(0.0f, eye, 0.0f);
+    camEyeY_ = feet_.y + eye;
+    camera_.position = glm::vec3(feet_.x, camEyeY_, feet_.z);
 }
 
 void PlayerController::teleport(glm::vec3 feet) {
     feet_ = feet;
     velocity_ = glm::vec3(0.0f);
     air_ = maxAir_; // surface / respawn -> full breath
+    bobAmt_ = 0.0f; // no bob mid-jump after a teleport/respawn
     syncCameraToBody();
 }
 
@@ -131,9 +147,9 @@ void PlayerController::update(float dt, const InputState& input) {
     // wins over sprint. Not while swimming (you tread water, not crouch).
     sneaking_ = input.sneak && !bodyInWater;
 
-    // Horizontal velocity is set directly from input (no momentum, which feels
-    // responsive for a blocky game). Swimming damps it. Vertical velocity is driven
-    // by gravity, weakened by buoyancy while submerged.
+    // Horizontal velocity eases toward the input-driven target — a small inertia so
+    // starting/stopping/turning ramps over ~0.12s instead of snapping, while staying
+    // snappy. Swimming damps it. Vertical velocity is gravity (buoyant when submerged).
     glm::vec3 wish = camera_.forwardHorizontal() * input.move.y +
                      camera_.rightHorizontal() * input.move.x;
     if (glm::dot(wish, wish) > 0.0f) {
@@ -143,8 +159,9 @@ void PlayerController::update(float dt, const InputState& input) {
                             : (input.sprint ? kSprintSpeed : kWalkSpeed);
     speed *= speedMul_;
     if (bodyInWater) speed *= kWaterHorizontalScale;
-    velocity_.x = wish.x * speed;
-    velocity_.z = wish.z * speed;
+    const float accelF = 1.0f - std::exp(-dt * kMoveAccel);
+    velocity_.x += (wish.x * speed - velocity_.x) * accelF;
+    velocity_.z += (wish.z * speed - velocity_.z) * accelF;
 
     if (bodyInWater) {
         // Buoyant, damped vertical motion: weak gravity, exponential drag toward a
@@ -232,7 +249,33 @@ void PlayerController::update(float dt, const InputState& input) {
         heal((kRegenRate + regenBonus_) * dt);
     }
 
-    syncCameraToBody();
+    // --- Camera: smooth small vertical steps, snap big ones, add view bob --------
+    // The body steps onto a slab/stair (or drops off one) in a single frame. Ease the
+    // rendered eye toward the true eye for those small grounded steps so they read
+    // smoothly; snap for jumps/falls/teleports (a large diff or being airborne) so
+    // they stay crisp.
+    const float eye      = kEyeHeight - (sneaking_ ? kCrouchDrop : 0.0f);
+    const float trueEyeY = feet_.y + eye;
+    const float diff     = trueEyeY - camEyeY_;
+    if (wasGrounded && std::fabs(diff) <= kStepHeight + kCrouchDrop + 0.05f) {
+        camEyeY_ += diff * (1.0f - std::exp(-dt * kStepSmoothRate));
+    } else {
+        camEyeY_ = trueEyeY; // jump / fall / first frame: no lag
+    }
+
+    // View bob: a subtle sway that ramps in with horizontal speed while grounded and
+    // out when you stop. Vertical at twice the lateral cadence (foot-falls); the phase
+    // advances with distance so it tracks walk/sprint speed. Off => bobAmt_ decays to 0.
+    const float hspeed    = std::sqrt(velocity_.x * velocity_.x + velocity_.z * velocity_.z);
+    const float targetBob = (viewBob_ && onGround_) ? std::min(hspeed / kWalkSpeed, 1.3f) : 0.0f;
+    bobAmt_ += (targetBob - bobAmt_) * (1.0f - std::exp(-dt * kBobRamp));
+    if (hspeed > 0.1f) bobPhase_ += hspeed * dt * kBobPerBlock;
+    glm::vec3 bob(0.0f);
+    if (bobAmt_ > 1e-3f) {
+        bob.y = std::sin(bobPhase_ * 2.0f) * kBobVert * bobAmt_;
+        bob += camera_.rightHorizontal() * (std::sin(bobPhase_) * kBobHoriz * bobAmt_);
+    }
+    camera_.position = glm::vec3(feet_.x, camEyeY_, feet_.z) + bob;
 }
 
 bool PlayerController::hasGroundSupport() const {
