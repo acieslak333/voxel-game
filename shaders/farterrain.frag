@@ -10,12 +10,13 @@ layout(set = 0, binding = 0) uniform CameraUBO {
     vec4 sunCol;  // rgb: linear light tint, a: sky-light intensity
     vec4 camPos;  // xyz: camera world pos, w: haze fade-start distance
     vec4 haze;    // rgb: horizon haze colour, w: haze fade-end distance
+    vec4 lodFade; // x: impostor dissolve-near dist, y: dissolve band
 } cam;
 
 layout(location = 0) in vec3      fragNormal;
 layout(location = 1) in vec2      fragUV;
 layout(location = 2) in flat uint fragLayer;
-layout(location = 3) in vec3      fragTint;
+layout(location = 3) in vec4      fragTint;  // rgb tint, a=0 marks a tree impostor
 layout(location = 4) in vec3      fragWorld;
 
 layout(location = 0) out vec4 outColor;
@@ -33,7 +34,20 @@ void main() {
     // matches the near terrain with no brightness step at the LOD seam: the same
     // directional sun/ambient term, then the same 7-level dithered shadow ramp from
     // the dark-night-sky floor (kShadow) up to the fully-lit surface colour.
-    vec3 albedo = texture(texArray, vec3(fragUV, float(fragLayer))).rgb * fragTint;
+    int bx = int(gl_FragCoord.x) & 3;
+    int by = int(gl_FragCoord.y) & 3;
+    float bayer = (kBayer[by * 4 + bx] + 0.5) / 16.0;
+    float dist = length(fragWorld - cam.camPos.xyz);
+
+    // Tree-impostor screen-door dissolve (fragTint.a == 0 marks an impostor): as an
+    // impostor nears the window edge the real voxel tree there takes over, so dither
+    // it away over a band instead of popping the whole solid shape out at once.
+    if (fragTint.a < 0.5) {
+        float gone = 1.0 - smoothstep(cam.lodFade.x, cam.lodFade.x + cam.lodFade.y, dist);
+        if (bayer < gone) discard;
+    }
+
+    vec3 albedo = texture(texArray, vec3(fragUV, float(fragLayer))).rgb * fragTint.rgb;
 
     vec3  N   = normalize(fragNormal);
     float ndl = max(dot(N, cam.sunDir.xyz), 0.0);
@@ -42,9 +56,7 @@ void main() {
     vec3  surf = albedo * cam.sunCol.rgb;                 // fully-lit colour
 
     const float kLevels = 7.0;
-    int bx = int(gl_FragCoord.x) & 3;
-    int by = int(gl_FragCoord.y) & 3;
-    float thresh = (kBayer[by * 4 + bx] + 0.5) / 16.0;
+    float thresh = bayer;
     float x = lit * (kLevels - 1.0);
     float level = floor(x) + step(thresh, fract(x)); // dithered quantise
     float litQ = level / (kLevels - 1.0);
@@ -54,7 +66,6 @@ void main() {
     // Distance haze-fade: dissolve the shell into the horizon haze over its outer
     // band so its finite edge never reads as a hard cutoff against the sky. Local
     // to the far shell; the global composite fog still applies on top.
-    float dist = length(fragWorld - cam.camPos.xyz);
     float t = clamp((dist - cam.camPos.w) / max(cam.haze.w - cam.camPos.w, 1.0), 0.0, 1.0);
     t = t * t * (3.0 - 2.0 * t); // smoothstep
     color = mix(color, cam.haze.rgb, t);

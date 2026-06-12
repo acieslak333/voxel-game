@@ -103,8 +103,9 @@ private:
         glm::mat4 proj;
         glm::vec4 sunDir;
         glm::vec4 sunCol;
-        glm::vec4 camPos; // xyz cam, w = haze fade start
-        glm::vec4 haze;   // rgb haze colour, w = haze fade end
+        glm::vec4 camPos;  // xyz cam, w = haze fade start
+        glm::vec4 haze;    // rgb haze colour, w = haze fade end
+        glm::vec4 lodFade; // x = impostor dissolve-near dist, y = dissolve band
     };
 
     // What the shell needs to know about one column (cached per built vertex).
@@ -147,6 +148,7 @@ private:
     bool                   built_ = false;
     uint32_t               meshVersion_ = 0; // bumped each rebuild; gates buffer re-upload
     std::vector<uint32_t>  bufVersion_;       // per-frame buffer: which mesh version it holds
+    float                  fadeNear_ = 0.0f;  // window half-extent: where impostors dissolve
 
     VkDescriptorSetLayout descriptorSetLayout_ = VK_NULL_HANDLE;
     VkPipelineLayout      pipelineLayout_      = VK_NULL_HANDLE;

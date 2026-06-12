@@ -155,6 +155,10 @@ void FarTerrainRenderer::update(const World& world, const glm::vec3& camPos) {
         mesh_ = buildFuture_.get();
         ++meshVersion_; // the buffers now hold a stale mesh — record() re-uploads
     }
+    // Window half-extent: impostors within this distance are about to be replaced by
+    // real voxel trees, so they dissolve there (screen-door fade in record/frag).
+    fadeNear_ = static_cast<float>((world.chunkCounts().x / 2) * Chunk::kSize);
+
     const int base = std::max(1, config_.baseStep);
     const glm::ivec2 c{floorDiv(static_cast<int>(std::floor(camPos.x)), base) * base,
                        floorDiv(static_cast<int>(std::floor(camPos.z)), base) * base};
@@ -335,8 +339,8 @@ std::vector<FarTerrainRenderer::FarVertex> FarTerrainRenderer::buildMesh(const W
                 glm::vec3 p = corners[i], q = corners[(i + 1) % 4];
                 const glm::vec3 t0(p.x, y0, p.z), t1(q.x, y0, q.z);
                 const glm::vec3 u0(p.x, y1, p.z), u1(q.x, y1, q.z);
-                pushTri(t0, t1, u1, trunkLayer_, kNoTint, false);
-                pushTri(t0, u1, u0, trunkLayer_, kNoTint, false);
+                pushTri(t0, t1, u1, trunkLayer_, 0x00FFFFFFu, false); // alpha 0 = impostor
+                pushTri(t0, u1, u0, trunkLayer_, 0x00FFFFFFu, false);
             }
         };
 
@@ -358,7 +362,9 @@ std::vector<FarTerrainRenderer::FarVertex> FarTerrainRenderer::buildMesh(const W
                 const float hh  = hash01(ox, oz, seed ^ 0x7234u); // trunk-height roll
                 const int k = std::clamp(static_cast<int>(oc.treeKind), 0, 4);
                 const uint32_t leaf = leafLayer_[k];
-                const uint32_t tint = packTint(oc.vegTint);
+                // Alpha 0 marks impostor geometry so the shader can screen-door
+                // dissolve it near the window edge (the trunk lambda matches).
+                const uint32_t tint = packTint(oc.vegTint) & 0x00FFFFFFu;
                 const float bx = ox + 0.5f, bz = oz + 0.5f;
                 const float oh = static_cast<float>(oc.height) + 1.0f;
 
@@ -405,7 +411,8 @@ void FarTerrainRenderer::record(VkCommandBuffer cmd, uint32_t frameIndex, VkExte
     if (!config_.enabled || mesh_.empty()) return;
 
     CameraUBO ubo{view, proj, sunDirAmbient, sunColIntensity,
-                  glm::vec4(camPos, fadeStart), glm::vec4(hazeColor, fadeEnd)};
+                  glm::vec4(camPos, fadeStart), glm::vec4(hazeColor, fadeEnd),
+                  glm::vec4(fadeNear_, 56.0f, 0.0f, 0.0f)};
     uniformBuffers_[frameIndex].upload(&ubo, sizeof(ubo));
 
     const size_t n = std::min(static_cast<size_t>(kMaxVerts), mesh_.size());

@@ -23,7 +23,7 @@ layout(location = 4) in vec4 inTint;    // biome/forest tint (RGBA8 -> normalize
 layout(location = 0) out vec3      fragNormal;
 layout(location = 1) out vec2      fragUV;
 layout(location = 2) out flat uint fragLayer;
-layout(location = 3) out vec3      fragTint;
+layout(location = 3) out vec4      fragTint;  // rgb tint, a=0 marks a tree impostor
 layout(location = 4) out vec3      fragWorld;
 
 void main() {
@@ -31,6 +31,6 @@ void main() {
     fragNormal  = inNormal;
     fragUV      = inUV;
     fragLayer   = inLayer;
-    fragTint    = inTint.rgb;
+    fragTint    = inTint;
     fragWorld   = inPos;
 }
