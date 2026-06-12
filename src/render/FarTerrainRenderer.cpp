@@ -65,14 +65,6 @@ FarTerrainRenderer::FarTerrainRenderer(VulkanContext& ctx, VkRenderPass renderPa
     }
     createPipeline(renderPass, shaderDir);
     createUniformBuffers(framesInFlight);
-    vertexBuffers_.reserve(framesInFlight);
-    for (uint32_t i = 0; i < framesInFlight; ++i) {
-        vertexBuffers_.emplace_back(ctx_, kMaxVerts * sizeof(FarVertex),
-                                    VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-                                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                                        VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-    }
-    bufVersion_.assign(framesInFlight, 0); // 0 = no mesh uploaded yet
     createDescriptorSets(framesInFlight, textureView, textureSampler);
 }
 
@@ -153,7 +145,7 @@ void FarTerrainRenderer::update(const World& world, const glm::vec3& camPos) {
     if (buildFuture_.valid() &&
         buildFuture_.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) {
         mesh_ = buildFuture_.get();
-        ++meshVersion_; // the buffers now hold a stale mesh — record() re-uploads
+        uploadMesh(); // rebuild the device-local vertex buffer (retire the old one)
     }
     // Window half-extent: impostors within this distance are about to be replaced by
     // real voxel trees, so they dissolve there (screen-door fade in record/frag).
@@ -404,6 +396,35 @@ std::vector<FarTerrainRenderer::FarVertex> FarTerrainRenderer::buildMesh(const W
     return mesh;
 }
 
+// --- Device buffer upload + retire -------------------------------------------
+
+void FarTerrainRenderer::uploadMesh() {
+    // Retire the current buffer (in-flight frames may still reference it) and build a
+    // fresh device-local one from the new mesh. createDeviceLocal stages + copies +
+    // waits, so it's ready for this frame's draw. Rare (every few blocks), so the
+    // one-off submit is far cheaper than re-fetching ~400k verts from host memory
+    // EVERY frame, which was the far terrain's whole per-frame cost.
+    if (deviceVertCount_ > 0) {
+        retired_.emplace_back(static_cast<int>(framesInFlight_) + 1, std::move(deviceVB_));
+    }
+    deviceVertCount_ = 0;
+    if (mesh_.empty()) {
+        return;
+    }
+    const size_t n = std::min(static_cast<size_t>(kMaxVerts), mesh_.size());
+    deviceVB_ = Buffer::createDeviceLocal(ctx_, mesh_.data(), n * sizeof(FarVertex),
+                                          VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+    deviceVertCount_ = static_cast<uint32_t>(n);
+}
+
+void FarTerrainRenderer::tickRetired() {
+    if (retired_.empty()) return;
+    for (auto& r : retired_) --r.first;
+    retired_.erase(std::remove_if(retired_.begin(), retired_.end(),
+                                  [](const std::pair<int, Buffer>& r) { return r.first <= 0; }),
+                   retired_.end());
+}
+
 // --- Recording ---------------------------------------------------------------
 
 void FarTerrainRenderer::record(VkCommandBuffer cmd, uint32_t frameIndex, VkExtent2D extent,
@@ -411,20 +432,13 @@ void FarTerrainRenderer::record(VkCommandBuffer cmd, uint32_t frameIndex, VkExte
                                 const glm::vec4& sunDirAmbient, const glm::vec4& sunColIntensity,
                                 const glm::vec3& camPos, const glm::vec3& hazeColor,
                                 float fadeStart, float fadeEnd) {
-    if (!config_.enabled || mesh_.empty()) return;
+    tickRetired(); // reap deferred buffer frees whose in-flight frames have completed
+    if (!config_.enabled || deviceVertCount_ == 0) return;
 
     CameraUBO ubo{view, proj, sunDirAmbient, sunColIntensity,
                   glm::vec4(camPos, fadeStart), glm::vec4(hazeColor, fadeEnd),
                   glm::vec4(fadeNear_, 56.0f, 0.0f, 0.0f)};
     uniformBuffers_[frameIndex].upload(&ubo, sizeof(ubo));
-
-    const size_t n = std::min(static_cast<size_t>(kMaxVerts), mesh_.size());
-    // Re-upload into THIS frame's buffer only when it holds a stale mesh — the shell
-    // changes only on a rebuild (every few blocks walked), so most frames just draw.
-    if (bufVersion_[frameIndex] != meshVersion_) {
-        vertexBuffers_[frameIndex].upload(mesh_.data(), n * sizeof(FarVertex));
-        bufVersion_[frameIndex] = meshVersion_;
-    }
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_);
     VkViewport viewport{};
@@ -439,10 +453,10 @@ void FarTerrainRenderer::record(VkCommandBuffer cmd, uint32_t frameIndex, VkExte
     vkCmdSetScissor(cmd, 0, 1, &scissor);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout_, 0, 1,
                             &descriptorSets_[frameIndex], 0, nullptr);
-    VkBuffer     vb   = vertexBuffers_[frameIndex].handle();
+    VkBuffer     vb   = deviceVB_.handle();
     VkDeviceSize zero = 0;
     vkCmdBindVertexBuffers(cmd, 0, 1, &vb, &zero);
-    vkCmdDraw(cmd, static_cast<uint32_t>(n), 1, 0, 0);
+    vkCmdDraw(cmd, deviceVertCount_, 1, 0, 0);
 }
 
 // --- Vulkan setup (mirrors EntityRenderer) -----------------------------------

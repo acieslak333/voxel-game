@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <future>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace vg {
@@ -124,6 +125,8 @@ private:
                                                    glm::ivec4 winBox) const;
     [[nodiscard]] Surf sampleSurf(const World& world, int wx, int wz) const;
 
+    void uploadMesh();   // (re)build the device-local vertex buffer from mesh_
+    void tickRetired();  // age + free deferred old vertex buffers (once per frame)
     void createPipeline(VkRenderPass renderPass, const std::string& shaderDir);
     void createUniformBuffers(uint32_t n);
     void createDescriptorSets(uint32_t n, VkImageView view, VkSampler sampler);
@@ -148,8 +151,6 @@ private:
     std::future<std::vector<FarVertex>> buildFuture_; // background rebuild in flight
     glm::ivec2             lastCenter_{1 << 30, 1 << 30}; // centre of the launched build
     bool                   built_ = false;
-    uint32_t               meshVersion_ = 0; // bumped each rebuild; gates buffer re-upload
-    std::vector<uint32_t>  bufVersion_;       // per-frame buffer: which mesh version it holds
     float                  fadeNear_ = 0.0f;  // window half-extent: where impostors dissolve
 
     VkDescriptorSetLayout descriptorSetLayout_ = VK_NULL_HANDLE;
@@ -157,7 +158,13 @@ private:
     VkPipeline            pipeline_            = VK_NULL_HANDLE;
 
     std::vector<Buffer>          uniformBuffers_;
-    std::vector<Buffer>          vertexBuffers_; // one host-visible buffer per frame
+    // The shell mesh lives in ONE device-local buffer (the GPU re-fetches it every
+    // frame for the draw, so host-visible was far too slow for ~400k verts). It is
+    // rebuilt only when the shell changes (every few blocks); the old buffer is
+    // retired for framesInFlight+1 frames before freeing (in-flight frames may use it).
+    Buffer                       deviceVB_;
+    uint32_t                     deviceVertCount_ = 0;
+    std::vector<std::pair<int, Buffer>> retired_;
     VkDescriptorPool             descriptorPool_ = VK_NULL_HANDLE;
     std::vector<VkDescriptorSet> descriptorSets_;
 };
