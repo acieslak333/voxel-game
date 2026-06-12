@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <fstream>
@@ -90,6 +91,23 @@ FarTerrainRenderer::Surf FarTerrainRenderer::sampleSurf(const World& world, int 
     return s;
 }
 
+int FarTerrainRenderer::outerExtentBlocks(const World& world) const {
+    if (!config_.enabled) return 0;
+    const int base = std::max(1, config_.baseStep);
+    const glm::ivec3 counts = world.chunkCounts();
+    const int windowHalf = (counts.x / 2) * Chunk::kSize;
+    int holeHalf = windowHalf - config_.underlap;
+    if (holeHalf < 0) holeHalf = 0;
+    holeHalf = ((holeHalf + base - 1) / base) * base;
+    int inner = holeHalf;
+    for (int L = 0; L < config_.ringCount; ++L) {
+        const int step = base << L;
+        const int innerL = ((inner + step - 1) / step) * step;
+        inner = innerL + config_.ringCells * step;
+    }
+    return inner; // outermost ring's outer half-extent
+}
+
 void FarTerrainRenderer::update(const World& world, const glm::vec3& camPos) {
     if (!config_.enabled) {
         return;
@@ -102,22 +120,32 @@ void FarTerrainRenderer::update(const World& world, const glm::vec3& camPos) {
         }
         waterResolved_ = true;
     }
+    // Collect a finished background rebuild (swap on the main thread; record() also
+    // runs on the main thread, so mesh_ is never read mid-swap).
+    if (buildFuture_.valid() &&
+        buildFuture_.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) {
+        mesh_ = buildFuture_.get();
+    }
     const int base = std::max(1, config_.baseStep);
     const glm::ivec2 c{floorDiv(static_cast<int>(std::floor(camPos.x)), base) * base,
                        floorDiv(static_cast<int>(std::floor(camPos.z)), base) * base};
-    if (built_ && c == lastCenter_) {
-        return; // hasn't crossed a base cell — the shell is still valid
+    // Kick a rebuild when we've crossed a base cell and none is already in flight.
+    // The generator/registry are immutable, so the worker only reads constant data
+    // — it never races the main thread's chunk/light mutations.
+    if ((!built_ || c != lastCenter_) && !buildFuture_.valid()) {
+        lastCenter_ = c;
+        built_ = true;
+        buildFuture_ = std::async(std::launch::async,
+                                  [this, &world, c] { return buildMesh(world, c); });
     }
-    lastCenter_ = c;
-    built_ = true;
-    buildMesh(world, camPos);
 }
 
-void FarTerrainRenderer::buildMesh(const World& world, const glm::vec3& camPos) {
-    mesh_.clear();
+std::vector<FarTerrainRenderer::FarVertex> FarTerrainRenderer::buildMesh(const World& world,
+                                                                         glm::ivec2 center) const {
+    std::vector<FarVertex> mesh;
     const int base = std::max(1, config_.baseStep);
-    const int centerX = floorDiv(static_cast<int>(std::floor(camPos.x)), base) * base;
-    const int centerZ = floorDiv(static_cast<int>(std::floor(camPos.z)), base) * base;
+    const int centerX = center.x;
+    const int centerZ = center.y;
 
     // Start the shell just outside the voxel window (minus a small underlap so the
     // near chunks always cover the seam). The window is (2*view_radius+1) chunks.
@@ -143,14 +171,14 @@ void FarTerrainRenderer::buildMesh(const World& world, const glm::vec3& camPos) 
 
     auto pushTri = [&](const glm::vec3& p0, const glm::vec3& p1, const glm::vec3& p2,
                        uint32_t layer, uint32_t tint, bool faceUp) {
-        if (mesh_.size() + 3 > kMaxVerts) return;
+        if (mesh.size() + 3 > kMaxVerts) return;
         glm::vec3 n = glm::cross(p1 - p0, p2 - p0);
         const float len = glm::length(n);
         n = len > 1e-6f ? n / len : glm::vec3(0.0f, 1.0f, 0.0f);
         if (faceUp && n.y < 0.0f) n = -n; // top faces always light from above
-        mesh_.push_back({p0, n, glm::vec2(p0.x, p0.z), layer, tint});
-        mesh_.push_back({p1, n, glm::vec2(p1.x, p1.z), layer, tint});
-        mesh_.push_back({p2, n, glm::vec2(p2.x, p2.z), layer, tint});
+        mesh.push_back({p0, n, glm::vec2(p0.x, p0.z), layer, tint});
+        mesh.push_back({p1, n, glm::vec2(p1.x, p1.z), layer, tint});
+        mesh.push_back({p2, n, glm::vec2(p2.x, p2.z), layer, tint});
     };
 
     int inner = holeHalf;
@@ -202,6 +230,7 @@ void FarTerrainRenderer::buildMesh(const World& world, const glm::vec3& camPos) 
             }
         }
     }
+    return mesh;
 }
 
 // --- Recording ---------------------------------------------------------------

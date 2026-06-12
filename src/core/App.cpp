@@ -5,6 +5,7 @@
 #include "world/Raycast.h"
 
 #include <glm/gtc/matrix_transform.hpp>
+#include <yaml-cpp/yaml.h>
 
 #include <algorithm>
 #include <chrono>
@@ -172,6 +173,34 @@ WorldConfig worldConfigWithSettings(const std::string& path, const Settings& s) 
     c.blockFalloff = std::clamp(s.blockFalloff, 1, 15);
     return c;
 }
+
+// Far-terrain LOD knobs, read from an OPTIONAL `far_terrain:` block in world.yaml
+// (any subset of keys; missing keys keep the code defaults). Keys:
+//   enabled (bool) · base_step (int blocks/cell, innermost ring) · ring_cells
+//   (int cells per ring side) · ring_count (int LOD levels) · skirt_depth (float
+//   blocks) · underlap (int blocks the shell reaches under the window) · y_bias
+//   (float; shell sits this far below the surface so near chunks win the seam).
+FarTerrainRenderer::Config farTerrainConfig(const std::string& path) {
+    FarTerrainRenderer::Config c; // sensible defaults if world.yaml has no block
+    try {
+        YAML::Node root = YAML::LoadFile(path);
+        if (const YAML::Node ft = root["far_terrain"]) {
+            if (ft["enabled"])     c.enabled    = ft["enabled"].as<bool>();
+            if (ft["base_step"])   c.baseStep   = ft["base_step"].as<int>();
+            if (ft["ring_cells"])  c.ringCells  = ft["ring_cells"].as<int>();
+            if (ft["ring_count"])  c.ringCount  = ft["ring_count"].as<int>();
+            if (ft["skirt_depth"]) c.skirtDepth = ft["skirt_depth"].as<float>();
+            if (ft["underlap"])    c.underlap   = ft["underlap"].as<int>();
+            if (ft["y_bias"])      c.yBias      = ft["y_bias"].as<float>();
+        }
+    } catch (...) {
+        // Malformed/missing file: keep defaults (the world load already reported it).
+    }
+    c.baseStep  = std::max(1, c.baseStep);
+    c.ringCells = std::clamp(c.ringCells, 2, 256);
+    c.ringCount = std::clamp(c.ringCount, 0, 8);
+    return c;
+}
 } // namespace
 
 std::string App::settingsPath() {
@@ -203,7 +232,7 @@ App::App()
       farTerrain_(context_, renderer_.sceneRenderPass(),
                   static_cast<uint32_t>(Renderer::kMaxFramesInFlight), VG_SHADER_DIR,
                   worldRenderer_.blockTextureView(), worldRenderer_.blockTextureSampler(),
-                  FarTerrainRenderer::Config{}),
+                  farTerrainConfig(std::string(VG_ASSET_DIR) + "/world.yaml")),
       ui_(context_, renderer_.uiRenderPass(),
           static_cast<uint32_t>(Renderer::kMaxFramesInFlight),
           std::string(VG_ASSET_DIR) + "/fonts/ari/" + settings_.font, 32.0f,
@@ -1132,8 +1161,17 @@ void App::run(long maxFrames, const std::string& screenshotPath) {
                                          : static_cast<float>(extent.width) /
                                                static_cast<float>(extent.height);
                 glm::mat4 view = cam.viewMatrix();
+                // Push the far clip plane out to cover the LOD shell (its diagonal
+                // corners reach ~1.5x its Chebyshev extent). Near terrain stays
+                // well within float-depth precision, and the depth-based fog uses
+                // this same proj so it stays consistent.
+                float farPlane = cam.farZ;
+                if (farTerrain_.enabled()) {
+                    const float reach = farTerrain_.outerExtentBlocks(world_) * 1.5f + 48.0f;
+                    farPlane = std::max(farPlane, reach);
+                }
                 glm::mat4 proj = glm::perspective(glm::radians(cam.fovDegrees), aspect,
-                                                  cam.nearZ, cam.farZ);
+                                                  cam.nearZ, farPlane);
                 proj[1][1] *= -1.0f; // flip Y for Vulkan's clip space
 
                 // Sky first (no depth), then the world over it, lit by the same

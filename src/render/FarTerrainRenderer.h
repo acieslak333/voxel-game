@@ -7,6 +7,7 @@
 #include <glm/glm.hpp>
 
 #include <cstdint>
+#include <future>
 #include <string>
 #include <vector>
 
@@ -43,7 +44,7 @@ public:
         bool  enabled    = true;
         int   baseStep   = 4;    // blocks per cell in the innermost ring (>=1)
         int   ringCells  = 14;   // cells from inner to outer edge, per ring side
-        int   ringCount  = 3;    // number of LOD rings (each 2x coarser)
+        int   ringCount  = 4;    // number of LOD rings (each 2x coarser)
         float skirtDepth = 28.0f;// how far ring-boundary skirts drop (blocks)
         int   underlap   = 24;   // blocks the shell reaches back under the window
         float yBias      = 1.5f; // shell sits this far below the true surface so
@@ -60,9 +61,16 @@ public:
 
     [[nodiscard]] bool enabled() const { return config_.enabled; }
 
-    // Rebuild the CPU shell mesh if the player has crossed a base cell since the
-    // last build (cheap, throttled). Samples world.generator()/registry(). No GPU
-    // work — call from the gameplay update.
+    // The shell's outer Chebyshev half-extent in blocks (how far the LOD reaches
+    // from the player). The app uses it to push the scene's far clip plane out so
+    // the distant rings aren't clipped. 0 when disabled.
+    [[nodiscard]] int outerExtentBlocks(const World& world) const;
+
+    // Collect a finished background rebuild and, if the player has crossed a base
+    // cell since the last one, kick a new one. The rebuild samples the immutable
+    // generator/registry on a worker thread (the ~20-30k columnInfo calls would
+    // hitch the frame on the main thread), so update() itself does no heavy work
+    // and no GPU work. Call from the gameplay update.
     void update(const World& world, const glm::vec3& camPos);
 
     // Upload this frame's shell mesh and draw it. Same sun/sky inputs as
@@ -96,9 +104,10 @@ private:
         uint32_t tint;  // packed RGBA8 biome veg tint (0xFFFFFFFF = none)
     };
 
-    void buildMesh(const World& world, const glm::vec3& camPos);
+    // Build and RETURN the shell mesh centred on `center` (base-snapped world
+    // coords). Pure read of the generator/registry — safe to run on a worker.
+    [[nodiscard]] std::vector<FarVertex> buildMesh(const World& world, glm::ivec2 center) const;
     [[nodiscard]] Surf sampleSurf(const World& world, int wx, int wz) const;
-    void emitCell(const World& world, int x0, int z0, int step, bool innerEdge[4]);
 
     void createPipeline(VkRenderPass renderPass, const std::string& shaderDir);
     void createUniformBuffers(uint32_t n);
@@ -115,8 +124,9 @@ private:
     mutable uint32_t waterLayer_ = 0;
     mutable bool     waterResolved_ = false;
 
-    std::vector<FarVertex> mesh_;            // CPU shell, rebuilt on cell crossing
-    glm::ivec2             lastCenter_{1 << 30, 1 << 30}; // last build centre (base-cell snapped)
+    std::vector<FarVertex> mesh_;            // current CPU shell (last finished build)
+    std::future<std::vector<FarVertex>> buildFuture_; // background rebuild in flight
+    glm::ivec2             lastCenter_{1 << 30, 1 << 30}; // centre of the launched build
     bool                   built_ = false;
 
     VkDescriptorSetLayout descriptorSetLayout_ = VK_NULL_HANDLE;
