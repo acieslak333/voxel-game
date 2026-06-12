@@ -129,7 +129,9 @@ private:
     void createDescriptorSets(uint32_t n, VkImageView view, VkSampler sampler);
     VkShaderModule loadShader(const std::string& path) const;
 
-    static constexpr uint32_t kMaxVerts = 1u << 19; // 524288 verts cap (ground + impostors)
+    static constexpr uint32_t kMaxVerts = 1u << 20; // 1048576 verts cap: headroom so a
+                                                    // dense-forest shell + impostors never
+                                                    // hit the cap and silently drop geometry
 
     VulkanContext& ctx_;
     Config         config_;
