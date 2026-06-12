@@ -920,9 +920,19 @@ Core Optimizations:
     - The scene far clip plane is pushed out to cover the shell's diagonal reach
       (fog uses the same proj, stays consistent; near terrain keeps depth precision).
     - Configurable via an OPTIONAL `far_terrain:` block in world.yaml (enabled /
-      base_step / ring_cells / ring_count / skirt_depth / underlap / y_bias);
-      absent keys keep code defaults, so world.yaml is untouched and it can be
-      tuned/disabled without a rebuild.
+      base_step / ring_cells / ring_count / skirt_depth / underlap / y_bias /
+      trees / tree_dist / forest_tint); absent keys keep code defaults, so
+      world.yaml is untouched and it can be tuned/disabled without a rebuild.
+    - **Distant trees + edge fade** (follow-up, commit b78fedc, per "no distant
+      trees / cutoffy" feedback): low-poly 3D tree IMPOSTORS — a 7-gon cone for
+      conifers, an octahedron blob + trunk box for round canopies (~7-16 tris, NOT
+      billboards) — scattered with the EXACT generateColumn tree gate (replicated
+      hash01 vs treeDensity, species/size from treeKind) so they match the real
+      voxel trees and swap in with no pop; skipped inside the loaded window box
+      (snapshotted on the main thread, no recenter() race) so no double-trees.
+      Biome veg tint carried (red maples etc). Ground forest-tints where dense.
+      farterrain.frag dissolves the shell into the horizon haze over its outer
+      ~45% so the finite edge isn't a hard cutoff. Buffer upload version-gated.
     Verified each via flycam + ground `--screenshot` (no Vulkan validation errors;
     distant shell reaches a hazy horizon with matching biomes/water, no seam cracks,
     crisp near terrain). NOTE: pre-existing `--selftest`/`--logictest` failures
