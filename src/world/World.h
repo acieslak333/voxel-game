@@ -42,6 +42,9 @@ public:
     [[nodiscard]] glm::ivec3 chunkOrigin()  const { return originChunk_; }
     [[nodiscard]] glm::ivec3 sizeInBlocks() const { return counts_ * Chunk::kSize; }
     [[nodiscard]] const BlockRegistry& registry() const { return registry_; }
+    // The deterministic terrain generator (pure fn of seed + world coord). The far-
+    // terrain LOD shell samples it directly to mesh ground beyond the loaded window.
+    [[nodiscard]] const TerrainGenerator& generator() const { return gen_; }
     [[nodiscard]] const Chunk& chunk(int cx, int cy, int cz) const;
 
     // The block at world coords; air (the default Block) outside world bounds.

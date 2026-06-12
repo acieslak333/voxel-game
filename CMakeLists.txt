@@ -203,6 +203,8 @@ add_shader(composite.vert)
 add_shader(composite.frag)
 add_shader(entity.vert)
 add_shader(entity.frag)
+add_shader(farterrain.vert)
+add_shader(farterrain.frag)
 add_custom_target(shaders DEPENDS ${SPIRV_OUTPUTS})
 
 # -----------------------------------------------------------------------------
@@ -226,6 +228,7 @@ add_executable(voxelgame
     src/render/Pipeline.cpp
     src/render/WorldRenderer.cpp
     src/render/EntityRenderer.cpp
+    src/render/FarTerrainRenderer.cpp
     src/render/OffscreenTarget.cpp
     src/render/CompositeRenderer.cpp
     src/render/SkyRenderer.cpp

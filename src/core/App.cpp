@@ -200,6 +200,10 @@ App::App()
       entityRenderer_(context_, renderer_.sceneRenderPass(),
                       static_cast<uint32_t>(Renderer::kMaxFramesInFlight), VG_SHADER_DIR,
                       worldRenderer_.blockTextureView(), worldRenderer_.blockTextureSampler()),
+      farTerrain_(context_, renderer_.sceneRenderPass(),
+                  static_cast<uint32_t>(Renderer::kMaxFramesInFlight), VG_SHADER_DIR,
+                  worldRenderer_.blockTextureView(), worldRenderer_.blockTextureSampler(),
+                  FarTerrainRenderer::Config{}),
       ui_(context_, renderer_.uiRenderPass(),
           static_cast<uint32_t>(Renderer::kMaxFramesInFlight),
           std::string(VG_ASSET_DIR) + "/fonts/ari/" + settings_.font, 32.0f,
@@ -1104,6 +1108,9 @@ void App::run(long maxFrames, const std::string& screenshotPath) {
             // edge melts in over several frames; a small budget keeps the per-frame
             // upload (buffer creation) under the frame budget instead of spiking.
             worldRenderer_.streamPump(12);
+            // Far-terrain LOD shell: rebuild the coarse heightmap beyond the window
+            // when the player crosses a base cell (cheap, throttled internally).
+            farTerrain_.update(world_, player_.camera().position);
             dayNight_.advance(dt);     // the sun keeps moving while playing
             clouds_.update(dt, dayNight_); // weather drifts with it
         }
@@ -1146,6 +1153,12 @@ void App::run(long maxFrames, const std::string& screenshotPath) {
                 const glm::vec3 lightCol =
                     glm::mix(sky.lightColor, glm::vec3(lum) * glm::vec3(0.95f, 0.98f, 1.05f),
                              shade * 0.6f);
+                // Far-terrain LOD shell first (background): the coarse distant
+                // ground beyond the voxel window. Drawn before the near chunks so
+                // they occlude it at the seam (it also sits a touch lower — yBias).
+                farTerrain_.record(cmd, frameIndex, extent, view, proj,
+                                   glm::vec4(sky.lightDir, ambient),
+                                   glm::vec4(lightCol, intensity));
                 worldRenderer_.record(cmd, frameIndex, extent, view, proj,
                                       glm::vec4(sky.lightDir, ambient),
                                       glm::vec4(lightCol, intensity));
@@ -1478,8 +1491,7 @@ void drawSlot(Ui& ui, const BlockRegistry& reg, float x, float y, float slot,
         return;
     }
     const float iconR = slot * 0.5f - 11.0f; // inset to clear the slot border
-    ui.isoCube(x + slot * 0.5f, y + slot * 0.5f, iconR,
-               reg.faceLayer(st.blockId, FacePosY), reg.faceLayer(st.blockId, FacePosX));
+    ui.itemIcon(x + slot * 0.5f, y + slot * 0.5f, iconR, reg.iconLayer(st.blockId));
     if (st.count > 1) {
         const std::string n = std::to_string(st.count);
         const float cx = x + slot - 14.0f, cy = y + slot - 18.0f;
@@ -1576,9 +1588,7 @@ void App::buildInventory(Ui& ui, float w, float h, const InputState& in) {
 
     // The cursor-held stack follows the mouse (icon only, no frame).
     if (!cursorStack_.empty()) {
-        ui.isoCube(in.cursor.x, in.cursor.y, 22.0f,
-                   reg.faceLayer(cursorStack_.blockId, FacePosY),
-                   reg.faceLayer(cursorStack_.blockId, FacePosX));
+        ui.itemIcon(in.cursor.x, in.cursor.y, 22.0f, reg.iconLayer(cursorStack_.blockId));
         if (cursorStack_.count > 1) {
             ui.labelCentered(in.cursor.x + 16.0f, in.cursor.y + 12.0f,
                              std::to_string(cursorStack_.count), 0.5f, kCream);
@@ -1654,8 +1664,7 @@ void App::buildCrafting(Ui& ui, float x, float y, float w, const InputState& in)
 
         ui.box(UiBox::Bg3, rx, ry, rw, rowH - 8.0f);
         if (craftable && hov) ui.box(UiBox::Border, rx, ry, rw, rowH - 8.0f, kLilac);
-        ui.isoCube(rx + iconR + 6.0f, ry + (rowH - 8.0f) * 0.5f, iconR,
-                   reg.faceLayer(r.output, FacePosY), reg.faceLayer(r.output, FacePosX));
+        ui.itemIcon(rx + iconR + 6.0f, ry + (rowH - 8.0f) * 0.5f, iconR, reg.iconLayer(r.output));
         std::string label = r.name;
         if (r.outCount > 1) label += " x" + std::to_string(r.outCount);
         ui.label(rx + 2.0f * iconR + 14.0f, ry + 6.0f, label, 0.46f, kCream);
@@ -1816,9 +1825,7 @@ void App::buildChest(Ui& ui, float w, float h, const InputState& in) {
     }
 
     if (!cursorStack_.empty()) {
-        ui.isoCube(in.cursor.x, in.cursor.y, 22.0f,
-                   reg.faceLayer(cursorStack_.blockId, FacePosY),
-                   reg.faceLayer(cursorStack_.blockId, FacePosX));
+        ui.itemIcon(in.cursor.x, in.cursor.y, 22.0f, reg.iconLayer(cursorStack_.blockId));
         if (cursorStack_.count > 1) {
             ui.labelCentered(in.cursor.x + 16.0f, in.cursor.y + 12.0f,
                              std::to_string(cursorStack_.count), 0.5f, kCream);

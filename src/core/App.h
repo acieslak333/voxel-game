@@ -18,6 +18,7 @@
 #include "render/SkyRenderer.h"
 #include "render/Swapchain.h"
 #include "render/EntityRenderer.h"
+#include "render/FarTerrainRenderer.h"
 #include "render/UiRenderer.h"
 #include "render/VulkanContext.h"
 #include "render/WorldRenderer.h"
@@ -156,6 +157,7 @@ private:
     World            world_;
     WorldRenderer    worldRenderer_;
     EntityRenderer   entityRenderer_; // animated box-rig entities (ISSUES #13E)
+    FarTerrainRenderer farTerrain_;   // coarse heightmap LOD shell beyond the window
     UiRenderer       ui_;        // 2D HUD/menu renderer (after renderer_)
     Input            input_;
     PlayerController  player_;
