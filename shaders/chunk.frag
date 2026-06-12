@@ -36,9 +36,14 @@ const float kBayer[16] = float[16](
     15.0,  7.0, 13.0,  5.0);
 
 void main() {
-    vec4 texel = texture(texArray, vec3(fragUV, float(fragLayer)));
-    if (texel.a < 0.5) {
-        discard; // supports cut-out textures later (e.g. plants)
+    vec3 uvw = vec3(fragUV, float(fragLayer));
+    vec4 texel = texture(texArray, uvw); // mip-filtered colour (anti-shimmer)
+    // Cut-out test against the FULL-RES alpha (LOD 0), not the mip-averaged alpha:
+    // averaging alpha shrinks/grows a thin shape's coverage and dissolves foliage,
+    // leaves and water edges at distance. Sampling LOD 0 here preserves the exact
+    // silhouette while the colour above still benefits from mipmapping.
+    if (textureLod(texArray, uvw, 0.0).a < 0.5) {
+        discard; // supports cut-out textures (plants, leaves, ...)
     }
     // Biome vegetation tint: white for ordinary blocks (no-op), a per-biome colour
     // for grass/leaves/plants so the same green texture reads lush / dry / pale by

@@ -68,23 +68,121 @@ TextureArray::TextureArray(VulkanContext& ctx, const std::vector<std::string>& f
 
     const VkFormat format = VK_FORMAT_R8G8B8A8_SRGB; // sampled into linear space
 
-    vkutil::createImage(ctx, static_cast<uint32_t>(width), static_cast<uint32_t>(height),
-                        layerCount, format, VK_IMAGE_TILING_OPTIMAL,
-                        VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-                        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, image_, memory_);
+    // Mip chain: minifying a 16px tile via REPEAT shimmers/moirés at distance and
+    // at grazing angles. We build a full chain by linear-blitting each level down
+    // from the previous, then sample NEAREST_MIPMAP_LINEAR (crisp texels, smooth
+    // level blend). The sampler caps maxLod (see createSampler) so the 1-2px mips
+    // — which are just the tile's average colour — don't turn the world to mush.
+    // Blit-down needs the format to support a LINEAR filter as a blit source.
+    VkFormatProperties fmtProps{};
+    vkGetPhysicalDeviceFormatProperties(ctx.physicalDevice(), format, &fmtProps);
+    const bool canMip =
+        (fmtProps.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT) != 0;
+    mipLevels_ = canMip ? mipLevelsFor(width, height) : 1;
 
+    VkImageUsageFlags usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    if (mipLevels_ > 1) {
+        usage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT; // each level is blitted from the one above
+    }
+    vkutil::createImage(ctx, static_cast<uint32_t>(width), static_cast<uint32_t>(height),
+                        layerCount, format, VK_IMAGE_TILING_OPTIMAL, usage,
+                        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, image_, memory_, mipLevels_);
+
+    // Move every mip level to TRANSFER_DST, fill level 0 from the staging buffer.
     vkutil::transitionImageLayout(ctx, image_, VK_IMAGE_LAYOUT_UNDEFINED,
-                                  VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, layerCount);
+                                  VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, layerCount, mipLevels_);
     vkutil::copyBufferToImage(ctx, staging.handle(), image_,
                               static_cast<uint32_t>(width), static_cast<uint32_t>(height),
                               layerCount);
-    vkutil::transitionImageLayout(ctx, image_, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                                  VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, layerCount);
+
+    if (mipLevels_ > 1) {
+        generateMipmaps(width, height, layerCount); // blits + leaves all levels SHADER_READ
+    } else {
+        vkutil::transitionImageLayout(ctx, image_, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, layerCount);
+    }
 
     view_ = vkutil::createImageView(ctx.device(), image_, format,
                                     VK_IMAGE_ASPECT_COLOR_BIT,
-                                    VK_IMAGE_VIEW_TYPE_2D_ARRAY, layerCount);
+                                    VK_IMAGE_VIEW_TYPE_2D_ARRAY, layerCount, mipLevels_);
     createSampler();
+}
+
+uint32_t TextureArray::mipLevelsFor(int width, int height) {
+    uint32_t levels = 1;
+    int dim = width > height ? width : height;
+    while (dim > 1) {
+        dim >>= 1;
+        ++levels;
+    }
+    return levels; // 16px tile -> 5 levels (16,8,4,2,1)
+}
+
+// Generate the mip chain in place: blit each level down from the previous with a
+// LINEAR filter, transitioning levels through TRANSFER_SRC and ending the whole
+// image (every level) in SHADER_READ_ONLY. All array layers are blitted together.
+void TextureArray::generateMipmaps(int width, int height, uint32_t layerCount) {
+    VkCommandBuffer cmd = ctx_->beginSingleTimeCommands();
+
+    VkImageMemoryBarrier barrier{};
+    barrier.sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.image               = image_;
+    barrier.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount     = layerCount;
+    barrier.subresourceRange.levelCount     = 1;
+
+    int mipW = width, mipH = height;
+    for (uint32_t i = 1; i < mipLevels_; ++i) {
+        // Level i-1: TRANSFER_DST -> TRANSFER_SRC so we can read it as the blit source.
+        barrier.subresourceRange.baseMipLevel = i - 1;
+        barrier.oldLayout     = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        barrier.newLayout     = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+        VkImageBlit blit{};
+        blit.srcOffsets[0] = {0, 0, 0};
+        blit.srcOffsets[1] = {mipW, mipH, 1};
+        blit.srcSubresource.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+        blit.srcSubresource.mipLevel       = i - 1;
+        blit.srcSubresource.baseArrayLayer = 0;
+        blit.srcSubresource.layerCount     = layerCount;
+        blit.dstOffsets[0] = {0, 0, 0};
+        blit.dstOffsets[1] = {mipW > 1 ? mipW / 2 : 1, mipH > 1 ? mipH / 2 : 1, 1};
+        blit.dstSubresource.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+        blit.dstSubresource.mipLevel       = i;
+        blit.dstSubresource.baseArrayLayer = 0;
+        blit.dstSubresource.layerCount     = layerCount;
+        vkCmdBlitImage(cmd, image_, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                       image_, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, VK_FILTER_LINEAR);
+
+        // Level i-1 is done being read: TRANSFER_SRC -> SHADER_READ_ONLY.
+        barrier.oldLayout     = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        barrier.newLayout     = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+        barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                             0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+        if (mipW > 1) mipW /= 2;
+        if (mipH > 1) mipH /= 2;
+    }
+
+    // The last level was never read, so it's still TRANSFER_DST -> SHADER_READ_ONLY.
+    barrier.subresourceRange.baseMipLevel = mipLevels_ - 1;
+    barrier.oldLayout     = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier.newLayout     = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                         0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+    ctx_->endSingleTimeCommands(cmd);
 }
 
 TextureArray::~TextureArray() {
@@ -113,9 +211,15 @@ void TextureArray::createSampler() {
     info.borderColor   = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
     info.unnormalizedCoordinates = VK_FALSE;
     info.compareEnable = VK_FALSE;
-    info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+    // NEAREST in-plane (crisp texels) but LINEAR across mip levels (smooth fade
+    // between levels, no popping). maxLod is capped well below the full chain: a
+    // 16px tile's 1-2px mips are just its average colour, and LOD is computed at
+    // the coarse offscreen resolution so mips already bite early — letting it run
+    // to the tiniest level would wash distant terrain to flat colour. Cap at 3
+    // (down to the 2px level) for a little anti-shimmer without the mush.
+    info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
     info.minLod = 0.0f;
-    info.maxLod = 0.0f;
+    info.maxLod = mipLevels_ > 1 ? 3.0f : 0.0f;
 
     if (vkCreateSampler(ctx_->device(), &info, nullptr, &sampler_) != VK_SUCCESS) {
         throw std::runtime_error("Failed to create texture sampler");

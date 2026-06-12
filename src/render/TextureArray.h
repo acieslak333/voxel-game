@@ -21,8 +21,12 @@ class VulkanContext;
 //
 //  All source images must share the same dimensions (array layers must match).
 //
-//  TODO(future): mipmaps, and a path for blocks that use custom models rather
-//  than cube-face textures (e.g. a furnace) — those would register differently.
+//  A capped mip chain is built at load (linear blit-down per array layer) to kill
+//  the minification shimmer/moiré on distant tiled tiles; the sampler stays NEAREST
+//  in-plane for the crisp voxel look. See TextureArray.cpp.
+//
+//  TODO(future): a path for blocks that use custom models rather than cube-face
+//  textures (e.g. a furnace) — those would register differently.
 // -----------------------------------------------------------------------------
 class TextureArray {
 public:
@@ -39,13 +43,16 @@ public:
 
 private:
     void createSampler();
+    void generateMipmaps(int width, int height, uint32_t layerCount);
+    static uint32_t mipLevelsFor(int width, int height);
 
     VulkanContext* ctx_ = nullptr;
 
-    VkImage        image_   = VK_NULL_HANDLE;
-    VkDeviceMemory memory_  = VK_NULL_HANDLE;
-    VkImageView    view_    = VK_NULL_HANDLE;
-    VkSampler      sampler_ = VK_NULL_HANDLE;
+    VkImage        image_     = VK_NULL_HANDLE;
+    VkDeviceMemory memory_    = VK_NULL_HANDLE;
+    VkImageView    view_      = VK_NULL_HANDLE;
+    VkSampler      sampler_   = VK_NULL_HANDLE;
+    uint32_t       mipLevels_ = 1;
 };
 
 } // namespace vg

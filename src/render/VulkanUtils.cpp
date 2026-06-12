@@ -9,12 +9,13 @@ namespace vg::vkutil {
 void createImage(const VulkanContext& ctx, uint32_t width, uint32_t height,
                  uint32_t arrayLayers, VkFormat format, VkImageTiling tiling,
                  VkImageUsageFlags usage, VkMemoryPropertyFlags properties,
-                 VkImage& outImage, VkDeviceMemory& outMemory) {
+                 VkImage& outImage, VkDeviceMemory& outMemory,
+                 uint32_t mipLevels) {
     VkImageCreateInfo info{};
     info.sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     info.imageType     = VK_IMAGE_TYPE_2D;
     info.extent        = {width, height, 1};
-    info.mipLevels     = 1;
+    info.mipLevels     = mipLevels;
     info.arrayLayers   = arrayLayers;
     info.format        = format;
     info.tiling        = tiling;
@@ -43,7 +44,7 @@ void createImage(const VulkanContext& ctx, uint32_t width, uint32_t height,
 
 VkImageView createImageView(VkDevice device, VkImage image, VkFormat format,
                             VkImageAspectFlags aspect, VkImageViewType viewType,
-                            uint32_t layerCount) {
+                            uint32_t layerCount, uint32_t mipLevels) {
     VkImageViewCreateInfo info{};
     info.sType    = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
     info.image    = image;
@@ -51,7 +52,7 @@ VkImageView createImageView(VkDevice device, VkImage image, VkFormat format,
     info.format   = format;
     info.subresourceRange.aspectMask     = aspect;
     info.subresourceRange.baseMipLevel   = 0;
-    info.subresourceRange.levelCount     = 1;
+    info.subresourceRange.levelCount     = mipLevels;
     info.subresourceRange.baseArrayLayer = 0;
     info.subresourceRange.layerCount     = layerCount;
 
@@ -64,7 +65,7 @@ VkImageView createImageView(VkDevice device, VkImage image, VkFormat format,
 
 void transitionImageLayout(const VulkanContext& ctx, VkImage image,
                            VkImageLayout oldLayout, VkImageLayout newLayout,
-                           uint32_t layerCount) {
+                           uint32_t layerCount, uint32_t mipLevels) {
     VkCommandBuffer cmd = ctx.beginSingleTimeCommands();
 
     VkImageMemoryBarrier barrier{};
@@ -76,7 +77,7 @@ void transitionImageLayout(const VulkanContext& ctx, VkImage image,
     barrier.image               = image;
     barrier.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
     barrier.subresourceRange.baseMipLevel   = 0;
-    barrier.subresourceRange.levelCount     = 1;
+    barrier.subresourceRange.levelCount     = mipLevels;
     barrier.subresourceRange.baseArrayLayer = 0;
     barrier.subresourceRange.layerCount     = layerCount;
 

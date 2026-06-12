@@ -18,8 +18,11 @@ layout(location = 2) in flat uint fragLayer;
 layout(location = 0) out vec4 outColor;
 
 void main() {
-    vec4 texel = texture(texArray, vec3(fragUV, float(fragLayer)));
-    if (texel.a < 0.5) discard; // cut-out support
+    vec3 uvw = vec3(fragUV, float(fragLayer));
+    vec4 texel = texture(texArray, uvw); // mip-filtered colour
+    // Cut-out test against full-res alpha (LOD 0) so mip-averaged alpha doesn't
+    // dissolve thin shapes (crack overlay, billboards) at distance.
+    if (textureLod(texArray, uvw, 0.0).a < 0.5) discard;
 
     // Directional sun/moon lighting, matching the terrain: faces toward the light
     // are bright, away fall to the ambient floor; the whole thing dims toward night
