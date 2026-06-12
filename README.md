@@ -5,8 +5,13 @@ A first-person voxel survival game built from scratch in modern **C++20** with
 generated island; this repository builds that foundation up in small, verifiable
 milestones.
 
-> **Status:** Milestone 3 complete — procedural, multi-chunk terrain from
-> layered noise, with first-person walking + collision over it.
+> **Status:** well past the original milestones — endless chunk streaming with
+> background generation/lighting/meshing, data-driven biome worldgen (splines +
+> 3D density: oceans, mountains, rivers, lakes, caves, ores), day/night sky with
+> volumetric clouds, far-terrain LOD, survival loop (mining, inventory,
+> crafting, chests), liquids, Blockbench entity/tool models, and an in-repo
+> Python tools hub for editing the data files. `ISSUES.md` tracks the living
+> backlog; `REVIEW.md` holds the latest code review.
 
 ![Procedural terrain, bird's-eye view](docs/screenshots/milestone3_overview.png)
 
@@ -226,8 +231,9 @@ own.
 - `render/WorldRenderer` greedy-meshes every chunk once and draws each non-empty
   chunk with its own model-matrix push constant, reusing one pipeline + texture
   array + per-frame camera UBO.
-- Island shaping and chunk streaming are intentionally deferred — see
-  [`FUTURE.md`](FUTURE.md).
+- (This section describes the original milestone-3 generator; the current
+  data-driven pipeline is documented in [`docs/WORLDGEN.md`](docs/WORLDGEN.md)
+  and [`docs/STREAMING.md`](docs/STREAMING.md).)
 
 ---
 
@@ -237,8 +243,11 @@ own.
 - [x] **Milestone 1** — Render one greedy-meshed, textured chunk.
 - [x] **Milestone 2** — First-person camera, walking + collision, free-fly.
 - [x] **Milestone 3** — Procedural multi-chunk noise terrain.
-- [ ] **Later** — island shaping, chunk streaming, inventory, crafting, mobs,
-  custom block models, more survival stats (see `FUTURE.md`).
+- [x] **Beyond** — endless chunk streaming, data-driven biome worldgen, caves &
+  ores, day/night + weather, far-terrain LOD, survival loop (inventory /
+  crafting / chests), liquids, Blockbench models, world/player persistence.
+- [ ] **Next** — see `ISSUES.md` (living backlog) and `REVIEW.md` (current
+  code-review fix list).
 
-See [`FUTURE.md`](FUTURE.md) for documented extension points for deferred
-features (inventory, crafting, mobs, custom block models, island shaping, …).
+See [`docs/FUTURE.md`](docs/FUTURE.md) for documented extension points and
+deferred features.
