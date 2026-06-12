@@ -36,9 +36,11 @@ Core Optimizations:
    - Multi-threading chunk generation: **DONE** — landed with the chunk-streaming
      milestone (worker-thread meshing + parallel generation + background relight).
      See issue 11.
-   - LOD for distant chunks: still NOT done — now that streaming exists, far chunks
-     do exist, so LOD is a real (but optional) future item. See issue 11's FUTURE
-     list.
+   - LOD for distant chunks: **DONE** — see issue 18 (far-terrain heightmap LOD
+     shell beyond the voxel window).
+   - Texture mipmapping (anti-shimmer on distant tiles): **DONE** — TextureArray
+     builds a capped mip chain; cut-out alpha tested at LOD 0 so foliage doesn't
+     dissolve. (Was ISSUES #17's last TODO.)
 
 
 4. ~~The darkest light should be as dark as dark sky add it as another level~~
@@ -432,9 +434,10 @@ Core Optimizations:
     - Cave variety (ravines, cave water/lava pools); ore-balance pass.
 
     **D. Performance / tech**
-    - LOD for distant chunks (the one open item from #3) — only matters at larger
-      view distance than the current window.
-    - The liquid remesh de-stutter from A.
+    - ~~LOD for distant chunks (the one open item from #3).~~ **DONE** — see #18.
+    - ~~The liquid remesh de-stutter from A.~~ **DONE** — flow remeshes now route
+      through the async streaming path (no per-tick vkDeviceWaitIdle); the
+      no-worker fallback installs via the deferred-buffer path too. (#13A/D)
 
     **E. 3D entities & animation** (prereq for mobs/NPCs/dropped items, combat)
     **PROGRESS — E1 (rig+anim core), E2 (renderer) & E4 (test entity) DONE; E3 (glTF
@@ -855,9 +858,9 @@ Core Optimizations:
     - **Codebase refactor pass (#13L):** App.cpp god-class, renderer pipeline/
       descriptor boilerplate, ChunkMesher render-type special-cases. Incremental,
       selftest-guarded; do with supervision (the golden guards worldgen only).
-    - **Perf (#13D):** LOD for distant chunks; kill the per-tick vkDeviceWaitIdle in
-      liquid/edit remeshes.
-    - **Texture mipmapping (TextureArray):** the 16px block textures tiled via REPEAT
+    - ~~**Perf (#13D):** LOD for distant chunks; kill the per-tick vkDeviceWaitIdle in
+      liquid/edit remeshes.~~ **BOTH DONE** — see #18 (LOD) and #13A/D (liquids).
+    - **Texture mipmapping (TextureArray):** **DONE** (see #18 summary). The 16px block textures tiled via REPEAT
       shimmer/moiré when minified (worse at the low-res offscreen + grazing angles).
       Composes fine with the dither/pixelate — those act on lighting + a low-res
       upscale, mips act only on albedo sampling (orthogonal). Plan (self-contained in
@@ -874,3 +877,54 @@ Core Optimizations:
       OPTIONAL/better for ground: enable the anisotropy device feature + anisotropic
       filtering (sharper at grazing angles than plain mips). Verify via a distant-
       terrain screenshot (shimmer is visible even in a still).
+
+18. **OPTIMIZATION PASS** (mipmapping → liquid de-stutter → multi-level LOD) — **DONE**
+    Three perf items from #3/#13D/#17, committed per-feature on main.
+
+    **A. Texture mipmapping (#17 last TODO)** — `TextureArray` builds a capped mip
+    chain at upload (linear `vkCmdBlitImage` down-scaling per array layer, gated on
+    the format supporting a linear blit). Sampler is NEAREST in-plane (crisp voxel
+    look) + LINEAR across levels, `maxLod` capped at 3 so the 1-2px mips don't wash
+    distant terrain to mush. `chunk.frag`/`entity.frag` cut-out test now samples
+    FULL-RES alpha (`textureLod(...,0)`) so mip-averaged alpha doesn't dissolve
+    foliage/leaves/water edges at distance while the colour still mips. The
+    `vkutil` createImage/createImageView/transitionImageLayout gained an optional
+    `mipLevels` (default 1, every other caller untouched). Kills distant shimmer/moiré.
+
+    **B. Liquid flow de-stutter (#13A/D)** — `App::tickLiquids` remeshed every 0.2s
+    tick via `remeshChunks()`, which does a full `vkDeviceWaitIdle`. Flow remeshes
+    now go through `streamRemesh()` (the async worker path: meshing off-thread,
+    frame-integrated upload, deferred-buffer retire) so the tick issues no device
+    wait. The no-worker fallback (`processRemeshQueue`) was rewritten to install via
+    the deferred-buffer path too, so the per-tick drain is gone with or without
+    worker threads. Block edits stay synchronous (discrete, want same-frame update).
+
+    **C. Multi-level LOD — far-terrain heightmap shell** (#3/#13D) — new
+    `FarTerrainRenderer` draws a coarse heightmap "shell" beyond the streamed voxel
+    window so the world is visible ~7x farther without per-voxel gen/light/triangles.
+    - Concentric geo-clipmap rings centred on the player; ring L uses cell size
+      `baseStep<<L`, so each ring out is half-res / 4x area (default base 4, 4 rings).
+    - Geometry sampled straight from the deterministic `TerrainGenerator`
+      (`columnInfo`: surface height + top block + biome veg tint + water level), so
+      it's cheap and matches the near terrain at the seam. Oceans/lakes show water.
+    - T-junction cracks between rings + at the window seam are hidden by vertical
+      skirts dropped along every ring boundary, plus a small downward `yBias` +
+      window `underlap` so near chunks always occlude the shell at the seam (no
+      z-fight, no gap). `cullMode NONE` sidesteps winding (normals computed per-tri).
+    - Own pipeline in the scene pass (shared depth + composite/fog), reusing the
+      mipmapped block texture array; `farterrain.vert/.frag` light it like terrain.
+    - The CPU shell rebuilds on a background `std::async` worker when the player
+      crosses a base cell (the ~20-30k columnInfo samples would hitch the main
+      thread); per-frame it just re-uploads + one draw. Worker only reads the
+      immutable generator/registry — race-free vs the main thread's chunk mutations.
+    - The scene far clip plane is pushed out to cover the shell's diagonal reach
+      (fog uses the same proj, stays consistent; near terrain keeps depth precision).
+    - Configurable via an OPTIONAL `far_terrain:` block in world.yaml (enabled /
+      base_step / ring_cells / ring_count / skirt_depth / underlap / y_bias);
+      absent keys keep code defaults, so world.yaml is untouched and it can be
+      tuned/disabled without a rebuild.
+    Verified each via flycam + ground `--screenshot` (no Vulkan validation errors;
+    distant shell reaches a hazy horizon with matching biomes/water, no seam cracks,
+    crisp near terrain). NOTE: pre-existing `--selftest`/`--logictest` failures
+    (worldgen hash, missing `iron_boots`) are from the user's in-flight worldgen +
+    blocks.yaml edits, NOT this render-only work.
