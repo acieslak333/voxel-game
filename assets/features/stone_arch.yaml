@@ -1,0 +1,14 @@
+# A free-standing stone arch / natural rock bridge — a vertical half-ring (doorway),
+# thin front-to-back. Sparse, on open ground. Shows the `arch` shape.
+name: stone_arch
+scatter: {density: 0.03, spacing: 44, surface: true, biomes: [mountain, desert, plains]}
+size: [13, 8, 3]
+anchor: [6, 0, 1]
+ops:
+  - shape: arch
+    at: [0, 0, 0]
+    radius: 6
+    thickness: 1.5
+    block: [{name: stone, w: 3}, {name: cobblestone, w: 1}]
+    block_pick: per_cell
+    place: force

@@ -1,0 +1,17 @@
+# Birch — slimmer, taller, with a smaller crown. Plains.
+name: birch_tree
+scatter: {density: 0.7, spacing: 7, surface: true, biomes: [plains]}
+size: [5, 10, 5]
+anchor: [2, 0, 2]
+ops:
+  - shape: ellipsoid
+    at: [0, 4, 0]
+    size: [5, 4, 5]
+    block: birch_leaves
+    place: air_only
+  - shape: column
+    at: [0, 0, 0]
+    radius: 0
+    height: 6
+    block: birch_trunk
+    place: air_only

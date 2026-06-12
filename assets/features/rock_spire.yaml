@@ -1,0 +1,18 @@
+# A tapering rock spire: a cone of random radius + height. Self-contained (the taper
+# means no separate cap is needed). Sparse, on high/dry ground.
+name: rock_spire
+scatter:
+  density: 0.07
+  spacing: 60
+  surface: true
+  biomes: [mountain, desert, plains]
+size: [7, 14, 7]
+anchor: [3, 0, 3]
+ops:
+  - shape: cone
+    at: [0, 0, 0]
+    radius: {min: 2, max: 3}
+    height: {min: 6, max: 12}
+    block: [ {name: stone, w: 5}, {name: cobblestone, w: 1} ]
+    fill: solid
+    place: force

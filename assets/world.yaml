@@ -57,18 +57,16 @@ async_streaming: true
 #   chunk boundary (more columns to generate/relight/remesh on the leading edge).
 #   Lowered 11 -> 9 for performance with the taller 128-block biome terrain; raise
 #   it back if you want more view distance and can take the startup/hitch cost.
-view_radius: 6   # lowered from 9 for the 256-tall world: doubling height_chunks
-                 # doubles the vertical chunk work, so a smaller horizontal window
-                 # keeps startup/meshing cost ~the same as the old 128-tall@9 world.
-                 # Raise it back toward 9 if your machine has the headroom.
+view_radius: 4   # the world is back to 128 tall (height_chunks 8), so each column is
+                 # half the vertical work — affording a wider window AND faster loads
+                 # than the old 256-tall@6 setup. Raise it for even more view distance.
 
-# Vertical extent of the world, in chunks (no vertical streaming). The biome
-# terrain pipeline (assets/biomes.yaml) needs headroom for oceans + mountains:
-# 16 * 16 = 256 blocks, sea level 128 in the middle — the taller world that gives
-# the biome pipeline room for dramatic mountains (biomes.yaml sea_level + splines
-# are scaled to match). Costs ~2x the vertical memory and light/gen work vs 128; if
-# startup/Hz suffers, lower view_radius. Drop back to 8 (and rescale biomes.yaml)
-# for the old short world.
+# Vertical extent of the world, in chunks (no vertical streaming). 8 * 16 = 128
+# blocks, sea level 64 in the middle (biomes.yaml sea_level + splines + snow_line
+# are scaled to match this). Half the vertical memory + light/gen work of the
+# 256-tall world, so it loads faster and leaves headroom for a wider view_radius.
+# To go taller again (e.g. 16 = 256 for dramatic mountains) double biomes.yaml's
+# sea_level + the spline y-values + snow_line, and the caves/ores max_y below.
 height_chunks: 16
 
 # -----------------------------------------------------------------------------
@@ -147,17 +145,22 @@ features:
   lantern_density: 0.0000
   # Cairns: a short stack of cobblestone, like a hiker's trail marker. Any land.
   cairn_density: 0.0
-  # Geodes: a single glowstone buried a few blocks down in the stone — a hidden
-  # glow you only discover by digging (or stumbling into a cave near one).
-  geode_density: 0.01
+  # Geodes / lanterns / cairns are now procedural features too (assets/features/
+  # geode.yaml, lantern.yaml, cairn.yaml — edited in tools/feature_tool.py). These
+  # built-in densities are all 0 so nothing is generated twice; the feature files
+  # own them now.
+  geode_density: 0.0
   # Oak trees: a slender (4-px-wide) trunk topped with a crossed-quad leaf canopy.
   # Per-column probability that a tree is *rooted* here; the canopy spreads over
   # the neighbouring columns. Grass only. The generator stamps each tree from every
   # column it overlaps (a pure function of world coords), so canopies cross chunk
   # seams cleanly. 0 = no trees.
-  tree_density: 0.000005
+  # NOTE: MASTER SWITCHES now. Trees & ground plants are authored as procedural
+  # features (assets/features/*.yaml, edited in tools/feature_tool.py). Set these
+  # back above 0 to re-enable the original built-in trees/plants instead.
+  tree_density: 0.0
   # Ground bushes: a single crossed-quad shrub on a grass surface. Single-column.
-  bush_density: 0.1
+  bush_density: 0.0
 
 # -----------------------------------------------------------------------------
 #  structures: hand-authored voxel templates (assets/structures/*.yaml) stamped
@@ -170,7 +173,10 @@ features:
 # -----------------------------------------------------------------------------
 structures:
   spacing: 80      # average blocks between candidate structure cells
-  density: 0.35    # chance a candidate cell actually roots a structure
+  # UNIFIED: structures are now features (assets/features/well.yaml, pillar.yaml, ...
+  # as `voxels` ops). density 0 turns off the legacy structure scatter so nothing is
+  # generated twice. Edit them in tools/feature_tool.py like any other feature.
+  density: 0.0     # chance a candidate cell actually roots a structure (0 = off)
 
 # -----------------------------------------------------------------------------
 #  caves: tunnels carved through the stone. They are hollowed where two 3D-noise
@@ -181,33 +187,33 @@ structures:
 caves:
   # Spatial frequency of the cave noise. Higher = tighter, twistier, more frequent
   # tunnels; lower = broader, rarer caverns.
-  frequency: 0.035
+  frequency: 0.036
   # Half-width of the |noise| band that counts as hollow. Bigger = wider tunnels
   # and more of them (too big merges everything into open voids); 0 = no caves.
-  threshold: 0.085
+  threshold: 0.060
   # Never carve at or below this world Y, so the world keeps a solid floor.
   floor: 2
   # Large caverns: a low-frequency 3D blob carved only below cavern_max_y (deep),
   # giving big open rooms that the tunnels connect into. Lower threshold = bigger,
   # more frequent caverns; raise it for rarer ones. Tunnels also taper near the
   # surface so the strongest ones open as cave mouths on hillsides.
-  cavern_threshold: 0.52
-  cavern_max_y: 90
+  cavern_threshold: 0.58
+  cavern_max_y: 45
   # Ravines: long, narrow, deep slot canyons where a low-frequency 2D winding noise
   # sits in a thin band. Carved over floor..max_y and can breach a hillside. Sparse
   # + narrow so they stay rare; width: 0 disables them.
   ravines:
     frequency: 0.0009   # lower = longer, sparser canyons
-    width: 0.016        # |noise| half-band counted as canyon (narrow = thin slot)
-    max_y: 110          # carve ravines only below this world Y
+    width: 0.011        # |noise| half-band counted as canyon (narrow = thin slot)
+    max_y: 55           # carve ravines only below this world Y
     floor: 6            # ...and never at/below this (keeps a base under the slot)
   # Cave fluid pools. A carved cell at/below lava_max_y floods with lava (deep magma
   # at the cave bottom); higher up (<= water_max_y) a carved cell resting on a SOLID
   # floor becomes a shallow water film with probability water_chance.
   pools:
-    lava_max_y: 16
-    water_max_y: 64
-    water_chance: 0.45
+    lava_max_y: 8
+    water_max_y: 32
+    water_chance: 0.46
 
 # -----------------------------------------------------------------------------
 #  ores: each ore replaces stone in small clusters (one roll shared across a
@@ -221,12 +227,12 @@ caves:
 # bands and a touch more of each ore, so the deeper, more-exposed cave network
 # (ravine + cavern walls) yields a steadier ore supply across the tiers.
 ores:
-  coal:    { density: 0.022,  max_y: 120 }
-  iron:    { density: 0.014,  max_y: 96 }
-  gold:    { density: 0.006,  max_y: 60 }
-  ruby:    { density: 0.0038, max_y: 40 }
-  emerald: { density: 0.0032, max_y: 36 }
-  mythril: { density: 0.0018, max_y: 22 }
+  coal: {density: 0.022, max_y: 60}
+  iron: {density: 0.014, max_y: 48}
+  gold: {density: 0.006, max_y: 30}
+  ruby: {density: 0.0038, max_y: 20}
+  emerald: {density: 0.0032, max_y: 18}
+  mythril: {density: 0.0018, max_y: 11}
 
 # NOTE: light falloff (how fast sky/block light dies per spread step) is a
 # player-facing option — it lives in assets/settings.yaml ("skyFalloff" /

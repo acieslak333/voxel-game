@@ -1,0 +1,13 @@
+# Cactus — a slim 1-3 tall column of cactus blocks. Desert. (The surface cell is
+# solid, so air_only starts it one block above the ground.)
+name: cactus
+scatter: {density: 0.22, spacing: 7, surface: true, biomes: [desert]}
+size: [1, 5, 1]
+anchor: [0, 0, 0]
+ops:
+  - shape: column
+    at: [0, 0, 0]
+    radius: 0
+    height: {min: 2, max: 4}
+    block: cactus
+    place: air_only

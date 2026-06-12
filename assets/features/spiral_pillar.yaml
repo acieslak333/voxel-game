@@ -1,0 +1,21 @@
+# A cobblestone pillar with ivy spiralling up it — a central column plus a `spiral`
+# (helix) of leaves winding around it. Shows the spiral shape (radius/height/turns).
+name: spiral_pillar
+scatter: {density: 0.025, spacing: 52, surface: true, biomes: [forest, swamp]}
+size: [11, 14, 11]
+anchor: [5, 0, 5]
+ops:
+  - shape: column
+    at: [0, 0, 0]
+    radius: 1
+    height: 12
+    block: cobblestone
+    place: force
+  - shape: spiral
+    at: [0, 0, 0]
+    radius: 4
+    height: 12
+    thickness: 1
+    turns: 3
+    block: oak_leaves
+    place: air_only

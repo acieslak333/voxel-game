@@ -1,0 +1,20 @@
+# Mushrooms that grow in PATCHES, not evenly — distribution: noise gates rooting to
+# the clumps of a low-frequency field. Shows the noise-field scatter placement.
+name: mushroom_ring
+scatter:
+  density: 0.8
+  spacing: 3
+  surface: true
+  biomes: [forest, swamp]
+  distribution: noise
+  noise_freq: 0.06          # lower = bigger patches
+  noise_threshold: 0.25     # higher = rarer/tighter patches
+size: [1, 2, 1]
+anchor: [0, 0, 0]
+ops:
+  - shape: box
+    at: [0, 1, 0]
+    size: [1, 1, 1]
+    block: [{name: red_mushroom, w: 2}, {name: bush, w: 1}]
+    block_pick: per_cell
+    place: air_only

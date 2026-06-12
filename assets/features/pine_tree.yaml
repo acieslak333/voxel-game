@@ -1,0 +1,19 @@
+# Pine — a conical needle crown (cone op tapers to a point) on a tall trunk. Cold /
+# high biomes.
+name: pine_tree
+scatter: {density: 0.55, spacing: 6, surface: true, biomes: [mountain, snowy]}
+size: [7, 12, 7]
+anchor: [3, 0, 3]
+ops:
+  - shape: cone
+    at: [0, 2, 0]
+    radius: 3
+    height: 8
+    block: pine_leaves
+    place: air_only
+  - shape: column
+    at: [0, 0, 0]
+    radius: 0
+    height: 8
+    block: pine_trunk
+    place: air_only

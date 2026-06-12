@@ -117,20 +117,20 @@ textures:
   grass_top.block.png:
     base: lime
     speckle: 0.05
-    variants: 3        # per-block random grass tops (non-repeating ground)
+    variants: 1        # variants disabled (unused — blocks.yaml uses single textures); bump to re-enable
   # Grass side: dirt with a ragged green band along the top edge.
   grass_side.block.png:
     base: brown
     top_band: [lime, 8]
     speckle: 0.08
-    variants: 3        # the green fringe edge varies per block, matching the top
+    variants: 1        # disabled (unused); see grass_top note
   dirt.block.png:
     base: brown
     speckle: 0.07
   stone.block.png:
     base: stone_gray
     speckle: 0.11
-    variants: 3        # per-block random stone grain (non-repeating walls/caves)
+    variants: 1        # disabled (unused); see grass_top note
   sand.block.png:
     base: cream
     speckle: 0.07
@@ -159,13 +159,13 @@ textures:
     base: "#3F6B2A"
     speckle: 0.18
     leaves: true
-    variants: 3        # per-block random leaf gaps so canopies don't tile
+    variants: 1        # disabled (unused); see grass_top note
   # Ground bush: a slightly lighter, brighter green so shrubs read apart from canopy.
   bush.block.png:
     base: "#4F7E33"
     speckle: 0.20
     leaves: true
-    variants: 3        # per-block random foliage so shrubs differ from each other
+    variants: 1        # disabled (unused); see grass_top note
   # Liquids (issue: water & lava). Water is a cool blue drawn in the renderer's
   # translucent pass (alpha-blended over the terrain/seabed behind it), so the
   # texture itself stays solid. Lava is a hot orange that also emits block light

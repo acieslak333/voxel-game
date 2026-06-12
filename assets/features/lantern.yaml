@@ -1,0 +1,19 @@
+# Lantern-tree — an oak-log stalk topped with a glowstone cap (a natural lamppost
+# that pools warm light after dusk). Authored but OFF by default (density 0, matching
+# the old world.yaml); bump scatter.density in the tool to scatter them on grass.
+name: lantern
+scatter: {density: 0.0, spacing: 28, surface: true, biomes: [plains, forest, savanna, snowy]}
+size: [1, 8, 1]
+anchor: [0, 0, 0]
+ops:
+  - shape: column
+    at: [0, 0, 0]
+    radius: 0
+    height: 6
+    block: oak_log
+    place: air_only
+  - shape: box
+    at: [0, 6, 0]
+    size: [1, 1, 1]
+    block: glowstone
+    place: air_only

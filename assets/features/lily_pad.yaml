@@ -1,0 +1,16 @@
+# Lily pads floating ON the water surface (on_water roots at the water level, not the
+# land). surface:false because it's not dry land. Shows the on-water placement.
+name: lily_pad
+scatter:
+  density: 0.35
+  spacing: 4
+  surface: false
+  on_water: true
+size: [1, 2, 1]
+anchor: [0, 0, 0]
+ops:
+  - shape: box
+    at: [0, 1, 0]
+    size: [1, 1, 1]
+    block: lilypad
+    place: air_only

@@ -1,0 +1,14 @@
+# Place poof (ISSUES #13M juice): a soft dust puff when a block is placed.
+# Uses the placed block's own texture (texture: ""), light + floaty vs break shards.
+name: place
+texture: ""
+count: 9
+gravity: -7
+drag: 4.5
+spawn_radius: 0.42
+speed: [0.2, 2.0]
+up_bias: 1.2
+lifetime: [0.25, 0.6]
+size: [0.05, 0.1]
+size_end: 1.7
+spin: [-2, 2]

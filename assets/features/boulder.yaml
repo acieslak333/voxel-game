@@ -1,0 +1,18 @@
+# A mossy boulder: a sphere of random radius, blocks mixed per-cell. Demonstrates a
+# randomized single-shape feature. Authored/previewed with tools/feature_tool.py.
+name: boulder
+scatter:
+  density: 0.16          # chance per candidate grid cell
+  spacing: 40            # candidate origins every ~40 blocks
+  surface: true          # only on dry land
+  biomes: [plains, forest, savanna, mountain]
+size: [9, 9, 9]          # max bounding box (radius up to 4 -> diameter 8)
+anchor: [4, 0, 4]        # centred; rests on the surface
+ops:
+  - shape: sphere
+    at: [0, 0, 0]
+    radius: {min: 2, max: 4}
+    block: [ {name: stone, w: 3}, {name: cobblestone, w: 2}, {name: gravel, w: 1} ]
+    block_pick: per_cell
+    fill: solid
+    place: force

@@ -1,0 +1,19 @@
+# Oak — rounded leaf crown on a slim trunk. The canopy op comes first so the trunk
+# op (later) overrides the centre column, leaving the trunk visible through it. Both
+# air_only so they never carve the terrain. Biome-gated to forests.
+name: oak_tree
+scatter: {density: 0.8, spacing: 4, surface: true, biomes: [forest]}
+size: [7, 9, 7]
+anchor: [3, 0, 3]
+ops:
+  - shape: ellipsoid
+    at: [0, 3, 0]
+    size: [7, 5, 7]
+    block: oak_leaves
+    place: air_only
+  - shape: column
+    at: [0, 0, 0]
+    radius: 0
+    height: 5
+    block: oak_trunk
+    place: air_only

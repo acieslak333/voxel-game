@@ -1,0 +1,14 @@
+# Lava embers (ISSUES #13M juice): tiny glowing sparks that rise off nearby lava.
+# Samples the lava texture so they read molten-orange; slow rise + shrink.
+name: ember
+texture: lava.block.png
+count: 2
+gravity: -3
+drag: 1.5
+spawn_radius: 0.18
+speed: [0.2, 1.0]
+up_bias: 1.8
+lifetime: [0.5, 1.4]
+size: [0.025, 0.05]
+size_end: 0.2
+spin: [-1, 1]

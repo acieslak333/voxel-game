@@ -1,0 +1,13 @@
+# Geode — a single glowstone buried a few blocks down in the stone (a hidden glow
+# you find by digging). The anchor sits at the surface (y=6 in the box), so the op
+# below it (place: force) overwrites stone ~5 blocks under the ground.
+name: geode
+scatter: {density: 0.012, spacing: 22, surface: true}
+size: [1, 7, 1]
+anchor: [0, 6, 0]
+ops:
+  - shape: box
+    at: [0, -5, 0]
+    size: [1, 1, 1]
+    block: glowstone
+    place: force

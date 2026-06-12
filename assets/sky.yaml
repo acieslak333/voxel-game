@@ -48,6 +48,13 @@ exposure: 0.22
 # (1 = physical single pass). Kept mild — the colourful dusk comes from the
 # authored `sunsetHorizon` band painted near the sun, not from filter hue.
 sunsetStrength: 2.0
+# Tempers how dark the ground gets through dusk. As the sun crosses the horizon the
+# terrain's day->moonlight blend collapses fast, so the ground blacks out under a
+# still-bright dusk sky. This lifts terrain light + ambient through the sunset band
+# (peaks right at the horizon, fades to nothing by full day / full night, so noon
+# and deep night are untouched). It's a fraction: 0.45 = up to +45% at the horizon.
+# 0 = the old, steeper falloff; raise for a brighter, longer-glowing dusk.
+duskBrightness: 0.6
 
 # --- Sky gradient colours ----------------------------------------------------
 # `dayZenith` is the *reference* colour for the in-game Sky option (picking the

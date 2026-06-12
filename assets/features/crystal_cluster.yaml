@@ -1,0 +1,16 @@
+# A glittering crystal cluster — a small sphere with `fill: scatter` so only ~half
+# the cells are kept, giving a jagged, sparkly clump of glowstone + ruby. Shows the
+# scatter fill (a fuzzy/cluster look on any shape).
+name: crystal_cluster
+scatter: {density: 0.05, spacing: 30, surface: true}
+size: [7, 7, 7]
+anchor: [3, 0, 3]
+ops:
+  - shape: sphere
+    at: [0, 0, 0]
+    radius: {min: 2, max: 3}
+    fill: scatter
+    scatter: 0.55
+    block: [{name: glowstone, w: 2}, {name: ruby_ore, w: 1}]
+    block_pick: per_cell
+    place: force

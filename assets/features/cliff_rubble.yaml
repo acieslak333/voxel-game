@@ -1,0 +1,17 @@
+# Loose rubble that only sits on STEEP ground (min_slope) — a small rock ball on
+# cliffs and mountainsides. Shows the slope gate.
+name: cliff_rubble
+scatter:
+  density: 0.5
+  spacing: 5
+  surface: true
+  min_slope: 5              # only where the surface drops >=5 blocks nearby
+size: [3, 3, 3]
+anchor: [1, 0, 1]
+ops:
+  - shape: sphere
+    at: [0, 0, 0]
+    radius: 1
+    block: [{name: cobblestone, w: 1}, {name: gravel, w: 1}]
+    block_pick: per_cell
+    place: force
