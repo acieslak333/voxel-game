@@ -115,7 +115,7 @@ lakes:
 # beyond `radius` with a noise-warped (irregular) coastline â€” the rest of the
 # infinite world is open sea. Disable for a continentalness-driven archipelago.
 island:
-  enabled: 0            # OFF = continentalness-driven archipelago (many islands). The
+  enabled: 1            # OFF = continentalness-driven archipelago (many islands). The
                         # continental_spline below now drives land/ocean.
   center: [0, 0]        # world coords of the island centre (genmap is centred here)
   radius: 2550          # blocks from centre where land has fully sunk to ocean
@@ -162,9 +162,9 @@ terrain3d:
     - {type: ridged, frequency: 0.0090, octaves: 3, weight: 0.38, offset: [1700, -900]}   # occasional clean cliffs / steps
   # Floating islands: solid masses ABOVE the surface. Dramatic fantasy -> COMMON, big,
   # and reaching high into the sky (now that the world is 256 tall).
-  float_threshold: 0.15  # LOWER = bigger / more islands (0.34 = lots of sky islands)
-  float_freq: 0.0060     # LOWER = bigger, chunkier island masses
-  float_gap: 10          # min blocks above the surface an island can start
+  float_threshold: 0.1  # LOWER = bigger / more islands (0.34 = lots of sky islands)
+  float_freq: 0.0030     # LOWER = bigger, chunkier island masses
+  float_gap: 2          # min blocks above the surface an island can start
   float_reach: 32       # max blocks above the surface islands appear (big sky archipelago)
   # float: { layers: [ ... ] }   # optional: author island shapes with the same blend
 
@@ -183,12 +183,11 @@ continental_spline:
 - [-0.40, -76]
 - [-0.18, -30]
 - [-0.06, -6]    # ┐ coast step: abrupt shoreline / sea-cliffs (crossing near c=0
-- [0.06, 6]     # ┘ -> roughly half land, big coherent islands)
+- [0.06, 18]     # ┘ -> roughly half land, big coherent islands)
 - [0.28, 30]     # ┐ flat plateau shelf (terrace)
 - [0.42, 34]     # ┘
 - [0.70, 50]
-- [0.85, 64]     # high inland base (mountains stack on top)
-- [1.00, 128]     # high inland base (mountains stack on top)
+- [1.00, 64]     # high inland base (mountains stack on top)
 # erosion_spline: erosion noise (-1..1) -> mountain amplitude (blocks). The ridged
 # `peaks` noise (0..1) scales this, so low-erosion areas grow tall ranges and
 # high-erosion areas stay flat.
