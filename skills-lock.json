@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "skills": {
+    "blockbench-animation": {
+      "source": "jasonjgardner/blockbench-mcp-project",
+      "sourceType": "github",
+      "skillPath": "skills/blockbench-animation/SKILL.md",
+      "computedHash": "5f4117a807b9d84285642232769ab48b6b82400d84dad922c2a00cc737bac896"
+    },
+    "blockbench-mcp-overview": {
+      "source": "jasonjgardner/blockbench-mcp-project",
+      "sourceType": "github",
+      "skillPath": "skills/blockbench-mcp-overview/SKILL.md",
+      "computedHash": "5aae407e95647a578106eff16619385d94207a3a1a680a77abb4d3815ad6752d"
+    },
+    "blockbench-texturing": {
+      "source": "jasonjgardner/blockbench-mcp-project",
+      "sourceType": "github",
+      "skillPath": "skills/blockbench-texturing/SKILL.md",
+      "computedHash": "736729d5159359f540d62fabf6c61e69d43429b0c2bbb55319fbb41053ca454e"
+    }
+  }
+}

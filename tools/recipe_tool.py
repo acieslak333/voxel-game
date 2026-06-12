@@ -9,7 +9,7 @@ block textures so you choose by icon, not by typing names.
 
     pip install flask ruamel.yaml
     python tools/recipe_tool.py
-    # open http://127.0.0.1:5001
+    # open http://127.0.0.1:5003
 
 Nothing here re-implements crafting: it only edits the data file the game reads,
 so what you save is exactly what the game uses.
@@ -328,5 +328,5 @@ fetch('/blocks').then(r=>r.json()).then(b=>{
 
 
 if __name__ == "__main__":
-    print("recipe editor → http://127.0.0.1:5001   (edits %s)" % RECIPES_FILE)
-    app.run(host="127.0.0.1", port=5001, debug=False)
+    print("recipe editor -> http://127.0.0.1:5003   (edits %s)" % RECIPES_FILE)
+    app.run(host="127.0.0.1", port=5003, debug=False)

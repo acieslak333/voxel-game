@@ -21,6 +21,7 @@ flora/caves themselves; this tool makes dialing the values a no-recompile loop.
     # open http://127.0.0.1:5002
 """
 import os
+import shutil
 import subprocess
 import sys
 
@@ -32,6 +33,8 @@ try:
     from ruamel.yaml import YAML
 except ImportError:
     sys.exit("biome_tool needs ruamel.yaml (preserves comments):  pip install ruamel.yaml")
+
+import terrain3d  # shared live-3D terrain view (vendored Three.js, sea plane + sky)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -72,13 +75,46 @@ def load_docs():
     return docs
 
 
-def save_and_deploy(docs):
+def deploy_only(docs):
+    """Preview: write the edited configs to the DEPLOYED copies (what --genmap and the
+    game read), NOT the committed source. So dragging a slider previews without saving."""
     for key, doc in docs.items():
-        with open(SRC[key], "w", encoding="utf-8") as f:
-            yaml.dump(doc, f)
         os.makedirs(os.path.dirname(DEPLOY[key]), exist_ok=True)
         with open(DEPLOY[key], "w", encoding="utf-8") as f:
             yaml.dump(doc, f)
+
+
+def save_source(docs):
+    """Persist the edits to the committed source files (and the deployed copies)."""
+    for key, doc in docs.items():
+        with open(SRC[key], "w", encoding="utf-8") as f:
+            yaml.dump(doc, f)
+    deploy_only(docs)
+
+
+def apply_form(docs, form):
+    """Patch the docs in place from a request form (id = 'FILE::dotted.path')."""
+    for cid, raw in form.items():
+        if cid in ("__pixels__", "__step__", "__view__"):
+            continue
+        try:
+            file, path = cid.split("::", 1)
+        except ValueError:
+            continue
+        # A theme dropdown sends a string; a slider sends a number.
+        if raw in PLANT_THEMES or raw in TREE_SPECIES:
+            val = raw
+        else:
+            try:
+                val = float(raw)
+                if val == int(val):
+                    val = int(val)
+            except ValueError:
+                val = raw
+        try:
+            set_path(docs[file], path, val)
+        except Exception:
+            pass
 
 
 def get_path(doc, dotted):
@@ -164,53 +200,55 @@ def build_controls(docs):
     return "\n".join(rows)
 
 
-def run_genmap(pixels, step):
-    subprocess.run([exe_path(), "--genmap", "--mapsize", str(pixels),
-                    "--mapstep", str(step), "--out", MAP_OUT],
-                   cwd=ROOT, check=True, capture_output=True)
+def run_genmap(pixels, step, view="top"):
+    if view == "3d":
+        args = terrain3d.vox_args(exe_path(), pixels)
+    else:
+        args = [exe_path(), "--genmap", "--mapsize", str(pixels),
+                "--mapstep", str(step), "--out", MAP_OUT]
+    subprocess.run(args, cwd=ROOT, check=True, capture_output=True)
 
 
 app = Flask(__name__)
+terrain3d.register(app)  # /vendor/<file>, /heightmap.png, /sealevel
 
 
 @app.route("/")
 def index():
     docs = load_docs()
-    page = PAGE.replace("__CONTROLS__", build_controls(docs))
+    page = (PAGE.replace("__CONTROLS__", build_controls(docs))
+            .replace("__HEAD__", terrain3d.HEAD).replace("__EXROW__", terrain3d.EX_ROW))
     return Response(page, mimetype="text/html")
 
 
 @app.route("/regen", methods=["POST"])
 def regen():
     docs = load_docs()
-    for cid, raw in request.form.items():
-        if cid in ("__pixels__", "__step__"):
-            continue
-        try:
-            file, path = cid.split("::", 1)
-        except ValueError:
-            continue
-        # A theme dropdown sends a string; a slider sends a number.
-        if raw in PLANT_THEMES or raw in TREE_SPECIES:
-            val = raw
-        else:
-            try:
-                val = float(raw)
-                if val == int(val):
-                    val = int(val)
-            except ValueError:
-                val = raw
-        try:
-            set_path(docs[file], path, val)
-        except Exception:
-            pass
-    save_and_deploy(docs)
+    apply_form(docs, request.form)
+    deploy_only(docs)  # preview only — does NOT touch the committed source
     try:
         run_genmap(int(request.form.get("__pixels__", 640)),
-                   int(request.form.get("__step__", 8)))
+                   int(request.form.get("__step__", 8)),
+                   request.form.get("__view__", "top"))
     except subprocess.CalledProcessError as e:
         return Response(e.stderr.decode(errors="ignore") or "genmap failed", status=500)
     return "ok"
+
+
+@app.route("/save", methods=["POST"])
+def save():
+    docs = load_docs()
+    apply_form(docs, request.form)
+    save_source(docs)  # persist edits to assets/biomes.yaml + world.yaml
+    return "saved"
+
+
+@app.route("/restore", methods=["POST"])
+def restore():
+    for key in SRC:  # discard unsaved edits (revert the deployed copies to source)
+        os.makedirs(os.path.dirname(DEPLOY[key]), exist_ok=True)
+        shutil.copyfile(SRC[key], DEPLOY[key])
+    return "restored"
 
 
 @app.route("/map.png")
@@ -222,8 +260,9 @@ PAGE = """<!doctype html><html><head><meta charset="utf-8"><title>biome / flora 
 <style>
  body{margin:0;background:#1b1a1a;color:#eaddc7;font:13px system-ui;display:flex}
  #side{width:360px;padding:14px;overflow:auto;height:100vh;box-sizing:border-box}
- #main{flex:1;display:flex;align-items:center;justify-content:center;background:#111}
- #map{max-width:96%;max-height:96vh;image-rendering:pixelated;border:1px solid #333}
+ #main{flex:1;position:relative;background:#0c1014;overflow:hidden}
+ #map{position:absolute;inset:0;margin:auto;max-width:96%;max-height:96vh;image-rendering:pixelated;border:1px solid #333}
+ #gl{position:absolute;inset:0;width:100%;height:100%;display:none}
  .r{display:grid;grid-template-columns:96px 1fr 52px;gap:6px;align-items:center;margin:4px 0}
  label{font-size:12px}.v{text-align:right;color:#c9a3e8}
  input[type=range]{width:100%}.sel{width:100%}
@@ -231,7 +270,9 @@ PAGE = """<!doctype html><html><head><meta charset="utf-8"><title>biome / flora 
  .grp{margin:8px 0 2px;font-weight:bold;color:#9fd0a0}
  .hint{color:#9a8f7d;font-size:11px;margin-bottom:10px}
  .row{display:flex;gap:8px;margin:8px 0}.row label{width:60px}
-</style></head><body>
+ button{background:#3a2f4a;color:#eaddc7;border:1px solid #5a4a6a;border-radius:5px;
+   padding:6px 14px;cursor:pointer;font:13px system-ui}button:hover{background:#4a3a5e}
+</style>__HEAD__</head><body>
 <div id="side">
  <h2>biome / flora / cave tool</h2>
  <div class="hint">Edits assets/biomes.yaml + world.yaml (comments preserved) and
@@ -239,30 +280,56 @@ PAGE = """<!doctype html><html><head><meta charset="utf-8"><title>biome / flora 
  plants, caves &amp; ores are placed per-voxel by the game, so launch it to see them.</div>
  <div class="row"><label>size</label><input id="px" type="number" value="640" min="128" max="2048" step="64"></div>
  <div class="row"><label>blk/px</label><input id="st" type="number" value="8" min="1" max="32"></div>
+ <div class="row"><label>3D</label><input type="checkbox" id="view3d"> <span style="color:#9a8f7d">live terrain (orbit)</span></div>
+ <div class="row"><button id="save">Save</button><button id="restore">Restore</button>
+   <span id="dirty" style="align-self:center;color:#e0a060;font-size:12px"></span></div>
+ __EXROW__
  __CONTROLS__
  <div id="status" style="margin-top:10px;color:#9a8f7d"></div>
 </div>
-<div id="main"><img id="map" src="/map.png?0"></div>
+<div id="main"><img id="map" src="/map.png?0"><canvas id="gl"></canvas></div>
 <script>
-let timer=null;
+let timer=null, lastGen=0, dirty=false;
+function is3D(){ return document.getElementById('view3d').checked; }
+// Slider/dropdown edits are PREVIEW-only (written to the build copies, never the
+// committed source) until you hit Save. Restore reverts the preview to source.
+function setDirty(b){ dirty=b; document.getElementById('dirty').textContent=b?'● unsaved':''; }
 function onSlide(el){const v=document.getElementById('v_'+el.dataset.id);
   if(v) v.textContent=(+el.value)||el.value;
-  clearTimeout(timer); timer=setTimeout(regen,200);}
-function regen(){
+  setDirty(true); clearTimeout(timer); timer=setTimeout(regen,200);}
+
+function formData(){
   const fd=new FormData();
   document.querySelectorAll('[data-id]').forEach(s=>fd.append(s.dataset.id,s.value));
   fd.append('__pixels__',document.getElementById('px').value);
   fd.append('__step__',document.getElementById('st').value);
+  fd.append('__view__', is3D() ? '3d' : 'top');
+  return fd;
+}
+// 3D voxel terrain (t3dShow/t3dBuild) lives in /vendor/terrain3d.js.
+function regen(){
+  t3dShow(is3D());
   document.getElementById('status').textContent='generating…';
-  fetch('/regen',{method:'POST',body:fd}).then(r=>r.text().then(t=>{
-    if(r.ok){document.getElementById('map').src='/map.png?'+Date.now();
-             document.getElementById('status').textContent='ok';}
+  fetch('/regen',{method:'POST',body:formData()}).then(r=>r.text().then(t=>{
+    if(r.ok){ lastGen=Date.now();
+      if(is3D()) t3dBuild('/voxels.bin?'+lastGen);
+      else document.getElementById('map').src='/map.png?'+lastGen;
+      document.getElementById('status').textContent='ok'; }
     else document.getElementById('status').textContent='error: '+t;}));}
 document.getElementById('px').onchange=regen; document.getElementById('st').onchange=regen;
+document.getElementById('view3d').onchange=regen;
+document.getElementById('save').onclick=function(){
+  document.getElementById('status').textContent='saving…';
+  fetch('/save',{method:'POST',body:formData()}).then(r=>r.text().then(t=>{
+    if(r.ok){ setDirty(false); document.getElementById('status').textContent='saved to biomes.yaml + world.yaml'; }
+    else document.getElementById('status').textContent='error: '+t; }));};
+document.getElementById('restore').onclick=function(){
+  if(dirty && !confirm('Discard unsaved changes and reload from source?')) return;
+  fetch('/restore',{method:'POST'}).then(()=>location.reload());};
 regen();
 </script></body></html>"""
 
 
 if __name__ == "__main__":
-    print("biome / flora tool → http://127.0.0.1:5002   (exe: %s)" % exe_path())
+    print("biome / flora tool -> http://127.0.0.1:5002   (exe: %s)" % exe_path())
     app.run(host="127.0.0.1", port=5002, debug=False)
