@@ -192,6 +192,9 @@ FarTerrainRenderer::Config farTerrainConfig(const std::string& path) {
             if (ft["skirt_depth"]) c.skirtDepth = ft["skirt_depth"].as<float>();
             if (ft["underlap"])    c.underlap   = ft["underlap"].as<int>();
             if (ft["y_bias"])      c.yBias      = ft["y_bias"].as<float>();
+            if (ft["trees"])       c.trees      = ft["trees"].as<bool>();
+            if (ft["tree_dist"])   c.treeDist   = ft["tree_dist"].as<int>();
+            if (ft["forest_tint"]) c.forestTint = ft["forest_tint"].as<float>();
         }
     } catch (...) {
         // Malformed/missing file: keep defaults (the world load already reported it).
@@ -199,6 +202,7 @@ FarTerrainRenderer::Config farTerrainConfig(const std::string& path) {
     c.baseStep  = std::max(1, c.baseStep);
     c.ringCells = std::clamp(c.ringCells, 2, 256);
     c.ringCount = std::clamp(c.ringCount, 0, 8);
+    c.treeDist  = std::clamp(c.treeDist, 0, 1024);
     return c;
 }
 } // namespace
@@ -1191,12 +1195,24 @@ void App::run(long maxFrames, const std::string& screenshotPath) {
                 const glm::vec3 lightCol =
                     glm::mix(sky.lightColor, glm::vec3(lum) * glm::vec3(0.95f, 0.98f, 1.05f),
                              shade * 0.6f);
-                // Far-terrain LOD shell first (background): the coarse distant
-                // ground beyond the voxel window. Drawn before the near chunks so
-                // they occlude it at the seam (it also sits a touch lower — yBias).
+                // Horizon haze colour, shared by the far-terrain edge fade and the
+                // composite distance fog: the sky's horizon warmed toward day haze,
+                // then toward the sunset colour at dusk.
+                const glm::vec3 dayHaze(0.66f, 0.74f, 0.86f);
+                glm::vec3 haze = glm::mix(sky.horizon, dayHaze,
+                                          glm::clamp(sky.skyIntensity * 1.3f, 0.0f, 1.0f));
+                haze = glm::mix(haze, sky.sunsetColor, sky.sunsetAmount * 0.5f);
+                if (fogHazeTuned_) haze = fogHaze_; // tuning panel override
+                // Far-terrain LOD shell first (background): the coarse distant ground
+                // + tree impostors beyond the voxel window. Drawn before the near
+                // chunks so they occlude it at the seam (it also sits a touch lower —
+                // yBias). Its outer ~45% dissolves into `haze` so the edge isn't hard.
+                const float farReach = farTerrain_.enabled()
+                    ? static_cast<float>(farTerrain_.outerExtentBlocks(world_)) : 0.0f;
                 farTerrain_.record(cmd, frameIndex, extent, view, proj,
                                    glm::vec4(sky.lightDir, ambient),
-                                   glm::vec4(lightCol, intensity));
+                                   glm::vec4(lightCol, intensity),
+                                   cam.position, haze, farReach * 0.55f, farReach);
                 worldRenderer_.record(cmd, frameIndex, extent, view, proj,
                                       glm::vec4(sky.lightDir, ambient),
                                       glm::vec4(lightCol, intensity));
@@ -1312,11 +1328,8 @@ void App::run(long maxFrames, const std::string& screenshotPath) {
                 // level ray accumulates it over a long column, so any sizeable base
                 // would grey out a clear midday distance.
                 const float fogAmt = glm::clamp(fogW + 0.5f * dawn * (0.3f + fogW), 0.0f, 1.0f);
-                const glm::vec3 dayHaze(0.66f, 0.74f, 0.86f);
-                glm::vec3 haze = glm::mix(sky.horizon, dayHaze,
-                                          glm::clamp(sky.skyIntensity * 1.3f, 0.0f, 1.0f));
-                haze = glm::mix(haze, sky.sunsetColor, sky.sunsetAmount * 0.5f);
-                if (fogHazeTuned_) haze = fogHaze_;        // tuning panel override
+                // `haze` (horizon fog colour) was computed once above, before the
+                // far-terrain pass, so the shell edge fade and this fog agree.
                 const float fogOn = fogEnabled_ ? 1.0f : 0.0f;
                 CompositeRenderer::Fog fog{};
                 fog.invViewProj = glm::inverse(proj * view);

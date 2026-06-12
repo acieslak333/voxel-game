@@ -45,6 +45,9 @@ public:
     // The deterministic terrain generator (pure fn of seed + world coord). The far-
     // terrain LOD shell samples it directly to mesh ground beyond the loaded window.
     [[nodiscard]] const TerrainGenerator& generator() const { return gen_; }
+    // World seed (for deterministic feature scatter — e.g. far-terrain impostors
+    // replicate the tree gate hash so distant trees match the real voxel trees).
+    [[nodiscard]] uint32_t seed() const { return config_.seed; }
     [[nodiscard]] const Chunk& chunk(int cx, int cy, int cz) const;
 
     // The block at world coords; air (the default Block) outside world bounds.

@@ -49,6 +49,9 @@ public:
         int   underlap   = 24;   // blocks the shell reaches back under the window
         float yBias      = 1.5f; // shell sits this far below the true surface so
                                  // the near chunks always win the seam overlap
+        bool  trees      = true; // scatter low-poly tree impostors (cones/blobs)
+        int   treeDist   = 240;  // blocks past the window edge that impostors fill
+        float forestTint = 0.72f;// ground darkens toward this where biomes are forested
     };
 
     FarTerrainRenderer(VulkanContext& ctx, VkRenderPass renderPass, uint32_t framesInFlight,
@@ -73,12 +76,16 @@ public:
     // and no GPU work. Call from the gameplay update.
     void update(const World& world, const glm::vec3& camPos);
 
-    // Upload this frame's shell mesh and draw it. Same sun/sky inputs as
-    // WorldRenderer::record so the far ground lights identically. Draw BEFORE the
-    // near terrain so the chunks occlude the shell at the seam.
+    // Upload the shell mesh (only when it changed) and draw it. Same sun/sky
+    // inputs as WorldRenderer::record so the far ground lights identically. Draw
+    // BEFORE the near terrain so the chunks occlude the shell at the seam. The
+    // shell dissolves into `hazeColor` between fadeStart..fadeEnd world distance
+    // so its outer edge never reads as a hard cutoff.
     void record(VkCommandBuffer cmd, uint32_t frameIndex, VkExtent2D extent,
                 const glm::mat4& view, const glm::mat4& proj,
-                const glm::vec4& sunDirAmbient, const glm::vec4& sunColIntensity);
+                const glm::vec4& sunDirAmbient, const glm::vec4& sunColIntensity,
+                const glm::vec3& camPos, const glm::vec3& hazeColor,
+                float fadeStart, float fadeEnd);
 
 private:
     // Interleaved far-terrain vertex (matches farterrain.vert attributes).
@@ -95,6 +102,8 @@ private:
         glm::mat4 proj;
         glm::vec4 sunDir;
         glm::vec4 sunCol;
+        glm::vec4 camPos; // xyz cam, w = haze fade start
+        glm::vec4 haze;   // rgb haze colour, w = haze fade end
     };
 
     // What the shell needs to know about one column (cached per built vertex).
@@ -105,8 +114,12 @@ private:
     };
 
     // Build and RETURN the shell mesh centred on `center` (base-snapped world
-    // coords). Pure read of the generator/registry — safe to run on a worker.
-    [[nodiscard]] std::vector<FarVertex> buildMesh(const World& world, glm::ivec2 center) const;
+    // coords). `winBox` is the loaded voxel window as world block bounds
+    // (x0,z0,x1,z1), snapshotted on the main thread so the worker doesn't race
+    // recenter() — tree impostors are skipped inside it (real voxel trees there).
+    // Pure read of the generator/registry — safe to run on a worker.
+    [[nodiscard]] std::vector<FarVertex> buildMesh(const World& world, glm::ivec2 center,
+                                                   glm::ivec4 winBox) const;
     [[nodiscard]] Surf sampleSurf(const World& world, int wx, int wz) const;
 
     void createPipeline(VkRenderPass renderPass, const std::string& shaderDir);
@@ -114,20 +127,25 @@ private:
     void createDescriptorSets(uint32_t n, VkImageView view, VkSampler sampler);
     VkShaderModule loadShader(const std::string& path) const;
 
-    static constexpr uint32_t kMaxVerts = 1u << 18; // 262144 verts/frame cap
+    static constexpr uint32_t kMaxVerts = 1u << 19; // 524288 verts cap (ground + impostors)
 
     VulkanContext& ctx_;
     Config         config_;
     uint32_t       framesInFlight_ = 0;
 
-    // Resolved once on the first update (needs a registry).
+    // Resolved once on the first update (needs a registry). leafLayer_ is indexed
+    // by TreeKind (oak/birch/pine/maple/willow), trunkLayer_ shared.
     mutable uint32_t waterLayer_ = 0;
-    mutable bool     waterResolved_ = false;
+    mutable uint32_t leafLayer_[5] = {0, 0, 0, 0, 0};
+    mutable uint32_t trunkLayer_ = 0;
+    mutable bool     layersResolved_ = false;
 
     std::vector<FarVertex> mesh_;            // current CPU shell (last finished build)
     std::future<std::vector<FarVertex>> buildFuture_; // background rebuild in flight
     glm::ivec2             lastCenter_{1 << 30, 1 << 30}; // centre of the launched build
     bool                   built_ = false;
+    uint32_t               meshVersion_ = 0; // bumped each rebuild; gates buffer re-upload
+    std::vector<uint32_t>  bufVersion_;       // per-frame buffer: which mesh version it holds
 
     VkDescriptorSetLayout descriptorSetLayout_ = VK_NULL_HANDLE;
     VkPipelineLayout      pipelineLayout_      = VK_NULL_HANDLE;

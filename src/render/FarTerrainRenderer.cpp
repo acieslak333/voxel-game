@@ -42,6 +42,17 @@ uint32_t packTint(const glm::vec3& t) {
     return c(t.r) | (c(t.g) << 8) | (c(t.b) << 16) | (0xFFu << 24);
 }
 constexpr uint32_t kNoTint = 0xFFFFFFFFu;
+
+// Deterministic [0,1) hash — MUST match World.cpp's hash01 so the far-terrain
+// tree impostors land on exactly the columns the voxel generator roots trees on.
+float hash01(int x, int z, uint32_t salt) {
+    uint32_t h = static_cast<uint32_t>(x) * 0x8da6b343u ^
+                 static_cast<uint32_t>(z) * 0xd8163841u ^ (salt * 0x9e3779b9u);
+    h ^= h >> 16; h *= 0x7feb352du;
+    h ^= h >> 15; h *= 0x846ca68bu;
+    h ^= h >> 16;
+    return static_cast<float>(h & 0x00FFFFFFu) / static_cast<float>(0x01000000);
+}
 } // namespace
 
 FarTerrainRenderer::FarTerrainRenderer(VulkanContext& ctx, VkRenderPass renderPass,
@@ -61,6 +72,7 @@ FarTerrainRenderer::FarTerrainRenderer(VulkanContext& ctx, VkRenderPass renderPa
                                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
                                         VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
     }
+    bufVersion_.assign(framesInFlight, 0); // 0 = no mesh uploaded yet
     createDescriptorSets(framesInFlight, textureView, textureSampler);
 }
 
@@ -86,7 +98,15 @@ FarTerrainRenderer::Surf FarTerrainRenderer::sampleSurf(const World& world, int 
     } else {
         s.y     = static_cast<float>(ci.height + 1) - config_.yBias;
         s.layer = reg.faceLayer(ci.topId, FacePosY);
-        s.tint  = world.isVegTintable(ci.topId) ? packTint(ci.vegTint) : kNoTint;
+        glm::vec3 tint = world.isVegTintable(ci.topId) ? ci.vegTint : glm::vec3(1.0f);
+        // Forest tint: darken vegetation-tinted ground toward `forestTint` where the
+        // biome is dense forest, so distant woods read as dark masses even between
+        // the tree impostors (and beyond the impostor band) instead of bare grass.
+        if (world.isVegTintable(ci.topId) && ci.treeDensity > 0.0f) {
+            const float f = std::clamp(ci.treeDensity * 5.0f, 0.0f, 1.0f);
+            tint *= glm::mix(1.0f, config_.forestTint, f);
+        }
+        s.tint = packTint(tint);
     }
     return s;
 }
@@ -112,19 +132,27 @@ void FarTerrainRenderer::update(const World& world, const glm::vec3& camPos) {
     if (!config_.enabled) {
         return;
     }
-    if (!waterResolved_) {
-        try {
-            waterLayer_ = world.registry().faceLayer(world.registry().idByName("water"), FacePosY);
-        } catch (...) {
-            waterLayer_ = 0;
-        }
-        waterResolved_ = true;
+    if (!layersResolved_) {
+        const BlockRegistry& reg = world.registry();
+        auto layerOf = [&](const char* name, uint32_t fallback) -> uint32_t {
+            try { return reg.faceLayer(reg.idByName(name), FacePosY); } catch (...) { return fallback; }
+        };
+        waterLayer_   = layerOf("water", 0);
+        // Indexed by TreeKind: 0 Oak, 1 Birch, 2 Pine, 3 Maple, 4 Willow.
+        leafLayer_[0] = layerOf("oak_leaves", 0);
+        leafLayer_[1] = layerOf("birch_leaves", leafLayer_[0]);
+        leafLayer_[2] = layerOf("pine_leaves", leafLayer_[0]);
+        leafLayer_[3] = layerOf("maple_leaves", leafLayer_[0]);
+        leafLayer_[4] = layerOf("willow_leaves", leafLayer_[0]);
+        trunkLayer_   = layerOf("oak_log_side", 0);
+        layersResolved_ = true;
     }
     // Collect a finished background rebuild (swap on the main thread; record() also
     // runs on the main thread, so mesh_ is never read mid-swap).
     if (buildFuture_.valid() &&
         buildFuture_.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) {
         mesh_ = buildFuture_.get();
+        ++meshVersion_; // the buffers now hold a stale mesh — record() re-uploads
     }
     const int base = std::max(1, config_.baseStep);
     const glm::ivec2 c{floorDiv(static_cast<int>(std::floor(camPos.x)), base) * base,
@@ -135,13 +163,20 @@ void FarTerrainRenderer::update(const World& world, const glm::vec3& camPos) {
     if ((!built_ || c != lastCenter_) && !buildFuture_.valid()) {
         lastCenter_ = c;
         built_ = true;
+        // Snapshot the loaded window box (block bounds) on the main thread — the
+        // worker must not read world.chunkOrigin() while recenter() may write it.
+        const glm::ivec3 o = world.chunkOrigin();
+        const glm::ivec3 n = world.chunkCounts();
+        const glm::ivec4 winBox{o.x * Chunk::kSize, o.z * Chunk::kSize,
+                                (o.x + n.x) * Chunk::kSize, (o.z + n.z) * Chunk::kSize};
         buildFuture_ = std::async(std::launch::async,
-                                  [this, &world, c] { return buildMesh(world, c); });
+                                  [this, &world, c, winBox] { return buildMesh(world, c, winBox); });
     }
 }
 
 std::vector<FarTerrainRenderer::FarVertex> FarTerrainRenderer::buildMesh(const World& world,
-                                                                         glm::ivec2 center) const {
+                                                                         glm::ivec2 center,
+                                                                         glm::ivec4 winBox) const {
     std::vector<FarVertex> mesh;
     const int base = std::max(1, config_.baseStep);
     const int centerX = center.x;
@@ -230,6 +265,112 @@ std::vector<FarTerrainRenderer::FarVertex> FarTerrainRenderer::buildMesh(const W
             }
         }
     }
+
+    // --- Low-poly tree impostors -------------------------------------------------
+    // Real 3D geometry (a cone for conifers, an octahedron blob for round canopies),
+    // NOT billboards — so they read correctly from any angle and never swim. They
+    // are scattered with the EXACT tree gate World::generateColumn uses (hash01 vs
+    // the column's treeDensity, species from treeKind), so a distant impostor sits
+    // on the same column and at matching size as the real voxel tree — as the player
+    // approaches, the window edge reaches it and the voxel tree takes over seamlessly.
+    if (config_.trees) {
+        const uint32_t seed = world.seed();
+        const float maxTreeD = world.generator().maxTreeDensity();
+        const int treeOuter = windowHalf + config_.treeDist; // Chebyshev reach from player
+        constexpr int kCap = 6000;                           // impostor budget per rebuild
+        int placed = 0;
+
+        // A cone (conifer): apex up, N-gon base ring. Outward-ish per-face normals.
+        auto cone = [&](glm::vec3 base, float r, float h, uint32_t layer, uint32_t tint) {
+            constexpr int N = 7;
+            const glm::vec3 apex = base + glm::vec3(0.0f, h, 0.0f);
+            for (int i = 0; i < N; ++i) {
+                const float a0 = (float(i) / N) * 6.2831853f;
+                const float a1 = (float(i + 1) / N) * 6.2831853f;
+                const glm::vec3 p0 = base + glm::vec3(std::cos(a0) * r, 0.0f, std::sin(a0) * r);
+                const glm::vec3 p1 = base + glm::vec3(std::cos(a1) * r, 0.0f, std::sin(a1) * r);
+                pushTri(p0, p1, apex, layer, tint, false);
+            }
+        };
+        // An octahedron blob (round/drooping canopy).
+        auto blob = [&](glm::vec3 c, float rh, float rv, uint32_t layer, uint32_t tint) {
+            const glm::vec3 top = c + glm::vec3(0.0f, rv, 0.0f);
+            const glm::vec3 bot = c - glm::vec3(0.0f, rv, 0.0f);
+            const glm::vec3 e[4] = {c + glm::vec3(rh, 0, 0), c + glm::vec3(0, 0, rh),
+                                    c - glm::vec3(rh, 0, 0), c - glm::vec3(0, 0, rh)};
+            for (int i = 0; i < 4; ++i) {
+                const glm::vec3& a = e[i];
+                const glm::vec3& b = e[(i + 1) % 4];
+                pushTri(a, b, top, layer, tint, false);
+                pushTri(b, a, bot, layer, tint, false);
+            }
+        };
+        // A thin trunk box (4 side faces).
+        auto trunk = [&](float bx, float bz, float y0, float y1, float half) {
+            const glm::vec3 A(bx - half, 0, bz - half), B(bx + half, 0, bz - half);
+            const glm::vec3 C(bx + half, 0, bz + half), D(bx - half, 0, bz + half);
+            const glm::vec3 corners[4] = {A, B, C, D};
+            for (int i = 0; i < 4; ++i) {
+                glm::vec3 p = corners[i], q = corners[(i + 1) % 4];
+                const glm::vec3 t0(p.x, y0, p.z), t1(q.x, y0, q.z);
+                const glm::vec3 u0(p.x, y1, p.z), u1(q.x, y1, q.z);
+                pushTri(t0, t1, u1, trunkLayer_, kNoTint, false);
+                pushTri(t0, u1, u0, trunkLayer_, kNoTint, false);
+            }
+        };
+
+        for (int oz = centerZ - treeOuter; oz <= centerZ + treeOuter && placed < kCap; ++oz) {
+            for (int ox = centerX - treeOuter; ox <= centerX + treeOuter; ++ox) {
+                const int cheb = std::max(std::abs(ox - centerX), std::abs(oz - centerZ));
+                if (cheb >= treeOuter) continue; // beyond the impostor reach
+                // Skip columns inside the loaded voxel window: real trees live there,
+                // so an impostor would double them (z-fighting). Outside it, impostors
+                // start exactly at the window edge — no overlap, no tree-less ring.
+                if (ox >= winBox.x && ox < winBox.z && oz >= winBox.y && oz < winBox.w) continue;
+                const float th = hash01(ox, oz, seed ^ 0x7233u);
+                if (th >= maxTreeD) continue; // cheap reject before the costly columnInfo
+                const ColumnInfo oc = world.generator().columnInfo(ox, oz);
+                if (th >= oc.treeDensity) continue;       // no tree roots here
+                if (oc.height < oc.waterLevel) continue;  // not in water
+
+                const float csz = hash01(ox, oz, seed ^ 0x7241u); // canopy-size roll
+                const float hh  = hash01(ox, oz, seed ^ 0x7234u); // trunk-height roll
+                const int k = std::clamp(static_cast<int>(oc.treeKind), 0, 4);
+                const uint32_t leaf = leafLayer_[k];
+                const uint32_t tint = packTint(oc.vegTint);
+                const float bx = ox + 0.5f, bz = oz + 0.5f;
+                const float oh = static_cast<float>(oc.height) + 1.0f;
+
+                switch (oc.treeKind) {
+                    case TreeKind::Pine: {
+                        const float trunkH = 8.0f + hh * 7.0f;
+                        const float r = 2.0f + csz * 2.0f + 0.6f;
+                        trunk(bx, bz, oh, oh + trunkH * 0.35f, 0.45f);
+                        cone({bx, oh + trunkH * 0.12f, bz}, r, trunkH + 1.0f, leaf, tint);
+                        break;
+                    }
+                    case TreeKind::Willow: {
+                        const float trunkH = 6.0f + hh * 5.0f;
+                        const float rH = 3.0f + csz * 2.0f;
+                        trunk(bx, bz, oh, oh + trunkH, 0.5f);
+                        blob({bx, oh + trunkH, bz}, rH + 1.0f, rH * 0.8f, leaf, tint);
+                        break;
+                    }
+                    default: { // Oak / Birch / Maple — round canopy on a trunk
+                        const float trunkH = (oc.treeKind == TreeKind::Birch)
+                                                 ? 7.0f + hh * 6.0f
+                                                 : 5.0f + hh * 6.0f;
+                        const float rH = (oc.treeKind == TreeKind::Birch) ? 2.2f : 2.5f + csz * 2.0f;
+                        const float rV = rH + 0.5f;
+                        trunk(bx, bz, oh, oh + trunkH, 0.45f);
+                        blob({bx, oh + trunkH, bz}, rH + 0.5f, rV, leaf, tint);
+                        break;
+                    }
+                }
+                if (++placed >= kCap) break;
+            }
+        }
+    }
     return mesh;
 }
 
@@ -237,14 +378,22 @@ std::vector<FarTerrainRenderer::FarVertex> FarTerrainRenderer::buildMesh(const W
 
 void FarTerrainRenderer::record(VkCommandBuffer cmd, uint32_t frameIndex, VkExtent2D extent,
                                 const glm::mat4& view, const glm::mat4& proj,
-                                const glm::vec4& sunDirAmbient, const glm::vec4& sunColIntensity) {
+                                const glm::vec4& sunDirAmbient, const glm::vec4& sunColIntensity,
+                                const glm::vec3& camPos, const glm::vec3& hazeColor,
+                                float fadeStart, float fadeEnd) {
     if (!config_.enabled || mesh_.empty()) return;
 
-    CameraUBO ubo{view, proj, sunDirAmbient, sunColIntensity};
+    CameraUBO ubo{view, proj, sunDirAmbient, sunColIntensity,
+                  glm::vec4(camPos, fadeStart), glm::vec4(hazeColor, fadeEnd)};
     uniformBuffers_[frameIndex].upload(&ubo, sizeof(ubo));
 
     const size_t n = std::min(static_cast<size_t>(kMaxVerts), mesh_.size());
-    vertexBuffers_[frameIndex].upload(mesh_.data(), n * sizeof(FarVertex));
+    // Re-upload into THIS frame's buffer only when it holds a stale mesh — the shell
+    // changes only on a rebuild (every few blocks walked), so most frames just draw.
+    if (bufVersion_[frameIndex] != meshVersion_) {
+        vertexBuffers_[frameIndex].upload(mesh_.data(), n * sizeof(FarVertex));
+        bufVersion_[frameIndex] = meshVersion_;
+    }
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_);
     VkViewport viewport{};
