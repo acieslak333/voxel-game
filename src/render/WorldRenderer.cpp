@@ -435,13 +435,36 @@ void WorldRenderer::processRemeshQueue(int budget) {
     if (pendingRemesh_.empty() || budget <= 0) {
         return;
     }
-    std::vector<glm::ivec3> batch;
+    // Pop a frame's slice and mesh it on the main thread, but install via the SAME
+    // deferred-buffer + frame-integrated upload path the worker pool uses
+    // (installMeshBatch -> recordPendingUploads), NOT the draining remeshChunks.
+    // This is the no-workers streaming fallback; routing it through the deferred
+    // path means per-tick liquid flow never issues a vkDeviceWaitIdle here either,
+    // so the flow-time stutter is gone with or without worker threads.
+    std::vector<MeshResult> batch;
     batch.reserve(static_cast<size_t>(budget));
     while (!pendingRemesh_.empty() && static_cast<int>(batch.size()) < budget) {
-        batch.push_back(pendingRemesh_.front());
+        const glm::ivec3 c = pendingRemesh_.front();
         pendingRemesh_.pop_front();
+        // A chunk queued by several liquid ticks before this drain only needs
+        // meshing once — skip a coord already in this batch.
+        bool dup = false;
+        for (const MeshResult& r : batch) {
+            if (r.cx == c.x && r.cy == c.y && r.cz == c.z) { dup = true; break; }
+        }
+        if (dup) {
+            continue;
+        }
+        const std::uint64_t v = ++meshVersion_[static_cast<size_t>(chunkIndex(c.x, c.y, c.z))];
+        MeshData md = ChunkMesher::greedyMesh(
+            world_.chunk(c.x, c.y, c.z), world_.registry(),
+            makeSampler(c.x, c.y, c.z), makeLightSampler(c.x, c.y, c.z), true,
+            c * kChunkSize, makeTintSampler(c.x, c.y, c.z));
+        batch.push_back(MeshResult{c.x, c.y, c.z, v, std::move(md)});
     }
-    remeshChunks(batch); // one GPU drain for this frame's slice
+    if (!batch.empty()) {
+        installMeshBatch(batch); // deferred buffers + queued staging copies, no drain
+    }
 }
 
 // --- Worker-thread streaming meshing -----------------------------------------

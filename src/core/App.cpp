@@ -822,7 +822,12 @@ void App::tickLiquids() {
 
     if (!edits.empty()) {
         const std::vector<glm::ivec3> dirty = world_.setBlocksBatch(edits); // one relight
-        worldRenderer_.remeshChunks(dirty);
+        // Flow remeshes go through the async streaming path (applied by streamPump +
+        // recordPendingUploads, deferred-buffer retire) instead of remeshChunks. The
+        // old synchronous path did a full vkDeviceWaitIdle every 0.2s tick while water
+        // spread — the remaining flow-time stutter. The next tick's streamBarrier()
+        // (top of this fn) keeps worker reads ordered before the next mutation.
+        worldRenderer_.streamRemesh(dirty);
     }
 }
 
