@@ -162,10 +162,13 @@ void FarTerrainRenderer::update(const World& world, const glm::vec3& camPos) {
     const int base = std::max(1, config_.baseStep);
     const glm::ivec2 c{floorDiv(static_cast<int>(std::floor(camPos.x)), base) * base,
                        floorDiv(static_cast<int>(std::floor(camPos.z)), base) * base};
-    // Kick a rebuild when we've crossed a base cell and none is already in flight.
-    // The generator/registry are immutable, so the worker only reads constant data
-    // — it never races the main thread's chunk/light mutations.
-    if ((!built_ || c != lastCenter_) && !buildFuture_.valid()) {
+    // Kick a rebuild when the player has moved a couple of base cells since the last
+    // one (the shell is distant + async, so this cadence is imperceptible but halves
+    // the rebuild CPU vs every single cell; the window-box hole's underlap covers the
+    // staleness). The generator/registry are immutable, so the worker only reads
+    // constant data — it never races the main thread's chunk/light mutations.
+    const int moved = std::max(std::abs(c.x - lastCenter_.x), std::abs(c.y - lastCenter_.y));
+    if ((!built_ || moved >= 2 * base) && !buildFuture_.valid()) {
         lastCenter_ = c;
         built_ = true;
         // Snapshot the loaded window box (block bounds) on the main thread — the
