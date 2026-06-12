@@ -25,7 +25,7 @@ struct ItemStack {
 //  Inventory
 // -----------------------------------------------------------------------------
 //  The player's item storage: a 9-slot hotbar (slots 0..8, one always "selected")
-//  plus a 27-slot backpack (slots 9..35), exactly like the classic layout. Mining
+//  plus a 54-slot backpack (slots 9..62), exactly like the classic layout. Mining
 //  a block calls add(); placing the held item calls takeFromSelected(). The full
 //  grid is shown/edited by the inventory screen (App::buildInventory); the hotbar
 //  row is always on the HUD.
@@ -36,10 +36,10 @@ struct ItemStack {
 class Inventory {
 public:
     static constexpr int kHotbarSlots  = 9;
-    static constexpr int kStorageRows  = 3;
+    static constexpr int kStorageRows  = 6;  // doubled backpack (was 3)
     static constexpr int kStorageCols  = 9;
-    static constexpr int kStorageSlots = kStorageRows * kStorageCols; // 27
-    static constexpr int kSlots        = kHotbarSlots + kStorageSlots; // 36
+    static constexpr int kStorageSlots = kStorageRows * kStorageCols; // 54
+    static constexpr int kSlots        = kHotbarSlots + kStorageSlots; // 63
     static constexpr uint16_t kMaxStack = 99;
 
     [[nodiscard]] ItemStack&       slot(int i)       { return slots_[static_cast<size_t>(i)]; }

@@ -1603,12 +1603,13 @@ void App::buildInventory(Ui& ui, float w, float h, const InputState& in) {
     Inventory& inv = player_.inventory();
     ui.panel(0.0f, 0.0f, w, h, kUiDim); // dim the world behind the screen
 
-    const float S = 1.7f; // inventory screen scale — bigger, comfier slots (ISSUES #15)
-    const float slot = 54.0f * S, gap = 8.0f * S, radius = 16.0f * S;
+    // Slots match the HUD hotbar exactly (60/8/20) so the screen reads compact; the
+    // backpack now holds twice as many rows (Inventory::kStorageRows) to compensate.
+    const float slot = 60.0f, gap = 8.0f, radius = 20.0f;
     const int   cols = Inventory::kStorageCols;
     const int   rows = Inventory::kStorageRows;
     const float gridW = cols * slot + (cols - 1) * gap;
-    const float pad = 22.0f * S, titleH = 30.0f * S, hotGap = 18.0f * S;
+    const float pad = 24.0f, titleH = 34.0f, hotGap = 16.0f;
     const float panelW = gridW + 2.0f * pad;
     const float panelH = titleH + rows * slot + (rows - 1) * gap + hotGap + slot + 2.0f * pad;
     const float px = std::round((w - panelW) * 0.5f);
