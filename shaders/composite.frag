@@ -32,7 +32,10 @@ void main() {
     vec3 col = texture(scene, uv).rgb;
 
     float depth = texture(depthTex, uv).r;
-    bool  isSky = depth >= 1.0; // sky / far plane: already holds horizon haze
+    // Reversed-Z: the far plane is depth 0 and the depth buffer is cleared to 0, so
+    // untouched sky pixels read 0 (the sky shader already painted the horizon haze
+    // there). Real geometry has depth > 0.
+    bool  isSky = depth <= 0.0;
 
     // Distance to this pixel (sky pixels sit at the far plane -> use a big value so
     // they read as "far" for the underwater murk below).

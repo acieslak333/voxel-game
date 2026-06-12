@@ -529,7 +529,7 @@ void FarTerrainRenderer::createPipeline(VkRenderPass renderPass, const std::stri
     depthStencil.sType            = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
     depthStencil.depthTestEnable  = VK_TRUE;
     depthStencil.depthWriteEnable = VK_TRUE;
-    depthStencil.depthCompareOp   = VK_COMPARE_OP_LESS;
+    depthStencil.depthCompareOp   = VK_COMPARE_OP_GREATER; // reversed-Z (near=1, far=0)
 
     VkPipelineColorBlendAttachmentState blendAttachment{};
     blendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |

@@ -1176,6 +1176,16 @@ void App::run(long maxFrames, const std::string& screenshotPath) {
                 }
                 glm::mat4 proj = glm::perspective(glm::radians(cam.fovDegrees), aspect,
                                                   cam.nearZ, farPlane);
+                // Reversed-Z: remap clip depth [0,1] -> [1,0] (near->1, far->0) so the
+                // float depth buffer's dense precision near 0 lands at the FAR distance
+                // — the correct distribution for the huge near:far ratio the LOD shell
+                // needs (otherwise distant geometry z-fights). Pipelines clear depth to
+                // 0 and test GREATER; the composite fog + sky use this same proj, and
+                // Gribb-Hartmann frustum culling is unaffected (same clip volume).
+                glm::mat4 rev(1.0f);
+                rev[2][2] = -1.0f;
+                rev[3][2] =  1.0f;
+                proj = rev * proj;
                 proj[1][1] *= -1.0f; // flip Y for Vulkan's clip space
 
                 // Sky first (no depth), then the world over it, lit by the same

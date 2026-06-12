@@ -233,7 +233,7 @@ void Renderer::recordCommandBuffer(VkCommandBuffer cmd, uint32_t imageIndex,
     // --- Pass 1: render the scene into the low-res offscreen target ----------
     std::array<VkClearValue, 2> clearValues{};
     clearValues[0].color        = {{clearColor_[0], clearColor_[1], clearColor_[2], clearColor_[3]}};
-    clearValues[1].depthStencil = {1.0f, 0}; // far plane
+    clearValues[1].depthStencil = {0.0f, 0}; // far plane (reversed-Z: far = depth 0)
 
     const VkExtent2D lowExtent = offscreen_->extent();
     VkRenderPassBeginInfo rpInfo{};

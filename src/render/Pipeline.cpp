@@ -148,7 +148,7 @@ void Pipeline::createPipeline(VkRenderPass renderPass, const std::string& vertSp
     // NOT write it, so overlapping liquid surfaces don't occlude each other and
     // the seabed drawn behind still shows through.
     depthStencil.depthWriteEnable = translucent_ ? VK_FALSE : VK_TRUE;
-    depthStencil.depthCompareOp   = VK_COMPARE_OP_LESS;
+    depthStencil.depthCompareOp   = VK_COMPARE_OP_GREATER; // reversed-Z (near=1, far=0)
 
     VkPipelineColorBlendAttachmentState blendAttachment{};
     blendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
