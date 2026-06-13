@@ -244,12 +244,11 @@ void VulkanContext::createLogicalDevice() {
     createInfo.pEnabledFeatures        = &features;
     createInfo.enabledExtensionCount   = static_cast<uint32_t>(kDeviceExtensions.size());
     createInfo.ppEnabledExtensionNames = kDeviceExtensions.data();
-    if (validationEnabled_) {
-        // Device layers are deprecated/ignored by modern loaders, but set them
-        // for compatibility with older implementations.
-        createInfo.enabledLayerCount   = static_cast<uint32_t>(kValidationLayers.size());
-        createInfo.ppEnabledLayerNames = kValidationLayers.data();
-    }
+    // Device-level layers are deprecated and have never done anything since Vulkan
+    // 1.0; modern validation flags setting them (VUID-VkDeviceCreateInfo-
+    // enabledLayerCount-12384). Leave enabledLayerCount at 0 — the validation layer
+    // is already enabled at the instance level (createInstance), which covers all
+    // device calls. (Old loaders that needed device layers are long gone.)
 
     if (vkCreateDevice(physicalDevice_, &createInfo, nullptr, &device_) != VK_SUCCESS) {
         throw std::runtime_error("Failed to create logical device");
