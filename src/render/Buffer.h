@@ -1,5 +1,7 @@
 #pragma once
 
+#include "render/GpuAllocator.h"
+
 #include <vulkan/vulkan.h>
 
 namespace vg {
@@ -9,8 +11,10 @@ class VulkanContext;
 // -----------------------------------------------------------------------------
 //  Buffer
 // -----------------------------------------------------------------------------
-//  RAII wrapper over a VkBuffer + its VkDeviceMemory. Move-only (owns GPU
-//  resources). Two common ways to build one:
+//  RAII wrapper over a VkBuffer whose memory is a sub-allocation from the
+//  context's shared GpuAllocator (not a private vkAllocateMemory — that ceiling
+//  is exactly what the pool removes). Move-only (owns the VkBuffer + its
+//  sub-allocation). Two common ways to build one:
 //    * the constructor, for a raw buffer you fill yourself (e.g. host-visible
 //      uniform buffers updated every frame), and
 //    * createDeviceLocal(), which uploads CPU data into fast device-local memory
@@ -31,7 +35,9 @@ public:
     // Copy `size` bytes from `src` into this buffer. Requires host-visible memory.
     void upload(const void* src, VkDeviceSize size);
 
-    // Persistent map/unmap for buffers updated frequently (e.g. per-frame UBOs).
+    // Host pointer to this buffer's memory (host-visible buffers only). The pool
+    // keeps host-visible blocks persistently mapped, so map() just returns the
+    // sub-allocation's pointer and unmap() is a no-op (kept for call-site symmetry).
     [[nodiscard]] void* map();
     void unmap();
 
@@ -48,9 +54,8 @@ private:
 
     VulkanContext* ctx_    = nullptr;
     VkBuffer       buffer_ = VK_NULL_HANDLE;
-    VkDeviceMemory memory_ = VK_NULL_HANDLE;
-    VkDeviceSize   size_   = 0;
-    void*          mapped_ = nullptr;
+    GpuAlloc       alloc_;            // sub-allocation backing buffer_'s memory
+    VkDeviceSize   size_   = 0;       // requested size (<= alloc_.spanSize)
 };
 
 } // namespace vg

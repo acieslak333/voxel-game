@@ -30,7 +30,8 @@ cmake is NOT on PATH; use the VS bundled one:
 ## Debug instrumentation (env-gated, inert otherwise — keep these)
 
 - `VG_MESH_TIME=1` — startup phase stamps: generate / skyLight / blockLight /
-  greedyMesh / GPU upload.
+  greedyMesh / GPU upload, plus the GpuAllocator pool summary (blocks + allocated/
+  live MiB — confirms chunk buffers share a few device allocations, REVIEW O5).
 - `VG_FRAME_TIME=1` — per-frame profiler, prints every 120 frames: avg/max,
   update/ui, and the draw split from `Renderer::phaseTimes()` (`wait` high =
   GPU-bound, `rec` high = CPU-bound recording).
@@ -86,7 +87,9 @@ visit order, thread timing, or mutable state.
 `src/core` app/input/UI/settings · `src/world` chunks, worldgen
 (TerrainGenerator + NoiseStack + Feature), lighting, persistence ·
 `src/render` Vulkan, WorldRenderer (meshing/streaming/workers), far-terrain
-LOD, composite/pixelate · `src/entity` Blockbench models, armature ·
+LOD, composite/pixelate; every `Buffer`'s memory is sub-allocated from
+`GpuAllocator`'s shared blocks (not a per-buffer `vkAllocateMemory` — REVIEW O5) ·
+`src/entity` Blockbench models, armature ·
 `src/player` controller/camera · `tools/` Python editors (`tools/hub.py`
 launches them) · `assets/` all game data (YAML + textures + models).
 

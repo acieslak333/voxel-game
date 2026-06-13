@@ -225,6 +225,7 @@ add_executable(voxelgame
     src/render/Renderer.cpp
     src/render/VulkanUtils.cpp
     src/render/Buffer.cpp
+    src/render/GpuAllocator.cpp
     src/render/TextureArray.cpp
     src/render/Pipeline.cpp
     src/render/WorldRenderer.cpp

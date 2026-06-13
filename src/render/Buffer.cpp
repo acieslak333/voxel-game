@@ -24,15 +24,11 @@ Buffer::Buffer(VulkanContext& ctx, VkDeviceSize size, VkBufferUsageFlags usage,
     VkMemoryRequirements memReq{};
     vkGetBufferMemoryRequirements(ctx_->device(), buffer_, &memReq);
 
-    VkMemoryAllocateInfo alloc{};
-    alloc.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    alloc.allocationSize  = memReq.size;
-    alloc.memoryTypeIndex = ctx_->findMemoryType(memReq.memoryTypeBits, properties);
-
-    if (vkAllocateMemory(ctx_->device(), &alloc, nullptr, &memory_) != VK_SUCCESS) {
-        throw std::runtime_error("Failed to allocate buffer memory");
-    }
-    vkBindBufferMemory(ctx_->device(), buffer_, memory_, 0);
+    // Sub-allocate from the shared pool instead of a private vkAllocateMemory, and
+    // bind at the sub-allocation's offset (it may be mid-block).
+    alloc_ = ctx_->allocator().allocate(memReq.size, memReq.alignment,
+                                        memReq.memoryTypeBits, properties);
+    vkBindBufferMemory(ctx_->device(), buffer_, alloc_.memory, alloc_.offset);
 }
 
 Buffer::~Buffer() {
@@ -43,28 +39,25 @@ void Buffer::destroy() {
     if (!ctx_) {
         return;
     }
-    if (mapped_) {
-        vkUnmapMemory(ctx_->device(), memory_);
-        mapped_ = nullptr;
-    }
+    // Destroy the buffer first (it references the memory), then return its range to
+    // the pool. The pool keeps the block mapped, so there is no per-buffer unmap.
     if (buffer_) {
         vkDestroyBuffer(ctx_->device(), buffer_, nullptr);
         buffer_ = VK_NULL_HANDLE;
     }
-    if (memory_) {
-        vkFreeMemory(ctx_->device(), memory_, nullptr);
-        memory_ = VK_NULL_HANDLE;
+    if (alloc_.valid()) {
+        ctx_->allocator().free(alloc_);
+        alloc_ = {};
     }
 }
 
 Buffer::Buffer(Buffer&& other) noexcept
-    : ctx_(other.ctx_), buffer_(other.buffer_), memory_(other.memory_),
-      size_(other.size_), mapped_(other.mapped_) {
+    : ctx_(other.ctx_), buffer_(other.buffer_), alloc_(other.alloc_),
+      size_(other.size_) {
     other.ctx_ = nullptr;
     other.buffer_ = VK_NULL_HANDLE;
-    other.memory_ = VK_NULL_HANDLE;
+    other.alloc_ = {};
     other.size_ = 0;
-    other.mapped_ = nullptr;
 }
 
 Buffer& Buffer::operator=(Buffer&& other) noexcept {
@@ -72,14 +65,12 @@ Buffer& Buffer::operator=(Buffer&& other) noexcept {
         destroy();
         ctx_    = other.ctx_;
         buffer_ = other.buffer_;
-        memory_ = other.memory_;
+        alloc_  = other.alloc_;
         size_   = other.size_;
-        mapped_ = other.mapped_;
         other.ctx_ = nullptr;
         other.buffer_ = VK_NULL_HANDLE;
-        other.memory_ = VK_NULL_HANDLE;
+        other.alloc_ = {};
         other.size_ = 0;
-        other.mapped_ = nullptr;
     }
     return *this;
 }
@@ -91,17 +82,14 @@ void Buffer::upload(const void* src, VkDeviceSize size) {
 }
 
 void* Buffer::map() {
-    if (!mapped_) {
-        vkMapMemory(ctx_->device(), memory_, 0, size_, 0, &mapped_);
-    }
-    return mapped_;
+    // Host-visible blocks are persistently mapped by the pool; the sub-allocation's
+    // pointer is computed at allocate() time. (Null here means a non-host-visible
+    // buffer was mapped — a usage error.)
+    return alloc_.mapped;
 }
 
 void Buffer::unmap() {
-    if (mapped_) {
-        vkUnmapMemory(ctx_->device(), memory_);
-        mapped_ = nullptr;
-    }
+    // No-op: the pool owns the persistent mapping for the whole block.
 }
 
 Buffer Buffer::createDeviceLocal(VulkanContext& ctx, const void* data,

@@ -464,6 +464,13 @@ void WorldRenderer::buildMeshes() {
         const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                             std::chrono::steady_clock::now() - _t1).count();
         std::printf("[mesh] GPU upload: %lldms\n", static_cast<long long>(ms));
+        // Pool stats: thousands of chunk buffers now ride a handful of device
+        // allocations (vs one vkAllocateMemory each — the maxMemoryAllocationCount
+        // ceiling, REVIEW O5).
+        const GpuAllocator& a = ctx_.allocator();
+        std::printf("[mesh] gpu pool: %u blocks, %.1f MiB allocated, %.1f MiB live\n",
+                    a.blockCount(), static_cast<double>(a.bytesAllocated()) / (1024.0 * 1024.0),
+                    static_cast<double>(a.bytesReserved()) / (1024.0 * 1024.0));
     }
     std::cout << "[world] meshed " << drawnChunks_ << " non-empty chunks, "
               << totalTriangles_ << " triangles";

@@ -50,13 +50,26 @@ cost, RAM, spike tails, and render-distance headroom. Ordered by value.
      strip — the CLAUDE.md wall-clock caveat. Verified: `--logictest`/`--selftest` green;
      autowalk steady ~850-1000 fps.
 
-## Remaining (future)
+- **O5 — GPU block sub-allocator (removes the per-chunk allocation ceiling).** Every
+  Buffer used to do its own `vkAllocateMemory`, so each chunk mesh + each staging
+  buffer counted against Vulkan's `maxMemoryAllocationCount` (guaranteed >= 4096, often
+  exactly that) — a hard cap on resident chunks and a per-upload alloc/free churn. New
+  `GpuAllocator` (src/render/GpuAllocator.{h,cpp}, owned by VulkanContext) hands out
+  sub-allocations from a few large 64 MiB `VkDeviceMemory` blocks: keep one (uncapped)
+  VkBuffer per chunk but `vkBindBufferMemory` it into a shared block at an offset.
+  Freed ranges return to a per-block coalescing free-list and are reused; host-visible
+  blocks are persistently mapped (Buffer::map() just returns the sub-allocation ptr,
+  unmap is a no-op). Buffer's public API is unchanged — only its internals. No block
+  reclaim in this first pass (the streaming working set is bounded, so block count
+  reaches a steady high-water well under the ceiling). Measured: 580 chunk meshes + all
+  staging now ride **2 blocks** (128 MiB allocated / 46.5 MiB live) vs ~580+ separate
+  device allocations — allocation count now scales with bytes, not chunk count.
+  Verified under Vulkan validation layers (Debug autowalk): no binding / alignment /
+  aliasing / use-after-free errors; Release streaming steady ~1100-1280 fps;
+  `--logictest`/`--selftest` green. This is the prerequisite for raising view_radius.
+  A `VG_MESH_TIME` line now prints pool block count + allocated/live MiB.
 
-**O5 — GPU buffer pool / VMA instead of one allocation per chunk.**
-The per-chunk-buffer design sits near Vulkan's ~4096 allocation ceiling (why upload
-batching needs slicing) and churns allocations during streaming. A pooled
-suballocator removes the ceiling — the prerequisite for raising view_radius
-meaningfully. Structural, medium effort.
+## Remaining (future)
 
 **O6 — Interpolated density sampling (approximate; only for view_radius 24–32).**
 Sample the terrain3d density stack on a coarse lattice (Minecraft uses 4×8×4) and

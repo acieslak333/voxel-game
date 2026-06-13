@@ -1,6 +1,7 @@
 #include "render/VulkanContext.h"
 
 #include "core/Window.h"
+#include "render/GpuAllocator.h"
 
 #include <cstring>
 #include <iostream>
@@ -111,10 +112,14 @@ VulkanContext::VulkanContext(const Window& window) : window_(window) {
     pickPhysicalDevice();
     createLogicalDevice();
     createTransientCommandPool();
+    allocator_ = std::make_unique<GpuAllocator>(*this);
 }
 
 VulkanContext::~VulkanContext() {
-    // Tear down in reverse creation order.
+    // Tear down in reverse creation order. The allocator frees its device memory
+    // blocks here, while the device is still alive and after every Buffer that
+    // sub-allocated from it has been destroyed (renderers outlived by this ctx).
+    allocator_.reset();
     if (transientPool_) {
         vkDestroyCommandPool(device_, transientPool_, nullptr);
     }
@@ -130,6 +135,10 @@ VulkanContext::~VulkanContext() {
     if (instance_) {
         vkDestroyInstance(instance_, nullptr);
     }
+}
+
+GpuAllocator& VulkanContext::allocator() const {
+    return *allocator_;
 }
 
 void VulkanContext::createInstance() {

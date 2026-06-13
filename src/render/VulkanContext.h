@@ -3,12 +3,14 @@
 #include <vulkan/vulkan.h>
 
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <vector>
 
 namespace vg {
 
 class Window;
+class GpuAllocator;
 
 // -----------------------------------------------------------------------------
 //  Queue families
@@ -68,6 +70,11 @@ public:
     [[nodiscard]] uint32_t findMemoryType(uint32_t typeFilter,
                                           VkMemoryPropertyFlags properties) const;
 
+    // Shared block sub-allocator backing every Buffer's device memory (removes the
+    // per-buffer vkAllocateMemory ceiling). Defined out-of-line so the header only
+    // needs a forward declaration. Lives as long as the device.
+    [[nodiscard]] GpuAllocator& allocator() const;
+
     // Allocate + begin a primary command buffer for a one-off operation (buffer
     // copies, image layout transitions). Pair with endSingleTimeCommands, which
     // submits it and blocks until it has finished.
@@ -99,6 +106,11 @@ private:
 
     // Small pool for short-lived one-off command buffers (staging copies, etc.).
     VkCommandPool transientPool_ = VK_NULL_HANDLE;
+
+    // Block sub-allocator for all device memory behind Buffers. Created after the
+    // logical device, destroyed first in ~VulkanContext (while the device is still
+    // alive) — after every Buffer that drew from it has already been freed.
+    std::unique_ptr<GpuAllocator> allocator_;
 
     QueueFamilyIndices queueFamilies_;
 
