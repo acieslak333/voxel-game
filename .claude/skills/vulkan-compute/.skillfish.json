@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "name": "vulkan-compute",
+  "owner": "a5c-ai",
+  "repo": "babysitter",
+  "path": "library/specializations/gpu-programming/skills/vulkan-compute",
+  "branch": "main",
+  "sha": "44e55f66fd3d4c3fe60418534b8dbf8d29e536ac",
+  "source": "manual"
+}

@@ -45,9 +45,18 @@ __pycache__/
 /tools/blockbench-mcp/
 /reference/
 
-# Claude Code local project config + installed skills (skills-lock.json is the
-# committed manifest; the skill contents reinstall from it).
-/.claude/
+# Claude Code project config. Track the shared agents + skills (so the team's
+# review/cpp/perf agents and the project skills are versioned), but keep personal
+# and transient bits out: local settings, and any nested .git from a cloned skill.
+/.claude/*
+!/.claude/agents/
+!/.claude/skills/
+# renderdoc-gpu-debug is a standalone git clone (has its own .git); excluded so it
+# is not committed as a broken embedded-repo gitlink. Vendor it separately if wanted.
+/.claude/skills/renderdoc-gpu-debug/
+# Defensive: never track a nested skill repo's .git or local settings.
+/.claude/**/.git/
+/.claude/settings.local.json
 
 # OS cruft
 .DS_Store
