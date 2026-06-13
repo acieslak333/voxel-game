@@ -51,9 +51,6 @@ __pycache__/
 /.claude/*
 !/.claude/agents/
 !/.claude/skills/
-# renderdoc-gpu-debug is a standalone git clone (has its own .git); excluded so it
-# is not committed as a broken embedded-repo gitlink. Vendor it separately if wanted.
-/.claude/skills/renderdoc-gpu-debug/
 # Defensive: never track a nested skill repo's .git or local settings.
 /.claude/**/.git/
 /.claude/settings.local.json
