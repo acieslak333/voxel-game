@@ -133,6 +133,18 @@ island:
 # â€” keep amplitude + tallest peak under ~127 or the highest peaks flat-top.
 terrain3d:
   enabled: 1
+  # interpolate (REVIEW O6): approximate the 3D density on a coarse world-aligned
+  # lattice and trilinearly interpolate, instead of evaluating the noise stack at
+  # EVERY cell. ~10-100x fewer density evals (the most expensive function in
+  # worldgen) — the headroom for a larger view_radius — at the cost of smoothing
+  # density detail finer than one lattice cell. OFF by default: leaving it off keeps
+  # generated terrain byte-identical (and the --selftest golden stable). Turn on
+  # when running a big render distance. `lattice` is the [x,y,z] cell size in blocks
+  # (default 4×8×4, Minecraft's; keep each a divisor of 16 so chunk seams land on
+  # lattice points). Where used: TerrainGenerator::mainSolid. Effect of raising the
+  # cell size: cheaper still, but blockier/blobbier sub-cell terrain.
+  interpolate: false
+  # lattice: [4, 8, 4]
   # amplitude = how far (blocks) the 3D noise pushes the surface up/down. This is an
   # ACCENT on top of the heightmap shape (splines + erosion-gated peaks), NOT the main
   # relief — keep it modest or it floods the world with chop and over-saturates the

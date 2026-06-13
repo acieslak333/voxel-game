@@ -1,13 +1,14 @@
 # Optimization backlog — voxel-game
 
 The 2026-06-13 code review (findings **R1–R12**: streaming/threading correctness and
-the remaining frame-hitch debt) has been **fully resolved** — see git history for the
-commits. What remains here is the optimization backlog from that pass: follow-up
-performance work, none of it felt slowness today.
+the remaining frame-hitch debt) and its follow-up optimization backlog (**O1–O7**) are
+both **fully resolved** — see git history for the commits and the per-item write-ups
+below. None of it was felt slowness at the time; the work bought RAM, killed the
+allocation ceiling, and opened headroom for a larger render distance.
 
-Profiled context: startup ~4s (generate dominates), steady state 250–800 fps, worst
-frame ~20–30 ms at a chunk-boundary crossing. These are about the remaining generate
-cost, RAM, spike tails, and render-distance headroom. Ordered by value.
+Profiled context (at the time): startup ~4s (generate dominates), steady state 250–800
+fps, worst frame ~20–30 ms at a chunk-boundary crossing. The items below targeted the
+generate cost, RAM, spike tails, and render-distance headroom.
 
 ## Done
 
@@ -69,16 +70,32 @@ cost, RAM, spike tails, and render-distance headroom. Ordered by value.
   `--logictest`/`--selftest` green. This is the prerequisite for raising view_radius.
   A `VG_MESH_TIME` line now prints pool block count + allocated/live MiB.
 
-## Remaining (future)
-
-**O6 — Interpolated density sampling (approximate; only for view_radius 24–32).**
-Sample the terrain3d density stack on a coarse lattice (Minecraft uses 4×8×4) and
-trilinearly interpolate: 10–100× on the most expensive function in the game, at the
-cost of smoothing sub-4-block density detail. Hold until a bigger window is actually
-wanted.
+- **O6 — interpolated density sampling (opt-in).** The 3D density stack (the most
+  expensive eval in worldgen — run per cell across the ±amplitude band) can now be
+  approximated: `TerrainGenerator::mainSolid` samples it only at the corners of a
+  world-aligned lattice (cell size `terrain3d.lattice`, default 4×8×4) and trilinearly
+  interpolates. Corners are memoised in a fixed-size per-worker thread_local cache —
+  pure memoisation (output independent of cache state, so determinism + worker-order
+  independence hold), keyed by an exact (epoch, x, y, z) discriminator so a hash
+  collision is a clean miss not a wrong value. World-aligned so neighbouring chunks
+  share corners (seam-safe; 4/8/4 divide 16 → chunk boundaries land on lattice points).
+  Measured (heavy 8-layer biomes.yaml stack): generate **2400 ms → 585 ms (~4.1x)** —
+  the density function itself drops ~10-100×; total generate is 4× because the other
+  noise (heightmap/climate/features) is now the floor. **Opt-in** via
+  `terrain3d.interpolate` (default false): off = byte-identical terrain + stable golden
+  + the thread_local cache is never even allocated; on = the determinism check (h1==h2)
+  still passes, the golden intentionally changes (it's an approximation). This is the
+  headroom O5 unblocked for a larger view_radius. The cost is smoothing density detail
+  finer than one cell; horizontal detail is preserved more than vertical (cell is
+  taller in Y).
 
 Measured and deliberately NOT worth touching: greedy mesher (0.19 ms/chunk), sky-light
 flood (0.38s), per-frame entity baking, the liquid tick.
+
+## Remaining (future)
+
+The O1–O7 backlog from the 2026-06-13 review is fully resolved. No open perf items;
+the list above is the record of what was done and what was measured-and-skipped.
 
 ## What's solid (keep doing this)
 

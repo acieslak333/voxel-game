@@ -77,7 +77,10 @@ visit order, thread timing, or mutable state.
 - Heavy-cost gotcha: editor-authored noise stacks can explode generation cost.
   `NoiseStack::addLayer` clamps invisible octaves, but `terrain3d.amplitude`
   near world height makes every cell pay the density path (the 145s-startup
-  incident). Watch generate-time stamps after biomes.yaml changes.
+  incident). Watch generate-time stamps after biomes.yaml changes. For a big
+  view_radius, `terrain3d.interpolate` (REVIEW O6) approximates the density on a
+  coarse lattice — ~4x faster generate — at the cost of smoothed sub-cell detail;
+  off by default (default terrain stays byte-identical).
 - Chunk saves (`saves/<seed>/c.X.Y.Z.bin`) have a magic+version header; bump
   `kChunkVersion` (World.cpp) on format changes — old files then regenerate
   instead of loading garbage. Only EDITED chunks are saved.

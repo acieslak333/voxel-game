@@ -170,6 +170,19 @@ private:
     // Main-terrain (no floating islands) solidity, shared by isSolid() + surfaceY().
     [[nodiscard]] bool mainSolid(int surfaceH, int wx, int wy, int wz) const;
 
+    // The raw 3D density perturbation at a world cell (the NoiseStack blend, or the
+    // scalar fbm fallback) — the single most expensive eval in worldgen.
+    [[nodiscard]] float rawDensity(float fx, float fy, float fz) const;
+    // Approximate density via a coarse world-aligned lattice (REVIEW O6): sample
+    // rawDensity only at lattice corners (cached per worker) and trilinearly
+    // interpolate. ~10-100x fewer noise evals at the cost of smoothing sub-cell
+    // detail. Opt-in (densityInterp_); a pure fn of (seed, coords) either way.
+    [[nodiscard]] float densityInterpolated(float fx, float fy, float fz) const;
+    // A single lattice-corner density, memoised in a per-thread cache (pure
+    // memoisation — the value is independent of cache state, so output stays
+    // deterministic and worker order can't change it).
+    [[nodiscard]] float densityCorner(int lx, int ly, int lz) const;
+
     // A perched lake covering this column, if any. `level` = water surface Y,
     // `bed` = the carved terrain height for this column (the bowl).
     struct LakeInfo { bool in = false; int level = 0; int bed = 0; };
@@ -211,6 +224,19 @@ private:
                                    // since the low-freq peaks only clear it in patches)
     int   floatGap_      = 6;      // min blocks above the surface a float isle can start
     int   floatReach_    = 64;     // how far above the surface float isles can appear
+
+    // Coarse-lattice density interpolation (REVIEW O6), opt-in via
+    // `terrain3d.interpolate` (default off, so existing worlds are byte-identical
+    // and the --selftest golden is unaffected). When on, mainSolid samples the
+    // density stack only at lattice corners (cell size latX_×latY_×latZ_, default
+    // 4×8×4 — Minecraft's) and trilinearly interpolates. The lattice is WORLD-
+    // aligned so adjacent chunks agree on shared corners (no seams), and corner
+    // samples are memoised per worker thread, so a streamed chunk pays a few
+    // hundred noise evals instead of tens of thousands. densityEpoch_ disambiguates
+    // the thread-local cache across TerrainGenerator instances (different seeds).
+    bool  densityInterp_ = false;
+    int   latX_ = 4, latY_ = 8, latZ_ = 4;
+    uint32_t densityEpoch_ = 0;
 
     // Sample a noise field: the stack blend if one was authored, else the scalar fbm.
     // All take raw world coords (the per-layer frequency is applied inside the stack).

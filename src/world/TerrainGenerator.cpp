@@ -5,9 +5,11 @@
 #include <yaml-cpp/yaml.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <cmath>
 #include <cstdio>
+#include <vector>
 
 namespace vg {
 
@@ -108,6 +110,12 @@ TerrainGenerator::TerrainGenerator(uint32_t seed, const BlockRegistry& registry,
     seed_ = seed;
     seaLevel_ = worldHeight_ / 2;
     snowLineRel_ = std::max(20, worldHeight_ / 2 - 9);
+
+    // Process-unique tag so the thread-local density-corner cache (keyed by lattice
+    // coords) never returns a stale value from a previously-constructed generator
+    // (a different seed → different density). See densityCorner().
+    static std::atomic<uint32_t> sEpochCounter{1};
+    densityEpoch_ = sEpochCounter.fetch_add(1, std::memory_order_relaxed);
 
     // Baked-in defaults so the game generates a sensible world even with no
     // biomes.yaml. loadConfig() overrides any of this from the file.
@@ -286,6 +294,15 @@ void TerrainGenerator::loadConfig(const std::string& assetDir, const BlockRegist
         getI(t3, "float_reach", floatReach_);
         densityStack_ = loadStack(t3["density"], seed_ * 374761393u + 0xABCDu);
         floatStack_   = loadStack(t3["float"],   seed_ * 1103515245u + 0x4Du);
+        // Coarse-lattice density interpolation (REVIEW O6), opt-in. `lattice` is an
+        // optional [x,y,z] cell size (default 4×8×4); each component is clamped to
+        // >= 1 (1 = exact on that axis).
+        densityInterp_ = asBool(t3["interpolate"], false);
+        if (const YAML::Node lat = t3["lattice"]; lat && lat.IsSequence() && lat.size() == 3) {
+            latX_ = std::max(1, lat[0].as<int>(latX_));
+            latY_ = std::max(1, lat[1].as<int>(latY_));
+            latZ_ = std::max(1, lat[2].as<int>(latZ_));
+        }
     }
     densityAmp_  = std::max(1.0f, densityAmp_);
     floatReach_  = std::max(floatGap_ + 1, floatReach_);
@@ -501,11 +518,72 @@ bool TerrainGenerator::mainSolid(int surfaceH, int wx, int wy, int wz) const {
     if (grad < -densityAmp_) return false; // well above the band: air (floats handled elsewhere)
     const float fx = static_cast<float>(wx), fy = static_cast<float>(wy),
                 fz = static_cast<float>(wz);
-    const float n = densityStack_.empty()
+    const float n = densityInterp_ ? densityInterpolated(fx, fy, fz) : rawDensity(fx, fy, fz);
+    return grad + n * densityAmp_ > 0.0f;
+}
+
+// The raw (exact) density perturbation: the authored NoiseStack blend, or the
+// scalar fbm fallback when no `density.layers:` was authored.
+float TerrainGenerator::rawDensity(float fx, float fy, float fz) const {
+    return densityStack_.empty()
         ? densityNoise_.fbm((fx + 26100.0f) * densityFreqXZ_, (fy + 9400.0f) * densityFreqY_,
                             (fz + 14700.0f) * densityFreqXZ_, densityOct_)
         : densityStack_.value(fx, fy, fz);
-    return grad + n * densityAmp_ > 0.0f;
+}
+
+// One lattice-corner density, memoised in a fixed-size per-thread direct-mapped
+// cache. Each worker keeps its own cache (no locking, no races); entries store the
+// exact (epoch, lx, ly, lz) discriminator so a hash collision is a clean miss, not
+// a wrong value — output stays a deterministic, visit-order-independent function.
+float TerrainGenerator::densityCorner(int lx, int ly, int lz) const {
+    constexpr uint32_t kBits = 15;            // 32768 slots
+    constexpr uint32_t kMask = (1u << kBits) - 1;
+    struct Slot { uint32_t epoch; int32_t x, y, z; float v; };
+    static thread_local std::vector<Slot> cache; // ~640 KiB/thread, lazily sized
+    if (cache.empty()) {
+        cache.assign(static_cast<size_t>(kMask) + 1, Slot{0, 0, 0, 0, 0.0f});
+    }
+    // Spatial hash → slot. Odd multipliers spread neighbouring corners apart.
+    const uint32_t h = (static_cast<uint32_t>(lx) * 73856093u) ^
+                       (static_cast<uint32_t>(ly) * 19349663u) ^
+                       (static_cast<uint32_t>(lz) * 83492791u);
+    Slot& s = cache[h & kMask];
+    if (s.epoch == densityEpoch_ && s.x == lx && s.y == ly && s.z == lz) {
+        return s.v; // hit
+    }
+    const float v = rawDensity(static_cast<float>(lx), static_cast<float>(ly),
+                               static_cast<float>(lz));
+    s = {densityEpoch_, lx, ly, lz, v};
+    return v;
+}
+
+// Trilinear interpolation of rawDensity over a world-aligned lattice. Sampling
+// only the 8 surrounding corners (each cached + shared across the cell's voxels and
+// neighbouring columns) replaces the per-voxel noise eval with eight cache lookups
+// and a lerp — the REVIEW O6 win. World-aligned so neighbouring chunks read the
+// same corners (seam-consistent); chunk boundaries (multiples of 16) land on lattice
+// points whenever the cell size divides 16 (4×8×4 does).
+float TerrainGenerator::densityInterpolated(float fx, float fy, float fz) const {
+    const int wx = static_cast<int>(std::floor(fx));
+    const int wy = static_cast<int>(std::floor(fy));
+    const int wz = static_cast<int>(std::floor(fz));
+    auto floorCell = [](int v, int c) { return (v >= 0 ? v / c : -((-v + c - 1) / c)) * c; };
+    const int x0 = floorCell(wx, latX_), x1 = x0 + latX_;
+    const int y0 = floorCell(wy, latY_), y1 = y0 + latY_;
+    const int z0 = floorCell(wz, latZ_), z1 = z0 + latZ_;
+    const float tx = static_cast<float>(wx - x0) / static_cast<float>(latX_);
+    const float ty = static_cast<float>(wy - y0) / static_cast<float>(latY_);
+    const float tz = static_cast<float>(wz - z0) / static_cast<float>(latZ_);
+
+    const float c000 = densityCorner(x0, y0, z0), c100 = densityCorner(x1, y0, z0);
+    const float c010 = densityCorner(x0, y1, z0), c110 = densityCorner(x1, y1, z0);
+    const float c001 = densityCorner(x0, y0, z1), c101 = densityCorner(x1, y0, z1);
+    const float c011 = densityCorner(x0, y1, z1), c111 = densityCorner(x1, y1, z1);
+
+    const float c00 = c000 + (c100 - c000) * tx, c10 = c010 + (c110 - c010) * tx;
+    const float c01 = c001 + (c101 - c001) * tx, c11 = c011 + (c111 - c011) * tx;
+    const float c0 = c00 + (c10 - c00) * ty, c1 = c01 + (c11 - c01) * ty;
+    return c0 + (c1 - c0) * tz;
 }
 
 // The actual 3D GROUND surface Y at a column — the topmost main-terrain solid cell
