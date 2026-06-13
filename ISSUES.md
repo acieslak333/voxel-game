@@ -938,3 +938,26 @@ Core Optimizations:
     crisp near terrain). NOTE: pre-existing `--selftest`/`--logictest` failures
     (worldgen hash, missing `iron_boots`) are from the user's in-flight worldgen +
     blocks.yaml edits, NOT this render-only work.
+19. **WORLDGEN TOOL POLISH + EDITOR MERGE** (next session; plan in docs/TOOLING.md)
+    The bd24b6a tooling pass fixed the dead noise sliders and the 96-block 3D
+    slice, but the tools are still rough. Remaining, roughly in order:
+    - **Still-missing fields**: per-biome tint [r,g,b] / snow / elevation +
+      temp/humidity ranges / top+filler blocks (biome_tool); world.yaml
+      structures.density/spacing; spline editors (continental_spline /
+      erosion_spline as draggable polylines); a feature-scatter summary table
+      (one row per assets/features/*.yaml: density, spacing, elevation band,
+      biome list) so tree/flora placement is visible in ONE place.
+    - **Weight sliders**: the per-layer f/w/o number inputs work but weights
+      (and probably frequency on a log scale) want real sliders with live
+      preview - numbers for exact entry, sliders for feel.
+    - **Prettier / more intuitive UI**: collapsible <details> sections instead
+      of one endless sidebar; group headers with reset-to-saved buttons; show
+      which fields are LIVE vs legacy-fallback; debounce indicator; a regen
+      spinner; tooltips from the YAML comments (what/where/effect).
+    - **3D view size control in the UI**: dedicated "view span (blocks)" +
+      "detail (blocks/cell)" inputs for the 3D mode instead of overloading the
+      2D map's size/blk-px fields; remember the camera between regens at
+      different sizes.
+    - Fold all of it into the genmap+biome editor MERGE (tools/worldgen_studio
+      .py) per the step-by-step plan in docs/TOOLING.md - do the merge FIRST,
+      then polish once, not twice.
