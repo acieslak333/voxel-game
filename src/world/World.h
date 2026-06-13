@@ -225,6 +225,11 @@ private:
     // call sites as computeSkyLight(); the two fields are combined by lightAt().
     void computeBlockLight();
 
+    // Build the block-light colour palette + per-block colour index from the
+    // registry's emission colours, once at construction. Single-threaded so the
+    // parallel emitter seed in computeBlockLight() can read it race-free.
+    void buildLightColorPalette();
+
     // Recompute one light field inside the column-box [x0,x1] x [z0,z1] (full
     // height). emitterSeed picks the source: false = sky (open columns), true =
     // block emission. Light entering across the box's open faces is seeded from
@@ -296,7 +301,15 @@ private:
     std::vector<Chunk>   chunks_;     // flat ring buffer, indexed by chunkIndex()
     std::vector<uint8_t> skyLight_;   // per-block sky light, indexed by lightIndex()
     std::vector<uint8_t> blockLight_; // per-block emitted light, same indexing
-    std::vector<uint32_t> blockLightColor_; // per-block emitter hue (packed RGBA8), same indexing
+    // Per-block emitter hue, stored as a 1-byte palette index (same indexing as
+    // blockLight_). Emitter colours come from a handful of blocks.yaml entries, so
+    // a palette index costs 1 byte/cell instead of a packed RGBA8 uint32 — ~200 MB
+    // saved at a 33x33x256 window (REVIEW O3). lightColorPalette_[idx] is the packed
+    // RGBA8 colour (entry 0 = none/black); emissionColorIndex_[blockId] is that
+    // block's palette index, both built once in buildLightColorPalette().
+    std::vector<uint8_t>  blockLightColor_;
+    std::vector<uint32_t> lightColorPalette_;   // palette idx -> packed RGBA8 (0 = none)
+    std::vector<uint8_t>  emissionColorIndex_;  // block id -> palette idx (0 = non-emitter)
     std::vector<uint8_t> chunkDirty_; // per ring slot: edited since gen/load (needs saving)
     std::string          savePath_;   // <config.saveDir>/<seed>; empty = persistence off
 

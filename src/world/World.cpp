@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <iostream>
+#include <iterator>
 #include <numeric>
 #include <stdexcept>
 #include <unordered_map>
@@ -164,6 +165,8 @@ World::World(const WorldConfig& config, const std::string& blocksFile)
     rubyId_    = registry_.idByName("ruby_ore");
     emeraldId_ = registry_.idByName("emerald_ore");
     mythrilId_ = registry_.idByName("mythril_ore");
+
+    buildLightColorPalette();
 
     // Sanity-check the configured vertical extent: columnHeight() clamps to the
     // world's top, so any terrain taller than chunks.y*kSize gets sheared flat.
@@ -1090,7 +1093,8 @@ glm::vec3 World::blockLightColorAt(int wx, int wy, int wz) const {
         wx >= o.x + s.x || wy >= o.y + s.y || wz >= o.z + s.z) {
         return glm::vec3(0.0f); // no emitters outside the loaded window
     }
-    return unpackLightColor(blockLightColor_[static_cast<size_t>(lightIndex(wx, wy, wz))]);
+    return unpackLightColor(
+        lightColorPalette_[blockLightColor_[static_cast<size_t>(lightIndex(wx, wy, wz))]]);
 }
 
 uint8_t World::lightAt(int wx, int wy, int wz) const {
@@ -1204,6 +1208,32 @@ void World::computeSkyLight() {
                 std::chrono::steady_clock::now() - _sf).count()));
 }
 
+void World::buildLightColorPalette() {
+    // Entry 0 is "no colour" (unlit cells / non-emitters). Every distinct emitter
+    // hue gets one palette slot; emissionColorIndex_[id] maps a block to its slot.
+    // Distinct emitter colours are a handful, so a linear find-or-add is fine and
+    // the index fits a byte (guarded below).
+    lightColorPalette_.assign(1, 0u);
+    emissionColorIndex_.assign(registry_.blockCount(), 0);
+    for (uint16_t id = 1; id < registry_.blockCount(); ++id) {
+        if (registry_.emission(id) == 0) continue;
+        const uint32_t packed = packLightColor(registry_.emissionColor(id));
+        auto it = std::find(lightColorPalette_.begin(), lightColorPalette_.end(), packed);
+        size_t idx = static_cast<size_t>(std::distance(lightColorPalette_.begin(), it));
+        if (it == lightColorPalette_.end()) {
+            lightColorPalette_.push_back(packed);
+        }
+        // Palette index is stored per-cell as a uint8_t; >255 distinct emitter
+        // colours would alias. Far beyond any real blocks.yaml, but clamp loudly.
+        if (idx > 255) {
+            std::cerr << "[world] warning: >255 distinct emitter colours; "
+                         "block-light hue palette overflow (using index 0).\n";
+            idx = 0;
+        }
+        emissionColorIndex_[id] = static_cast<uint8_t>(idx);
+    }
+}
+
 void World::computeBlockLight() {
     const glm::ivec3 s = sizeInBlocks();
     blockLight_.assign(static_cast<size_t>(s.x) * s.y * s.z, 0);
@@ -1235,7 +1265,7 @@ void World::computeBlockLight() {
                 if (e > 0) {
                     const size_t li = static_cast<size_t>(lightIndex(x, y, z));
                     blockLight_[li] = e;
-                    blockLightColor_[li] = packLightColor(registry_.emissionColor(id));
+                    blockLightColor_[li] = emissionColorIndex_[id];
                     out.push_back({x, y, z});
                 }
             }
@@ -1302,7 +1332,7 @@ void World::relightField(std::vector<uint8_t>& field, bool emitterSeed, int x0, 
     // Block-light hue, mirrored alongside `field` only on the emitter pass (the
     // sky pass leaves it untouched, since sky/block relight the same box back to
     // back and the block pass owns the colour). Writes are guarded by emitterSeed.
-    auto colorAt = [&](int x, int y, int z) -> uint32_t& {
+    auto colorAt = [&](int x, int y, int z) -> uint8_t& {
         return blockLightColor_[static_cast<size_t>(lightIndex(x, y, z))];
     };
     auto chunkAtBlock = [&](int x, int y, int z) -> const Chunk& {
@@ -1356,7 +1386,7 @@ void World::relightField(std::vector<uint8_t>& field, bool emitterSeed, int x0, 
                     const uint8_t e = registry_.emission(id);
                     if (e > 0) {
                         fieldAt(x, y, z) = e;
-                        colorAt(x, y, z) = packLightColor(registry_.emissionColor(id));
+                        colorAt(x, y, z) = emissionColorIndex_[id];
                         frontier.push_back({x, y, z});
                     }
                 }

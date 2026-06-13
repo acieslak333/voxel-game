@@ -237,6 +237,41 @@ own.
 
 ---
 
+## Claude Code tooling
+
+This repo is developed with [Claude Code](https://docs.anthropic.com/en/docs/claude-code),
+and the agents/skills it leans on are checked into `.claude/` so any clone (and
+any contributor) gets the same setup. None of these are required to build or run
+the game — they're development aids.
+
+### Agents (`.claude/agents/`)
+
+Specialist sub-agents Claude can delegate to, each with a focused system prompt:
+
+| Agent | Focus |
+|-------|-------|
+| `cpp-pro` | Modern C++20/23 — templates, RAII, zero-overhead abstractions |
+| `game-developer` | Engine architecture, graphics, gameplay systems |
+| `performance-engineer` | Profiling, bottleneck hunting, scalability |
+| `refactoring-specialist` | Behaviour-preserving cleanups & code-smell removal |
+| `code-reviewer` | Code-quality & security review |
+
+### Skills (`.claude/skills/`)
+
+| Skill | What it does | Requires |
+|-------|--------------|----------|
+| `renderdoc-gpu-debug` | Capture & inspect GPU frames (Vulkan/D3D/GL): pipeline state, render targets, pixel history, shader debugging | [RenderDoc](https://renderdoc.org) + [`rdc-cli`](https://github.com/BANANASJIM/rdc-cli) |
+| `vulkan-compute` | Author compute shaders — GLSL/HLSL → SPIR-V, pipelines, descriptor sets, barriers | — |
+| `blockbench-mcp-overview` / `-animation` / `-texturing` | Drive [Blockbench](https://www.blockbench.net/) over its MCP server (modeling, rigging, keyframes, texture painting) | Blockbench MCP server |
+
+The Blockbench skills are vendored from
+[`jasonjgardner/blockbench-mcp-project`](https://github.com/jasonjgardner/blockbench-mcp-project)
+and pinned in `skills-lock.json`. `renderdoc-gpu-debug` is vendored from
+[`rudybear/renderdoc-skill`](https://github.com/rudybear/renderdoc-skill) — see
+its own `README.md` for setup.
+
+---
+
 ## Roadmap
 
 - [x] **Milestone 0** — Project skeleton: window + Vulkan + clear screen.

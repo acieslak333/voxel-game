@@ -1066,13 +1066,31 @@ void App::streamWindow() {
                 if (gateOpen ||
                     ++windowStepStarveFrames_ >= kMaxWindowStepStarveFrames) {
                     windowStepStarveFrames_ = 0;
+                    // VG_STREAM_TIME: isolate the synchronous main-thread cost of a
+                    // window step (worker drain + strip apply) — the heavy relight +
+                    // remesh are off-thread/budget-spread, so this is what a boundary
+                    // actually costs the frame. Inert unless the env var is set.
+                    static const bool kStreamTime = std::getenv("VG_STREAM_TIME") != nullptr;
+                    const auto t0 = kStreamTime ? std::chrono::steady_clock::now()
+                                                : std::chrono::steady_clock::time_point{};
                     World::PregenStrip strip = pregenFuture_.get();
                     forceDrainForStep(); // idle path: returns immediately
+                    const auto t1 = kStreamTime ? std::chrono::steady_clock::now()
+                                                : std::chrono::steady_clock::time_point{};
                     std::vector<glm::ivec4> boxes;
                     std::vector<glm::ivec3> dirty =
                         world_.recenterWithStrip(pcx, pcz, std::move(strip), boxes);
                     if (!boxes.empty()) {
                         launchRelight(std::move(boxes), std::move(dirty));
+                    }
+                    if (kStreamTime) {
+                        const auto t2 = std::chrono::steady_clock::now();
+                        auto ms = [](auto a, auto b) {
+                            return std::chrono::duration<double, std::milli>(b - a).count();
+                        };
+                        std::printf("[stream] step %s: drain %.2fms apply %.2fms total %.2fms\n",
+                                    gateOpen ? "gate" : "STARVE", ms(t0, t1), ms(t1, t2),
+                                    ms(t0, t2));
                     }
                 }
             }

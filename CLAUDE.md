@@ -36,6 +36,10 @@ cmake is NOT on PATH; use the VS bundled one:
   GPU-bound, `rec` high = CPU-bound recording).
 - `VG_AUTOWALK=<blocks/s>` — flies the player along +X; the way to measure
   chunk-boundary/streaming frame spikes headlessly.
+- `VG_STREAM_TIME=1` — per window step, prints the synchronous main-thread cost
+  (`drain` = worker-pool drain, `apply` = strip move/recenter); the heavy relight
+  + remesh are off-thread/budget-spread, so this is the boundary's true frame cost.
+  Pair with `VG_AUTOWALK`.
 - `VG_SHAPES_DEMO`, `VG_WATER_DEMO`, `VG_MODEL_DEMO`, `VG_DROP_DEMO`,
   `VG_HOUR`/`VG_PITCH`/`VG_LOW` — screenshot/setup hooks in `App.cpp`.
 - Measurement gotcha: this machine runs other heavy apps; wall-clock varies
@@ -85,3 +89,24 @@ visit order, thread timing, or mutable state.
 LOD, composite/pixelate · `src/entity` Blockbench models, armature ·
 `src/player` controller/camera · `tools/` Python editors (`tools/hub.py`
 launches them) · `assets/` all game data (YAML + textures + models).
+
+## Claude Code tooling (`.claude/`, checked in)
+
+Domain helpers are vendored in the repo so any clone gets them. Reach for them
+when the task matches — don't reinvent what they cover.
+
+- **Agents** (`.claude/agents/`, spawn via the Agent tool): `cpp-pro` (modern
+  C++20/23, templates, zero-overhead — sonnet), `game-developer` (engine /
+  graphics / gameplay systems — sonnet), `performance-engineer` (profiling,
+  bottlenecks, scaling — sonnet), `refactoring-specialist` (behavior-preserving
+  cleanups — sonnet), `code-reviewer` (quality + security review — opus).
+- **Skills** (`.claude/skills/`, invoke via the Skill tool):
+  - `renderdoc-gpu-debug` — GPU frame capture/inspection via `rdc-cli`
+    (Vulkan/D3D/GL). Use for rendering artifacts, shadow/z-fighting/blend bugs,
+    pixel history, shader debugging. Needs RenderDoc + `pip install rdc-cli`
+    (see its `README.md`/`CLAUDE.md`).
+  - `vulkan-compute` — compute-shader authoring: GLSL/HLSL → SPIR-V, pipelines,
+    descriptor sets, barriers.
+  - `blockbench-mcp-overview` / `-animation` / `-texturing` — drive Blockbench
+    over its MCP server (modeling, rigging, keyframes, painting/UV). Tracked in
+    `skills-lock.json` (source: `jasonjgardner/blockbench-mcp-project`).

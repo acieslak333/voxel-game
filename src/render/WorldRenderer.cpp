@@ -20,9 +20,33 @@
 #include <utility>
 #include <vector>
 
+#if defined(_WIN32)
+#  ifndef WIN32_LEAN_AND_MEAN
+#    define WIN32_LEAN_AND_MEAN
+#  endif
+#  ifndef NOMINMAX
+#    define NOMINMAX
+#  endif
+#  include <windows.h>
+#endif
+
 namespace vg {
 
 namespace {
+
+// Drop the calling (mesh-worker) thread below normal scheduling priority. A
+// window-step enqueues a burst of greedy-mesh jobs; with the workers at normal
+// priority they saturate every core and deschedule the main thread, which was
+// most of the residual ~20-30 ms chunk-boundary frame spike (REVIEW O4). Below
+// the main thread the OS hands cores back to rendering and the workers simply
+// fill the slack. Windows-only for now (the measured platform); a no-op
+// elsewhere — POSIX has no portable per-thread nice, and the builds there are
+// untested for this knob.
+void lowerWorkerThreadPriority() {
+#if defined(_WIN32)
+    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
+#endif
+}
 
 // Six frustum planes (a,b,c,d) extracted from a clip matrix (Gribb-Hartmann),
 // each oriented so a point is inside the half-space when a*x+b*y+c*z+d >= 0.
@@ -574,6 +598,7 @@ void WorldRenderer::stopWorkers() {
 }
 
 void WorldRenderer::workerLoop() {
+    lowerWorkerThreadPriority(); // yield cores to the main thread (REVIEW O4)
     for (;;) {
         MeshJob job;
         {
