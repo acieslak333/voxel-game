@@ -62,6 +62,24 @@ struct WorldConfig {
     int chunksY = 3;
     int chunksZ = 17;
 
+    // --- Streaming tuning (the `stream_tuning:` block in world.yaml) -----------
+    // Per-machine performance knobs for the streaming pipeline. Defaults match the
+    // values these replaced as inline constants (REVIEW R7); raise on a fast machine
+    // to fill the view quicker, lower to keep per-frame cost down. See world.yaml.
+    int streamPumpBudget = 12;  // finished-mesh uploads applied per frame (steady state)
+    int streamMeltBudget = 64;  // boosted per-frame uploads while a backlog melts in
+    int streamCoreRadius = 5;   // chunks around spawn meshed synchronously at startup;
+                                // the rest stream in (smaller => faster first frame)
+    int streamUploadSlice = 384;// chunks per GPU submit in the startup batch upload
+                                // (bounded by Vulkan's maxMemoryAllocationCount ~4096)
+
+    // --- Liquid flow tuning (the `liquids:` block in world.yaml) ---------------
+    int liquidMaxFills = 16;    // cells a liquid tick fills before stopping (one relight)
+    int liquidScan     = 4096;  // cheap blockAt reads per tick to drain dead queue cells
+    int liquidMaxLevel = 3;     // rings a source spreads before the thin edge stops
+                                // (level 0 source .. liquidMaxLevel edge); bigger = wider
+                                // puddles but more cells filled + remeshed per tick
+
     // --- Surface height noise --------------------------------------------------
     float heightFrequency = 0.006f; // lower => broader, smoother hills
     int   octaves         = 4;      // fbm octaves for the height field (detail)

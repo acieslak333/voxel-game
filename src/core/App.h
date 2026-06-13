@@ -66,6 +66,39 @@ private:
     // cost) — the hammer's reshape/rotate. Same streaming/relight/remesh path.
     void reshapeBlockAt(const glm::ivec3& b, uint16_t id, uint8_t metadata);
 
+    // An edit deferred because a background relight was in flight (REVIEW R3): the
+    // *BlockAt entry points record the INTENT here and flushPendingEdits() re-runs
+    // them once the relight finishes (usually 1-3 frames). Capturing intent (not the
+    // half-done edit) means the inventory/particle side effects happen exactly once,
+    // when the edit applies. Defined before the helpers below that take it by ref.
+    struct PendingEdit {
+        enum Kind { Break, Place, Reshape } kind;
+        glm::ivec3 pos;
+        uint16_t   id       = 0;
+        uint8_t    metadata = 0;
+    };
+
+    // Preamble every world mutation (setBlock, setLightFalloff, recenter) must run
+    // first: join any in-flight background relight (enqueuing its remeshes), then
+    // drain the mesh-worker pool so no worker is mid-read of the World. The only
+    // safe ordering against the streaming threads (REVIEW invariants 1-2, R1).
+    // BLOCKS on an in-flight relight — use only off the per-frame hot path (the
+    // Esc-menu falloff sliders); edits/liquids use tryPrepareWorldMutation instead.
+    void drainBeforeWorldMutation();
+
+    // Non-blocking variant for the per-frame edit/liquid paths (REVIEW R3). Prepares
+    // the world for mutation (collect a finished relight's remeshes, drain workers)
+    // and returns true ONLY if that needs no blocking; returns false while a
+    // background relight is still flooding the edge, so the caller defers (edits) or
+    // skips (liquids) rather than stalling the frame.
+    [[nodiscard]] bool tryPrepareWorldMutation();
+    // Re-run any edits deferred by tryPrepareWorldMutation, once the relight that
+    // forced the deferral has finished. Called each frame before editBlocks.
+    void flushPendingEdits();
+    // Record a deferred edit (deduped on kind+pos: a held mine button can re-trigger
+    // the same break every frame while the relight runs).
+    void enqueueEdit(const PendingEdit& e);
+
     // Survival per-frame upkeep: environmental damage (lava) and death/respawn.
     // No-op in creative. Health regen/fall damage live in PlayerController.
     void updateSurvival(float dt);
@@ -79,6 +112,12 @@ private:
     // Chest contents persistence (<save dir>/chests.dat). No-op when persistence off.
     void saveChests() const;
     void loadChests();
+
+    // Advance the streamed chunk window one step toward the player (per frame): the
+    // pregen/relight futures, the window-step busy-gate (R5), and the synchronous
+    // fallback. Holds the four-actor threading invariants in one place (REVIEW R9) —
+    // see the definition's header comment before touching it.
+    void streamWindow();
 
     // Simple liquid flow (water & lava): drain a budget of queued liquid cells,
     // spreading them down then sideways (decaying distance in Block::metadata, no
@@ -243,6 +282,11 @@ private:
     float      mineNeeded_   = 0.0f; // seconds required to break it (0 = instant)
     float      mineProgress01_ = 0.0f; // 0..1 for the crosshair break meter
 
+    // Edits deferred because a background relight was in flight (REVIEW R3); see the
+    // PendingEdit definition above. flushPendingEdits() drains this each frame once
+    // the relight finishes.
+    std::deque<PendingEdit> pendingEdits_;
+
     glm::vec3  spawnFeet_{0.0f}; // respawn point (world spawn; player save comes later)
     uint16_t   chestId_ = 0;     // resolved id of the chest block (0 if undefined)
 
@@ -278,6 +322,14 @@ private:
     // running. Declared last so it is destroyed first — its destructor joins the
     // task while world_/worldRenderer_ are still alive.
     std::future<std::vector<glm::ivec3>> relightFuture_;
+    // A window step (pregen-strip apply / teleport regen) may only mutate the window
+    // when no relight is in flight AND the mesh workers are idle. A sustained remesh
+    // source (a big water flood re-queuing chunks every tick) can hold the workers
+    // busy indefinitely, postponing the step while the player walks past the window
+    // edge. This counts consecutive postponed frames; past the cap the step forces a
+    // bounded drain (join relight + streamBarrier) and applies anyway (REVIEW R5).
+    int        windowStepStarveFrames_ = 0;
+    static constexpr int kMaxWindowStepStarveFrames = 30; // ~0.5s at 60fps before forcing
     // The in-flight background strip pregeneration (World::pregenStrip): the next
     // entering edge column's chunks, generated off-thread so the window step itself
     // is just a swap (the per-boundary frame spike was this generation). Reads only

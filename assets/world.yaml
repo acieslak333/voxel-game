@@ -70,6 +70,46 @@ view_radius: 4   # the world is back to 128 tall (height_chunks 8), so each colu
 height_chunks: 16
 
 # -----------------------------------------------------------------------------
+#  stream_tuning: per-machine performance knobs for the chunk-streaming pipeline
+#  (docs/STREAMING.md). These used to be inline constants in the engine (REVIEW
+#  R7). Defaults match those values, so leaving the block out changes nothing.
+#  Watch the VG_FRAME_TIME profiler (and VG_MESH_TIME at startup) when tuning.
+# -----------------------------------------------------------------------------
+stream_tuning:
+  # Finished worker meshes uploaded to the GPU per frame in steady state. Each
+  # upload builds a device buffer, so a high budget spikes the frame on a slow
+  # GPU; too low and a streamed-in edge melts in visibly. what: per-frame upload
+  # count; where: WorldRenderer::streamPump; effect: higher = fills faster, costs
+  # more per frame.
+  pump_budget: 12
+  # Boosted pump_budget used WHILE a large backlog melts in (startup rings, a
+  # falloff-driven remesh-all). Higher = the view fills faster after a load at the
+  # cost of a few busier frames. Clamped to >= pump_budget.
+  melt_budget: 64
+  # Chunks around the spawn meshed+uploaded synchronously before the first frame;
+  # everything outside this radius streams in afterwards. Smaller = faster first
+  # frame, more visible melt-in. (Ignored when streaming is off.)
+  core_radius: 5
+  # Chunks per GPU submit in the one-time startup batch upload. Bounded by Vulkan's
+  # maxMemoryAllocationCount (~4096) since each chunk holds a live allocation while
+  # its slice is in flight; rarely needs changing.
+  upload_slice: 384
+
+# -----------------------------------------------------------------------------
+#  liquids: water/lava flow budget per 0.2s tick. Bigger spreads look better but
+#  cost more cells filled + a larger remesh every tick while flowing (REVIEW R7).
+# -----------------------------------------------------------------------------
+liquids:
+  # Cells a single tick fills before stopping (the whole tick is one light flood).
+  max_fills: 16
+  # Cheap blockAt reads per tick used to drain already-settled queue cells.
+  scan: 4096
+  # Rings a source spreads before the thin edge stops (level 0 source .. max_level
+  # edge). 3 ≈ a 7-wide puddle; raise for wider pools, but each ring is more fills
+  # and a bigger per-tick remesh.
+  max_level: 3
+
+# -----------------------------------------------------------------------------
 #  terrain: the noise + material rules that shape the surface. Two noise fields
 #  drive it: a HEIGHT field (the surface shape) and a MATERIAL field (rocky vs
 #  grassy, dirt thickness). Both are fbm (fractal/Perlin) sampled in world space.

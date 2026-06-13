@@ -49,6 +49,9 @@ public:
     // World seed (for deterministic feature scatter — e.g. far-terrain impostors
     // replicate the tree gate hash so distant trees match the real voxel trees).
     [[nodiscard]] uint32_t seed() const { return config_.seed; }
+    // The full generation/streaming config (assets/world.yaml). The renderer and app
+    // read the streaming/liquid tuning knobs from here (REVIEW R7).
+    [[nodiscard]] const WorldConfig& config() const { return config_; }
     [[nodiscard]] const Chunk& chunk(int cx, int cy, int cz) const;
 
     // The block at world coords; air (the default Block) outside world bounds.
@@ -171,6 +174,19 @@ public:
     // both disjoint from the player-area slots the main thread reads for collision.
     // The caller must not mutate the World (setBlock / another recenter) while this
     // runs — see App's streaming orchestration.
+    //
+    // ACCEPTED DATA RACE (REVIEW R6): the relight box deliberately reaches ~16 blocks
+    // into the *retained* interior (shiftColumn's relight-box recording) so light
+    // bleeds across the seam. While this background flood writes that margin, a
+    // main-thread light READ in the same margin — lightAt() queries, or liquid-tick
+    // meshing in the stream_workers:0 config — can observe a torn uint8 light level.
+    // It is benign by construction: light levels are single bytes (a torn read is
+    // still a valid 0..15 value, never a wild pointer), and the post-relight remesh
+    // of every dirtied chunk overwrites the transient value, so it self-corrects
+    // within a frame. It is left as-is rather than locked because a per-cell lock on
+    // the light fields would cost far more than the worst-case one-frame flicker. A
+    // thread sanitizer WILL flag it; if that ever matters, gate the margin behind a
+    // "relight-pending" flag the main-thread light paths treat as off-limits.
     void relightBoxes(const std::vector<glm::ivec4>& boxes, std::vector<glm::ivec3>& dirty);
 
     // Streaming knobs the renderer/app need (read from the world config).

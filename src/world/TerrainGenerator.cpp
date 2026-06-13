@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdio>
 
 namespace vg {
 
@@ -288,6 +289,27 @@ void TerrainGenerator::loadConfig(const std::string& assetDir, const BlockRegist
     }
     densityAmp_  = std::max(1.0f, densityAmp_);
     floatReach_  = std::max(floatGap_ + 1, floatReach_);
+
+    // Cost warning (REVIEW R12). A cell pays the expensive density-stack eval only
+    // where the heightmap gradient is within ±amplitude of the surface — a vertical
+    // band ~2*amplitude tall per column. With amplitude near world height that band
+    // covers the whole column, so EVERY cell takes the density path: this is the
+    // other half of the 145s-startup incident (octave count was the half the
+    // NoiseStack clamp now guards). Warn when the band exceeds half the column so an
+    // editor-authored biomes.yaml that does this is caught at load, not by a stalled
+    // startup. Watch the VG_MESH_TIME generate stamp after a change.
+    if (density3DEnabled_) {
+        const float bandCells = 2.0f * densityAmp_;
+        if (bandCells > 0.5f * static_cast<float>(worldHeight_)) {
+            std::fprintf(stderr,
+                "[worldgen] WARNING: terrain3d.amplitude=%.0f makes the density band "
+                "~%.0f blocks tall (>%.0f%% of the %d-tall world): every column cell "
+                "pays the density eval — generation will be slow (REVIEW R12).\n",
+                static_cast<double>(densityAmp_), static_cast<double>(bandCells),
+                static_cast<double>(100.0f * bandCells / static_cast<float>(worldHeight_)),
+                worldHeight_);
+        }
+    }
 
     const YAML::Node bs = root["biomes"];
     if (bs && bs.IsSequence() && bs.size() > 0) {

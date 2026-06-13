@@ -214,6 +214,7 @@ add_executable(voxelgame
     src/main.cpp
     src/core/Window.cpp
     src/core/App.cpp
+    src/core/AppUi.cpp
     src/core/Input.cpp
     src/core/Palette.cpp
     src/core/DayNight.cpp

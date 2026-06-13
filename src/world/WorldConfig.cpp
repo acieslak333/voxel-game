@@ -55,6 +55,24 @@ WorldConfig WorldConfig::load(const std::string& path) {
     c.viewRadius = std::max(0, c.viewRadius);
     c.chunksX = c.chunksZ = 2 * c.viewRadius + 1;
     c.chunksY = std::max(1, c.heightChunks);
+    if (const YAML::Node str = root["stream_tuning"]) {
+        get(str["pump_budget"], c.streamPumpBudget);
+        get(str["melt_budget"], c.streamMeltBudget);
+        get(str["core_radius"], c.streamCoreRadius);
+        get(str["upload_slice"], c.streamUploadSlice);
+    }
+    c.streamPumpBudget  = std::max(1, c.streamPumpBudget);
+    c.streamMeltBudget  = std::max(c.streamPumpBudget, c.streamMeltBudget);
+    c.streamCoreRadius  = std::max(0, c.streamCoreRadius);
+    c.streamUploadSlice = std::max(1, c.streamUploadSlice);
+    if (const YAML::Node lq = root["liquids"]) {
+        get(lq["max_fills"], c.liquidMaxFills);
+        get(lq["scan"], c.liquidScan);
+        get(lq["max_level"], c.liquidMaxLevel);
+    }
+    c.liquidMaxFills = std::max(1, c.liquidMaxFills);
+    c.liquidScan     = std::max(1, c.liquidScan);
+    c.liquidMaxLevel = std::max(1, c.liquidMaxLevel);
     if (const YAML::Node t = root["terrain"]) {
         get(t["height_frequency"], c.heightFrequency);
         get(t["octaves"], c.octaves);

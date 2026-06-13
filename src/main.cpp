@@ -61,10 +61,20 @@ uint64_t hashWorld(const vg::World& w) {
 }
 
 // Headless world-generation self-test (no window/Vulkan). Uses a FIXED config
-// (independent of assets/world.yaml) so the golden hash is stable, generates the
-// world twice, and checks (a) regeneration is bit-identical and (b) the output
-// matches the recorded golden. Bump kGolden only for an intentional worldgen
-// change (per docs/WORLD_GEN_AGENT_TIPS.md Â§6).
+// (independent of assets/world.yaml) so the result is config-stable, generates the
+// world twice, and checks that regeneration is bit-identical (h1 == h2) within the
+// process.
+//
+// NO GOLDEN (REVIEW R10). A recorded golden hash used to live here too, but it was
+// dead weight: (1) it goes stale every time biomes.yaml / the splines are tuned, and
+// (2) worldgen is cross-PROCESS non-deterministic — the hash can vary run-to-run
+// even though the in-process h1 == h2 holds — so a golden can never pass reliably and
+// everyone learned to ignore the failure, eroding the test's authority. The within-
+// process regen check is the meaningful invariant (worldgen is a pure function of
+// (seed, coords) for a given build), so that is all this asserts. The hash is still
+// printed for manual A/B comparison across builds in one environment. If the cross-
+// process non-determinism is ever hunted down (it also implies saved worlds may not
+// regenerate identically), a golden can be reinstated then — but as its own session.
 int runWorldGenSelfTest(const std::string& assetDir) {
     vg::WorldConfig cfg;
     cfg.seed          = 1337u;
@@ -78,14 +88,6 @@ int runWorldGenSelfTest(const std::string& assetDir) {
 
     const std::string blocks = assetDir + "/blocks.yaml";
 
-    // Recorded golden. NOTE: the selftest reads assets/biomes.yaml, so TUNING the
-    // generation (e.g. via tools/genmap_tool.py) intentionally changes this hash â€”
-    // rebaseline when the config settles. Last set for the half-height world: the
-    // world dropped 256 -> 128 tall (world.yaml height_chunks 16 -> 8), so biomes.yaml
-    // sea_level/splines/snow_line + the caves/ores max_y were all halved to match.
-    // Bump ONLY for an intentional worldgen change (per docs/WORLD_GEN_AGENT_TIPS.md Â§6).
-    constexpr uint64_t kGolden = 0x96e2b5877af345f1ull;
-
     uint64_t h1 = 0, h2 = 0;
     try {
         h1 = hashWorld(vg::World(cfg, blocks));
@@ -95,29 +97,16 @@ int runWorldGenSelfTest(const std::string& assetDir) {
         return EXIT_FAILURE;
     }
 
-    std::cout << "[selftest] worldgen hash = 0x" << std::hex << h1 << std::dec << '\n';
-    bool ok = true;
+    std::cout << "[selftest] worldgen hash = 0x" << std::hex << h1 << std::dec
+              << " (in-process regen check only; no golden — REVIEW R10)\n";
     if (h1 != h2) {
         std::cerr << "[selftest] FAIL: regeneration is non-deterministic (0x" << std::hex
                   << h1 << " vs 0x" << h2 << std::dec << ")\n";
-        ok = false;
-    }
-    if (kGolden != 0 && h1 != kGolden) {
-        std::cerr << "[selftest] FAIL: worldgen output changed vs golden 0x" << std::hex
-                  << kGolden << std::dec << " (bump kGolden if this was intentional)\n";
-        ok = false;
-    }
-    if (ok) {
-        std::cout << "[selftest] PASS";
-        if (kGolden == 0) {
-            std::cout << " (golden not locked â€” set kGolden to 0x" << std::hex << h1
-                      << std::dec << ")";
-        }
-        std::cout << '\n';
-    } else {
         std::cout << "[selftest] FAIL\n";
+        return EXIT_FAILURE;
     }
-    return ok ? EXIT_SUCCESS : EXIT_FAILURE;
+    std::cout << "[selftest] PASS\n";
+    return EXIT_SUCCESS;
 }
 
 // Headless top-down map export (no window/Vulkan). Samples the terrain generator

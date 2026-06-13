@@ -200,11 +200,13 @@ void WorldRenderer::swapChunkBuffers(int cx, int cy, int cz, Buffer&& meshBuffer
                                      VkDeviceSize indexOffset, uint32_t indexCount,
                                      VkDeviceSize waterIndexOffset, uint32_t waterIndexCount,
                                      int32_t firstWaterVertex, bool deferOldBuffers) {
-    ChunkMesh& cm = meshes_[chunkIndex(cx, cy, cz)];
+    const uint32_t slot = static_cast<uint32_t>(chunkIndex(cx, cy, cz));
+    ChunkMesh& cm = meshes_[slot];
 
     // Drop this slot's previous contribution before rebuilding it. A slot counts
     // as a drawn chunk if it has either opaque or water geometry.
     const bool hadGeometry = cm.indexCount > 0 || cm.waterIndexCount > 0;
+    const bool hadWater    = cm.waterIndexCount > 0;
     totalTriangles_ -= (cm.indexCount + cm.waterIndexCount) / 3;
     if (hadGeometry) {
         --drawnChunks_;
@@ -221,8 +223,25 @@ void WorldRenderer::swapChunkBuffers(int cx, int cy, int cz, Buffer&& meshBuffer
     cm.waterIndexOffset = waterIndexOffset;
     cm.waterIndexCount  = waterIndexCount;
     cm.firstWaterVertex = firstWaterVertex;
-    if (indexCount > 0 || waterIndexCount > 0) {
+    const bool nowGeometry = indexCount > 0 || waterIndexCount > 0;
+    const bool nowWater    = waterIndexCount > 0;
+    if (nowGeometry) {
         ++drawnChunks_;
+    }
+    drawnWaterChunks_ += static_cast<std::size_t>(nowWater) - static_cast<std::size_t>(hadWater);
+    // Maintain the compact draw list (REVIEW R8): add this slot when it gains
+    // geometry, swap-remove it when it loses geometry. drawListPos is its index in
+    // drawList_ so removal is O(1).
+    if (nowGeometry && cm.drawListPos < 0) {
+        cm.drawListPos = static_cast<int>(drawList_.size());
+        drawList_.push_back(slot);
+    } else if (!nowGeometry && cm.drawListPos >= 0) {
+        const int pos = cm.drawListPos;
+        const uint32_t moved = drawList_.back();
+        drawList_[static_cast<size_t>(pos)] = moved;
+        meshes_[moved].drawListPos = pos;
+        drawList_.pop_back();
+        cm.drawListPos = -1;
     }
     cm.worldPos = glm::vec3(cx, cy, cz) * static_cast<float>(Chunk::kSize);
     totalTriangles_ += (cm.indexCount + cm.waterIndexCount) / 3;
@@ -340,7 +359,7 @@ void WorldRenderer::buildMeshes() {
     // (nearest-first) and melt in over the first frames — the same machinery a
     // window recenter uses. The full window still fills in either way; startup
     // just stops paying ~85% of the mesh+upload bill before the first frame.
-    constexpr int kCoreRadius = 5;
+    const int kCoreRadius = world_.config().streamCoreRadius; // world.yaml stream_tuning (R7)
     const glm::ivec3 c0 = counts_ / 2;
     std::vector<glm::ivec3> coords;
     coords.reserve(meshes_.size());
@@ -386,7 +405,7 @@ void WorldRenderer::buildMeshes() {
     // PER chunk (thousands of GPU round-trips were the rest of the startup cost).
     // The slice bound keeps live allocations (accumulating device buffers + this
     // slice's staging) under Vulkan's maxMemoryAllocationCount (~4096).
-    constexpr size_t kSlice = 384;
+    const size_t kSlice = static_cast<size_t>(world_.config().streamUploadSlice); // R7
     for (size_t start = 0; start < coords.size(); start += kSlice) {
         const size_t end = std::min(start + kSlice, coords.size());
         std::vector<Buffer> staging; // freed at slice end (after the copy completes)
@@ -430,49 +449,72 @@ void WorldRenderer::buildMeshes() {
     std::cout << "\n";
 }
 
-void WorldRenderer::remeshChunk(int cx, int cy, int cz) {
-    // The chunk's old buffers may still be referenced by frames in flight, so wait
-    // for the GPU to drain before we free and replace them. Remeshing is a rare,
-    // discrete event (a block edit, a chunk streaming in), so a full device wait
-    // here is acceptable and keeps buffer lifetime trivial.
-    vkDeviceWaitIdle(ctx_.device());
-    if (!meshVersion_.empty()) {
-        ++meshVersion_[static_cast<size_t>(chunkIndex(cx, cy, cz))];
-    }
-    uploadChunkMesh(cx, cy, cz);
-}
-
-void WorldRenderer::remeshChunks(const std::vector<glm::ivec3>& chunks) {
+void WorldRenderer::meshChunksDeferred(const std::vector<glm::ivec3>& chunks) {
     if (chunks.empty()) {
         return;
     }
-    vkDeviceWaitIdle(ctx_.device()); // drain once for the whole batch
+    // Mesh on the main thread (the edit is visible this frame) but install through
+    // the deferred buffer + frame-integrated upload path — NO vkDeviceWaitIdle. The
+    // old buffers are retired for framesInFlight_+1 frames (a frame in flight may
+    // still reference them) and the staging->device copy rides the next frame's
+    // command buffer via recordPendingUploads (REVIEW R4). Bumping each slot's
+    // version makes any in-flight worker result for it stale (discarded on install).
+    std::vector<MeshResult> batch;
+    batch.reserve(chunks.size());
     for (const glm::ivec3& c : chunks) {
-        // Bump the slot's version so any in-flight worker result for it is treated
-        // as stale and discarded (this immediate remesh is the newest state).
-        if (!meshVersion_.empty()) {
-            ++meshVersion_[static_cast<size_t>(chunkIndex(c.x, c.y, c.z))];
+        bool dup = false; // a chunk listed twice (e.g. two edits) only needs meshing once
+        for (const MeshResult& r : batch) {
+            if (r.cx == c.x && r.cy == c.y && r.cz == c.z) { dup = true; break; }
         }
-        uploadChunkMesh(c.x, c.y, c.z);
+        if (dup || meshVersion_.empty()) {
+            continue;
+        }
+        const std::uint64_t v = ++meshVersion_[static_cast<size_t>(chunkIndex(c.x, c.y, c.z))];
+        MeshData md = ChunkMesher::greedyMesh(
+            world_.chunk(c.x, c.y, c.z), world_.registry(),
+            makeSampler(c.x, c.y, c.z), makeLightSampler(c.x, c.y, c.z), true,
+            c * kChunkSize, makeTintSampler(c.x, c.y, c.z));
+        batch.push_back(MeshResult{c.x, c.y, c.z, v, std::move(md)});
+    }
+    if (!batch.empty()) {
+        installMeshBatch(batch);
     }
 }
 
+void WorldRenderer::remeshChunk(int cx, int cy, int cz) {
+    meshChunksDeferred({{cx, cy, cz}});
+}
+
+void WorldRenderer::remeshChunks(const std::vector<glm::ivec3>& chunks) {
+    meshChunksDeferred(chunks);
+}
+
 void WorldRenderer::remeshAll() {
-    // Lighting is baked into the vertex data, so a global lighting change (e.g.
-    // a new falloff) means every loaded chunk must be rebuilt. One drain for the
-    // lot. Iterate the window's absolute coords — it may have streamed away from 0.
-    vkDeviceWaitIdle(ctx_.device());
+    // Lighting is baked into the vertex data, so a global lighting change (e.g. a new
+    // falloff) means every loaded chunk must be rebuilt. A 33x33x16 window is
+    // thousands of chunks; the old per-chunk submit+wait path froze the frame for
+    // seconds (REVIEW R2). Instead reuse the startup melt-in machinery: hand the whole
+    // window to streamRemesh (workers mesh in the background, or the no-worker queue
+    // drains over frames) and flag startupMelt_ so streamPump uploads the backlog at
+    // the boosted rate. The view shows old lighting for the ~1s it takes to melt in,
+    // which beats a multi-second stall. streamRemesh stamps each slot's meshVersion_,
+    // so any worker result meshed before the lighting change is discarded as stale.
+    // The caller is responsible for the streamBarrier + light rewrite that must
+    // precede this (App::drainBeforeWorldMutation, then World::setLightFalloff).
     const glm::ivec3 o = world_.chunkOrigin();
+    std::vector<glm::ivec3> all;
+    all.reserve(static_cast<size_t>(counts_.x) *
+                static_cast<size_t>(counts_.y) *
+                static_cast<size_t>(counts_.z));
     for (int cz = o.z; cz < o.z + counts_.z; ++cz) {
         for (int cy = o.y; cy < o.y + counts_.y; ++cy) {
             for (int cx = o.x; cx < o.x + counts_.x; ++cx) {
-                if (!meshVersion_.empty()) {
-                    ++meshVersion_[static_cast<size_t>(chunkIndex(cx, cy, cz))];
-                }
-                uploadChunkMesh(cx, cy, cz);
+                all.push_back({cx, cy, cz});
             }
         }
     }
+    streamRemesh(all);
+    startupMelt_ = true; // boost streamPump's per-frame upload budget until drained
 }
 
 void WorldRenderer::queueRemesh(const std::vector<glm::ivec3>& chunks) {
@@ -485,36 +527,22 @@ void WorldRenderer::processRemeshQueue(int budget) {
     if (pendingRemesh_.empty() || budget <= 0) {
         return;
     }
-    // Pop a frame's slice and mesh it on the main thread, but install via the SAME
-    // deferred-buffer + frame-integrated upload path the worker pool uses
-    // (installMeshBatch -> recordPendingUploads), NOT the draining remeshChunks.
-    // This is the no-workers streaming fallback; routing it through the deferred
-    // path means per-tick liquid flow never issues a vkDeviceWaitIdle here either,
-    // so the flow-time stutter is gone with or without worker threads.
-    std::vector<MeshResult> batch;
-    batch.reserve(static_cast<size_t>(budget));
-    while (!pendingRemesh_.empty() && static_cast<int>(batch.size()) < budget) {
+    // Pop a frame's slice of unique coords and hand them to the shared
+    // main-thread-mesh + deferred-install path. This is the no-workers streaming
+    // fallback (and liquid-flow remeshes when stream_workers: 0); routing it through
+    // meshChunksDeferred means no vkDeviceWaitIdle here either.
+    std::vector<glm::ivec3> slice;
+    slice.reserve(static_cast<size_t>(budget));
+    while (!pendingRemesh_.empty() && static_cast<int>(slice.size()) < budget) {
         const glm::ivec3 c = pendingRemesh_.front();
         pendingRemesh_.pop_front();
         // A chunk queued by several liquid ticks before this drain only needs
-        // meshing once — skip a coord already in this batch.
-        bool dup = false;
-        for (const MeshResult& r : batch) {
-            if (r.cx == c.x && r.cy == c.y && r.cz == c.z) { dup = true; break; }
+        // meshing once — skip a coord already in this slice.
+        if (std::find(slice.begin(), slice.end(), c) == slice.end()) {
+            slice.push_back(c);
         }
-        if (dup) {
-            continue;
-        }
-        const std::uint64_t v = ++meshVersion_[static_cast<size_t>(chunkIndex(c.x, c.y, c.z))];
-        MeshData md = ChunkMesher::greedyMesh(
-            world_.chunk(c.x, c.y, c.z), world_.registry(),
-            makeSampler(c.x, c.y, c.z), makeLightSampler(c.x, c.y, c.z), true,
-            c * kChunkSize, makeTintSampler(c.x, c.y, c.z));
-        batch.push_back(MeshResult{c.x, c.y, c.z, v, std::move(md)});
     }
-    if (!batch.empty()) {
-        installMeshBatch(batch); // deferred buffers + queued staging copies, no drain
-    }
+    meshChunksDeferred(slice);
 }
 
 // --- Worker-thread streaming meshing -----------------------------------------
@@ -660,7 +688,7 @@ void WorldRenderer::streamPump(int budget) {
         if (drained) {
             startupMelt_ = false;
         } else {
-            budget = std::max(budget, 64);
+            budget = std::max(budget, world_.config().streamMeltBudget); // world.yaml (R7)
         }
     }
     if (!workers_.empty()) {
@@ -777,9 +805,12 @@ void WorldRenderer::record(VkCommandBuffer cmd, uint32_t frameIndex, VkExtent2D 
     const glm::vec3 chunkExtent(static_cast<float>(Chunk::kSize));
 
     // --- Pass 1: opaque terrain (writes colour + depth) ----------------------
-    for (const ChunkMesh& m : meshes_) {
+    // Iterate only the slots that actually have geometry (drawList_), not all ~17k
+    // mesh slots (REVIEW R8).
+    for (const uint32_t slot : drawList_) {
+        const ChunkMesh& m = meshes_[slot];
         if (m.indexCount == 0) {
-            continue;
+            continue; // water-only chunk: nothing for the opaque pass
         }
         if (!aabbInFrustum(frustum, m.worldPos, m.worldPos + chunkExtent)) {
             continue;
@@ -798,14 +829,20 @@ void WorldRenderer::record(VkCommandBuffer cmd, uint32_t frameIndex, VkExtent2D 
     }
 
     // --- Pass 2: translucent water (depth test on, depth write off) ----------
-    // Drawn after all opaque geometry so each water surface alpha-blends over the
-    // seabed/terrain already in the colour buffer. The viewport/scissor are
-    // dynamic and persist; the descriptor set layout is identical, but rebind it
-    // against the water pipeline's layout to be explicit.
+    // Skip the whole pass (pipeline bind + descriptor bind + scan) when nothing in
+    // the window has water — the common above-ground case (REVIEW R8). Drawn after
+    // all opaque geometry so each water surface alpha-blends over the seabed/terrain
+    // already in the colour buffer. The viewport/scissor are dynamic and persist;
+    // the descriptor set layout is identical, but rebind it against the water
+    // pipeline's layout to be explicit.
+    if (drawnWaterChunks_ == 0) {
+        return;
+    }
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, waterPipeline_->handle());
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, waterPipeline_->layout(),
                             0, 1, &descriptorSets_[frameIndex], 0, nullptr);
-    for (const ChunkMesh& m : meshes_) {
+    for (const uint32_t slot : drawList_) {
+        const ChunkMesh& m = meshes_[slot];
         if (m.waterIndexCount == 0) {
             continue;
         }

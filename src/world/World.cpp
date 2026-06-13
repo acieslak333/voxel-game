@@ -12,6 +12,7 @@
 #include <iostream>
 #include <numeric>
 #include <stdexcept>
+#include <unordered_map>
 
 namespace vg {
 
@@ -421,6 +422,43 @@ void World::generateColumnInto(int cx, int cz, Chunk* const* stack,
     }
 
     const uint32_t seed = config_.seed;
+
+    // --- Per-call worldgen memos (REVIEW O1/O2) ----------------------------------
+    // The scatter passes below (trees, structures, features) each gather every nearby
+    // ROOT/ORIGIN column that can reach the current cell, so across the 256 cells of
+    // this chunk-column the SAME origin (ox,oz) is queried by up to dozens of covering
+    // cells. columnInfo() and especially surfaceY() (a full density-band scan) are the
+    // priciest worldgen calls. All three are pure functions of (seed, x, z), so caching
+    // them for the duration of this one generateColumnInto call is byte-identical output
+    // with the redundant re-evaluations removed (~50-80x dedup on the tree scatter;
+    // ~4x on the cliff-probe heights). The memos are call-local — no cross-call or
+    // cross-thread state — so worldgen stays a pure function and pregen stays safe.
+    std::unordered_map<int64_t, ColumnInfo> ciMemo;
+    std::unordered_map<int64_t, int>        surfMemo;
+    std::unordered_map<int64_t, int>        htMemo;
+    auto memoKey = [](int x, int z) -> int64_t {
+        return (static_cast<int64_t>(x) << 32) |
+               static_cast<int64_t>(static_cast<uint32_t>(z));
+    };
+    auto colInfoAt = [&](int x, int z) -> const ColumnInfo& {
+        const int64_t k = memoKey(x, z);
+        auto it = ciMemo.find(k);
+        if (it == ciMemo.end()) it = ciMemo.emplace(k, gen_.columnInfo(x, z)).first;
+        return it->second;
+    };
+    auto surfaceYAt = [&](int x, int z) -> int {
+        const int64_t k = memoKey(x, z);
+        auto it = surfMemo.find(k);
+        if (it == surfMemo.end()) it = surfMemo.emplace(k, gen_.surfaceY(x, z)).first;
+        return it->second;
+    };
+    auto heightAt = [&](int x, int z) -> int {
+        const int64_t k = memoKey(x, z);
+        auto it = htMemo.find(k);
+        if (it == htMemo.end()) it = htMemo.emplace(k, gen_.height(x, z)).first;
+        return it->second;
+    };
+
     for (int lz = 0; lz < N; ++lz) {
         for (int lx = 0; lx < N; ++lx) {
             const int wx = cx * N + lx;
@@ -429,7 +467,7 @@ void World::generateColumnInto(int cx, int cz, Chunk* const* stack,
             // The expensive bit — computed ONCE for the whole vertical column (the
             // surface height, biome, blocks and water level all come from this one
             // call, instead of also calling columnHeight() separately).
-            const ColumnInfo ci = gen_.columnInfo(wx, wz);
+            const ColumnInfo ci = colInfoAt(wx, wz); // memoized; also seeds neighbour scans
             const int h = ci.height; // heightmap base — drives the 3D density gradient
             // The ACTUAL 3D ground surface (the density raises/lowers the land by up
             // to `amplitude`, so h is NOT where the surface is). Features — trees,
@@ -474,8 +512,8 @@ void World::generateColumnInto(int cx, int cz, Chunk* const* stack,
             int  nhPX = 0, nhNX = 0, nhPZ = 0, nhNZ = 0; // neighbour heightmap heights (cliff only)
             bool cliff = false;
             if (colSurf - kCliffDrop > seaLevel) {
-                nhPX = gen_.height(wx + 1, wz); nhNX = gen_.height(wx - 1, wz);
-                nhPZ = gen_.height(wx, wz + 1); nhNZ = gen_.height(wx, wz - 1);
+                nhPX = heightAt(wx + 1, wz); nhNX = heightAt(wx - 1, wz);
+                nhPZ = heightAt(wx, wz + 1); nhNZ = heightAt(wx, wz - 1);
                 const int probe = colSurf - kCliffDrop;
                 cliff = !gen_.isSolid(nhPX, wx + 1, probe, wz) ||
                         !gen_.isSolid(nhNX, wx - 1, probe, wz) ||
@@ -655,9 +693,9 @@ void World::generateColumnInto(int cx, int cz, Chunk* const* stack,
                     // is then re-checked against the root biome's actual density.
                     const float th = hash01(ox, oz, seed ^ 0x7233u);
                     if (th >= maxTreeD) continue;
-                    const ColumnInfo oc = gen_.columnInfo(ox, oz);
+                    const ColumnInfo oc = colInfoAt(ox, oz);
                     if (th >= oc.treeDensity) continue;
-                    const int oh = gen_.surfaceY(ox, oz); // the root's REAL 3D surface,
+                    const int oh = surfaceYAt(ox, oz); // the root's REAL 3D surface,
                     // so trees stand on the actual ground even where the density
                     // raised it well above the heightmap (the "no trees up high" fix).
 
@@ -836,9 +874,9 @@ void World::generateColumnInto(int cx, int cz, Chunk* const* stack,
                         const int slx = (wx - ox) + st.anchor.x;
                         const int slz = (wz - oz) + st.anchor.z;
                         if (slx < 0 || slz < 0 || slx >= st.size.x || slz >= st.size.z) continue;
-                        const ColumnInfo oc = gen_.columnInfo(ox, oz);
+                        const ColumnInfo oc = colInfoAt(ox, oz);
                         if (st.surface && oc.height <= oc.waterLevel) continue; // not in water
-                        const int oh = gen_.surfaceY(ox, oz); // sit structures on the real surface
+                        const int oh = surfaceYAt(ox, oz); // sit structures on the real surface
                         for (int ly = 0; ly < st.size.y; ++ly) {
                             const uint16_t bid = st.at(slx, ly, slz);
                             if (bid != Structure::kSkip) placeForce(oh + (ly - st.anchor.y), bid);
@@ -885,7 +923,7 @@ void World::generateColumnInto(int cx, int cz, Chunk* const* stack,
                             const int slx = (wx - ox) + ft.anchor.x;
                             const int slz = (wz - oz) + ft.anchor.z;
                             if (slx < 0 || slz < 0 || slx >= ft.size.x || slz >= ft.size.z) continue;
-                            const ColumnInfo oc = gen_.columnInfo(ox, oz);
+                            const ColumnInfo oc = colInfoAt(ox, oz);
                             const bool submerged = oc.height < oc.waterLevel;
                             if (ft.scatter.onWater) { if (!submerged) continue; }   // need water below
                             else if (ft.scatter.surface && submerged) continue;     // dry-land only
@@ -899,18 +937,18 @@ void World::generateColumnInto(int cx, int cz, Chunk* const* stack,
                                 const int dxs[4] = {nw, -nw, 0, 0}, dzs[4] = {0, 0, nw, -nw};
                                 bool found = false;
                                 for (int k = 0; k < 4 && !found; ++k) {
-                                    const ColumnInfo nc = gen_.columnInfo(ox + dxs[k], oz + dzs[k]);
+                                    const ColumnInfo nc = colInfoAt(ox + dxs[k], oz + dzs[k]);
                                     if (nc.height < nc.waterLevel) found = true;
                                 }
                                 if (!found) continue;
                             }
                             // Root on the water surface (lilypads) or the real 3D ground.
-                            const int oh = ft.scatter.onWater ? oc.waterLevel : gen_.surfaceY(ox, oz);
+                            const int oh = ft.scatter.onWater ? oc.waterLevel : surfaceYAt(ox, oz);
                             if (ft.scatter.minSlope > 0 || ft.scatter.maxSlope < 100000) {
                                 int lo = oh, hi = oh;  // steepness = surface delta nearby
                                 const int dxs[4] = {3, -3, 0, 0}, dzs[4] = {0, 0, 3, -3};
                                 for (int k = 0; k < 4; ++k) {
-                                    const int s = gen_.surfaceY(ox + dxs[k], oz + dzs[k]);
+                                    const int s = surfaceYAt(ox + dxs[k], oz + dzs[k]);
                                     lo = std::min(lo, s); hi = std::max(hi, s);
                                 }
                                 const int slope = hi - lo;

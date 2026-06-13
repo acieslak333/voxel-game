@@ -61,11 +61,15 @@ public:
 
     // Rebuild one chunk's mesh and swap its GPU buffers, leaving every other
     // chunk untouched. Call after the world's blocks change (see World::setBlock,
-    // which returns exactly the chunk coordinates to pass here).
+    // which returns exactly the chunk coordinates to pass here). Meshes on the
+    // main thread (immediate, low-latency) and installs via the deferred path —
+    // no GPU drain (REVIEW R4).
     void remeshChunk(int cx, int cy, int cz);
 
-    // Remesh several chunks with a single GPU drain (cheaper than calling
-    // remeshChunk per chunk, which waits each time). Pass the list World::setBlock
+    // Remesh several chunks after an edit. Meshes them on the main thread now (so
+    // the edit shows this frame) and installs via the deferred buffer + frame-
+    // integrated upload path (installMeshBatch -> recordPendingUploads), so there
+    // is NO vkDeviceWaitIdle per edit (REVIEW R4). Pass the list World::setBlock
     // returns after an edit.
     void remeshChunks(const std::vector<glm::ivec3>& chunks);
 
@@ -140,6 +144,8 @@ private:
         uint32_t     waterIndexCount = 0;  // translucent water index count
         int32_t      firstWaterVertex = 0; // vertexOffset for water draws (= opaque vertex count)
         glm::vec3    worldPos{0.0f};
+        int          drawListPos = -1;     // index of this slot in drawList_, or -1 if empty
+                                           // (lets swapChunkBuffers swap-remove in O(1); R8)
     };
     // A queued mesh job / its finished result, exchanged with the worker pool.
     struct MeshJob    { int cx, cy, cz; std::uint64_t version; };
@@ -147,8 +153,16 @@ private:
 
     void buildMeshes();
     // (Re)mesh chunk (cx,cy,cz) and (re)build its buffers into its slot, updating
-    // the triangle/drawn-chunk tallies. Shared by buildMeshes() and remeshChunk().
+    // the triangle/drawn-chunk tallies. The immediate-drain path: callers issue a
+    // device-idle wait first. Now used only by buildMeshes() (startup); edits go
+    // through meshChunksDeferred().
     void uploadChunkMesh(int cx, int cy, int cz);
+    // Mesh a list of chunks on the MAIN thread (so an edit is visible this frame),
+    // dedup, bump each slot's version (discarding any stale worker result), and
+    // install via the deferred buffer + frame-integrated upload path — no GPU
+    // drain. Shared by remeshChunk/remeshChunks and the no-worker remesh queue
+    // (REVIEW R4).
+    void meshChunksDeferred(const std::vector<glm::ivec3>& chunks);
     // Apply an already-built mesh to a slot. deferOldBuffers=true retires the old
     // GPU buffers for framesInFlight_+1 frames instead of freeing them now (an
     // in-flight frame may still reference them) — required when uploading from the
@@ -196,6 +210,13 @@ private:
     std::unique_ptr<Pipeline>     waterPipeline_;       // translucent water (2nd pass)
 
     std::vector<ChunkMesh> meshes_;          // indexed by chunkIndex(); may be empty
+    // Compact list of the meshes_ slots that currently have geometry (opaque or
+    // water), maintained by swapChunkBuffers. record() iterates THIS instead of all
+    // ~17k slots twice per frame, so its cost scales with drawn chunks not window
+    // volume (REVIEW R8). drawnWaterChunks_ lets the whole water pass be skipped when
+    // nothing has water (the common above-ground case).
+    std::vector<uint32_t>  drawList_;
+    std::size_t            drawnWaterChunks_ = 0;
     // Outer-ring chunks buildMeshes() skipped (streaming only): the ctor hands them
     // to the streaming pipeline, nearest-first, so they melt in over the first
     // frames instead of blocking startup. startupMelt_ keeps streamPump() at a
