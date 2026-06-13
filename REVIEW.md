@@ -159,6 +159,58 @@ height (or when the density band covers >50% of the column), naming the cost.
 - The gated `VG_*` instrumentation (`VG_MESH_TIME`, `VG_FRAME_TIME`, `VG_AUTOWALK`)
   made both perf investigations measurement-driven; cheap to keep, worth using.
 
+## Optimization backlog (follow-up pass, 2026-06-13)
+
+Profiled context: startup ~4s (generate 3.0s dominates), steady state 250-800
+fps, worst frame ~20-30ms at a chunk-boundary crossing. These are about the
+remaining generate cost, RAM, spike tails, and render-distance headroom — not
+felt slowness. Ordered by value.
+
+**O1 — Per-column memo for the feature/tree scatter (exact; top pick).**
+`World::generateColumnInto` tree loop (`World.cpp:638`): every one of the 256
+cells scans a 9×9 root neighborhood, and each passing root pays
+`gen_.columnInfo(ox,oz)` + `gen_.surfaceY(ox,oz)` — the latter a ~100-eval
+density-band scan. The same root is fully recomputed by up to 81 covering
+cells, and again by the structure (`World.cpp:827-829`) and feature
+(`World.cpp:876-901`) stamps. A per-call memo keyed on `(ox,oz)` is
+byte-identical output and dedupes ~50-80×. Estimate: generate 3.0s → ~1.5s.
+
+**O2 — Cache the cliff-probe heights (exact; do with O1).**
+`World.cpp:449-456`: four `gen_.height(wx±1, wz)` spline-stack evals per
+elevated cell, recomputed across neighboring cells. An 18×18 per-chunk-column
+height cache cuts those ~4×.
+
+**O3 — Pack/sparsify `blockLightColor_` (memory).**
+4 bytes per cell ≈ 285MB at 33×33×256, almost all storing "no colored light"
+(sky/block light add ~140MB more). Emitter colors come from a handful of
+blocks.yaml entries — a small palette index (or sparse storage) saves a couple
+hundred MB of the ~0.7-1GB footprint. Matters on a machine that multitasks.
+
+**O4 — Smooth the residual 20-30ms boundary frame.**
+Spread the strip apply over 2-3 frames (move a third of the columns per frame —
+still exact), and/or lower mesh-worker thread priority so 8 workers chewing the
+new edge don't deschedule the main thread.
+
+**O5 — GPU buffer pool / VMA instead of one allocation per chunk.**
+The per-chunk-buffer design sits near Vulkan's ~4096 allocation ceiling (why
+upload batching needs slicing) and churns allocations during streaming. A
+pooled suballocator removes the ceiling — the prerequisite for raising
+view_radius meaningfully. Structural, medium effort.
+
+**O6 — Interpolated density sampling (approximate; only for view_radius 24-32).**
+Sample the terrain3d density stack on a coarse lattice (Minecraft uses 4×8×4)
+and trilinearly interpolate: 10-100× on the most expensive function in the
+game, at the cost of smoothing sub-4-block density detail. Hold until O1/O2
+are in and a bigger window is actually wanted.
+
+**O7 — R8 bundle (render micro-costs).**
+Compact visible-chunk list instead of iterating all 17,424 slots twice per
+frame; skip the water pass when no chunk has water. ~0.5ms/frame today — only
+worth bundling with other render work.
+
+Measured and deliberately NOT worth touching: greedy mesher (0.19ms/chunk),
+sky-light flood (0.38s), per-frame entity baking, the liquid tick.
+
 ## Suggested fix order
 
 1. **R1 + R2 together** (one change: barrier+join, then streamed remesh-all) — the
@@ -168,3 +220,8 @@ height (or when the density band covers >50% of the column), naming the cost.
 4. **R5** — bounded gate so the window can't starve.
 5. **R7, R10** — convention/oracle debt, both small.
 6. **R6, R8, R9, R12** — opportunistic, or when the relevant area is next touched.
+
+Optimization pass (independent of the fixes above): **O1+O2** first (exact,
+one function, verifiable with VG_MESH_TIME + selftest h1==h2), then **O4**;
+O3/O5 when memory or render distance becomes the goal; O6 only behind a
+deliberate quality decision; O7 opportunistic.
