@@ -1,10 +1,11 @@
 """Shared live-3D terrain view for the worldgen + biome web tools.
 
-Both tools mesh the engine's heightfield export (voxelgame --genmap --mode height)
-into a 3D terrain in the browser (Three.js, vendored locally so it works offline).
-A tool splices HEAD into its <head>, CANVAS into its #main, EX_ROW into its sidebar,
-calls register(app) for the /vendor, /heightmap and /sealevel routes, and uses
-height_args() to render the heightfield. The 3D JS (vendor/terrain3d.js) exposes
+Both tools render the engine's exposed-voxel export (voxelgame --genmap --mode
+voxels, real 3D solidity: overhangs/caves/floating islands) as instanced cubes in
+the browser (Three.js, vendored locally so it works offline). A tool splices HEAD
+into its <head>, CANVAS into its #main, EX_ROW into its sidebar, calls
+register(app) for the /vendor, /voxels.bin and /sealevel routes, and uses
+vox_args() to run the export. The 3D JS (vendor/terrain3d.js) exposes
 t3dShow(on) / t3dBuild(url); the tool owns the on/off state + regen wiring.
 """
 import os
@@ -26,16 +27,19 @@ CANVAS = '<canvas id="gl"></canvas>'
 EX_ROW = ""
 
 
-def vox_args(exe, footprint):
-    """CLI args for the engine's exposed-voxel slice export — real 3D solidity, so it
-    shows overhangs/caves/floating islands (capped footprint; it's instanced as cubes)."""
-    return [exe, "--genmap", "--mode", "voxels", "--mapsize", str(min(int(footprint), 96)),
-            "--out", VOX_OUT]
+def vox_args(exe, footprint, step=1):
+    """CLI args for the engine's exposed-voxel export — real 3D solidity, so it shows
+    overhangs/caves/floating islands. `footprint` is in BLOCKS and `step` is blocks
+    per voxel cell on every axis: step 1 = true block resolution over a small patch,
+    larger steps trade detail for breadth (footprint/step cells, engine-capped at
+    255 per side) so a whole island fits in one view instead of a 96-block slice."""
+    return [exe, "--genmap", "--mode", "voxels", "--mapsize", str(int(footprint)),
+            "--mapstep", str(max(1, int(step))), "--out", VOX_OUT]
 
 
 def sea_y():
-    """Sea level in BLOCK units (the voxels are at block coords), read from the sidecar
-    the engine writes next to the voxel slice (runGenVoxels in src/main.cpp). The JS
+    """Sea level in CELL units (the same grid the voxels use), read from the sidecar
+    the engine writes next to the voxel export (runGenVoxels in src/main.cpp). The JS
     floats the water plane at this Y. Falls back to a sane default."""
     try:
         with open(VOX_OUT + ".sea", encoding="utf-8") as f:
@@ -45,7 +49,7 @@ def sea_y():
 
 
 def register(app):
-    """Add the /vendor/<file>, /heightmap.png and /sealevel routes to a tool's app."""
+    """Add the /vendor/<file>, /voxels.bin and /sealevel routes to a tool's app."""
     @app.route("/vendor/<path:fname>")
     def _vendor(fname):
         path = os.path.abspath(os.path.join(VENDOR, fname))

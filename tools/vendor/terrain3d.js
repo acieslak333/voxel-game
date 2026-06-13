@@ -58,14 +58,15 @@
   };
 
   let framed = false; // frame the camera on the first build, then leave the user's orbit
-  // Rebuild from the exposed-voxel binary (int32 N,H,count; then count*{u8 x,y,z,r,g,b}),
-  // instancing one lit cube per voxel — so overhangs / caves / floating islands show.
+  // Rebuild from the exposed-voxel binary (int32 N,H,count,step; then
+  // count*{u8 x,y,z,r,g,b}, all coords in CELL units — `step` blocks per cell),
+  // instancing one lit cube per cell — so overhangs / caves / floating islands show.
   window.t3dBuild = function (url) {
     t3dInit();
     fetch(url).then(r => r.arrayBuffer()).then(buf => {
       const dv = new DataView(buf);
       const N = dv.getInt32(0, true), H = dv.getInt32(4, true), count = dv.getInt32(8, true);
-      const bytes = new Uint8Array(buf, 12);
+      const bytes = new Uint8Array(buf, 16); // header is 4 int32s (4th = blocks/cell)
       if (mesh) { scene.remove(mesh); mesh.geometry.dispose(); mesh.material.dispose(); }
       const box = new THREE.BoxGeometry(1, 1, 1);
       mesh = new THREE.InstancedMesh(box, new THREE.MeshStandardMaterial({ roughness: 1, metalness: 0 }), count);
@@ -81,7 +82,7 @@
       if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
       scene.add(mesh);
       fetch('/sealevel').then(r => r.json()).then(d => {
-        water.position.set(0, d.seaY, 0);          // sea level in block units
+        water.position.set(0, d.seaY, 0);          // sea level in CELL units (matches voxels)
         const s = Math.max(N * 2.2, 200) / SPAN; water.scale.set(s, s, 1);
         water.visible = true;
         if (!framed) {

@@ -54,7 +54,9 @@ def exe_path():
 
 
 # Each control: (label, dotted yaml path, min, max, step). Dotted path indexes
-# nested maps; "island.center.0" indexes a sequence element.
+# nested maps; "island.center.0" indexes a sequence element. NOTE: when a field
+# has a `layers:` stack, its single `frequency` is a LEGACY fallback the game
+# ignores — the per-layer controls (built dynamically below) are what matter.
 CONTROLS = [
     ("Sea level",            "sea_level",                 8,   240, 1),
     ("Snow line (rel)",      "snow_line",                 0,   120, 1),
@@ -64,12 +66,59 @@ CONTROLS = [
     ("Island coast warp",    "island.coast_warp",         0,   800, 10),
     ("Island land base",     "island.land_base",          0,   40,  1),
     ("Island interior var",  "island.interior_var",       0,   30,  1),
-    ("Continental freq",     "continentalness.frequency", 0.0008, 0.012, 0.0002),
-    ("Erosion freq",         "erosion.frequency",         0.001, 0.012, 0.0002),
-    ("Peaks freq",           "peaks.frequency",           0.002, 0.02, 0.0005),
-    ("Temperature freq",     "temperature.frequency",     0.0003, 0.004, 0.0001),
-    ("Humidity freq",        "humidity.frequency",        0.0003, 0.004, 0.0001),
+    ("Island ocean floor",   "island.ocean_floor",        -120, 0,  2),
+    ("Temperature freq",     "temperature.frequency",     0.0003, 0.008, 0.0001),
+    ("Humidity freq",        "humidity.frequency",        0.0003, 0.008, 0.0001),
 ]
+
+# 3D volumetric terrain + water bodies (only visible in the 3D voxel view; the
+# top-down map shows the heightmap surface only).
+CONTROLS_3D = [
+    ("3D enabled (1/0)",     "terrain3d.enabled",         0,   1,    1),
+    ("3D amplitude",         "terrain3d.amplitude",       0,   128,  2),
+    ("Float threshold",      "terrain3d.float_threshold", 0.0, 0.8,  0.01),
+    ("Float freq",           "terrain3d.float_freq",      0.001, 0.02, 0.0005),
+    ("Float gap",            "terrain3d.float_gap",       0,   60,   1),
+    ("Float reach",          "terrain3d.float_reach",     0,   200,  2),
+    ("River freq",           "rivers.frequency",          0.0005, 0.006, 0.0001),
+    ("River width",          "rivers.width",              0.0, 0.3,  0.005),
+    ("River depth",          "rivers.depth",              0,   16,   1),
+    ("River max elev",       "rivers.max_elevation",      0,   60,   1),
+    ("Lake spacing",         "lakes.spacing",             60,  600,  10),
+    ("Lake chance",          "lakes.chance",              0.0, 1.0,  0.02),
+    ("Lake radius min",      "lakes.radius_min",          4,   40,   1),
+    ("Lake radius max",      "lakes.radius_max",          8,   80,   1),
+    ("Lake depth",           "lakes.depth",               2,   20,   1),
+]
+
+# Fields whose noise can be an authored `layers:` stack — each layer gets live
+# frequency / weight / octaves number inputs (the stack IS what the game runs).
+STACK_FIELDS = ["continentalness", "erosion", "peaks", "temperature", "humidity",
+                "rivers", "terrain3d.density"]
+
+
+def layer_controls(doc):
+    """Number-input rows for every layer of every authored noise stack."""
+    rows = []
+    for field in STACK_FIELDS:
+        try:
+            layers = get_path(doc, field)["layers"]
+        except Exception:
+            continue
+        rows.append(f'<div class="grp">{field} layers</div>')
+        for i, l in enumerate(layers):
+            base = f"{field}.layers.{i}"
+            typ = str(l.get("type", "perlin"))
+            f = float(l.get("frequency", 0.01))
+            w = float(l.get("weight", 1.0))
+            o = int(l.get("octaves", 3))
+            rows.append(
+                f'<div class="r4"><label>{i} {typ}</label>'
+                f'<span>f<input type="number" step="any" value="{f:g}" data-path="{base}.frequency" oninput="onSlide(this)"></span>'
+                f'<span>w<input type="number" step="0.02" value="{w:g}" data-path="{base}.weight" oninput="onSlide(this)"></span>'
+                f'<span>o<input type="number" step="1" min="1" max="10" value="{o}" data-path="{base}.octaves" oninput="onSlide(this)"></span>'
+                f'</div>')
+    return rows
 
 
 def get_path(doc, dotted):
@@ -146,7 +195,9 @@ def run_genmap(pixels, step, view="top"):
     px = int(pixels)
     args = [exe_path(), "--genmap", "--mapstep", str(step)]
     if view == "3d":
-        subprocess.run(terrain3d.vox_args(exe_path(), px),
+        # blk/px doubles as blocks-per-voxel-cell: size 1600 / step 8 = a 200-cell
+        # view spanning 1600 blocks — the whole island, not a 96-block slice.
+        subprocess.run(terrain3d.vox_args(exe_path(), px, step),
                        cwd=ROOT, check=True, capture_output=True)
         return
     if view.startswith("noise:"):
@@ -166,16 +217,24 @@ terrain3d.register(app)  # /vendor/<file>, /heightmap.png, /sealevel
 def index():
     doc = load_doc()
     rows = []
-    for label, path, lo, hi, step in CONTROLS:
-        try:
-            val = float(get_path(doc, path))
-        except Exception:
-            val = lo
-        rows.append(
-            f'<div class="r"><label>{label}</label>'
-            f'<input type="range" min="{lo}" max="{hi}" step="{step}" value="{val}" '
-            f'data-path="{path}" oninput="onSlide(this)">'
-            f'<span class="v" id="v_{path}">{val:g}</span></div>')
+
+    def slider_rows(controls):
+        for label, path, lo, hi, step in controls:
+            try:
+                val = float(get_path(doc, path))
+            except Exception:
+                continue  # field absent from this biomes.yaml: skip the control
+            rows.append(
+                f'<div class="r"><label>{label}</label>'
+                f'<input type="range" min="{lo}" max="{hi}" step="{step}" value="{val}" '
+                f'data-path="{path}" oninput="onSlide(this)">'
+                f'<span class="v" id="v_{path}">{val:g}</span></div>')
+
+    rows.append('<div class="grp">Shape &amp; island</div>')
+    slider_rows(CONTROLS)
+    rows.append('<div class="grp">3D terrain, floats &amp; water (see them in the 3D view)</div>')
+    slider_rows(CONTROLS_3D)
+    rows.extend(layer_controls(doc))
     controls = "\n".join(rows)
     opts = "\n".join(f'<option value="{val}">{label}</option>' for label, val in VIEW_MODES)
     page = (PAGE.replace("__CONTROLS__", controls).replace("__VIEWS__", opts)
@@ -226,6 +285,10 @@ PAGE = """<!doctype html><html><head><meta charset="utf-8"><title>worldgen tool<
  #map{position:absolute;inset:0;margin:auto;max-width:96%;max-height:96vh;image-rendering:pixelated;border:1px solid #333}
  #gl{position:absolute;inset:0;width:100%;height:100%;display:none}
  .r{display:grid;grid-template-columns:120px 1fr 52px;gap:6px;align-items:center;margin:5px 0}
+ .r4{display:grid;grid-template-columns:74px 1fr 1fr 0.8fr;gap:4px;align-items:center;margin:3px 0}
+ .r4 span{display:flex;align-items:center;gap:2px;color:#9a8f7d;font-size:11px}
+ .r4 input[type=number]{width:100%;background:#262030;color:#eaddc7;border:1px solid #4a3a5e;border-radius:3px;padding:2px 3px;font-size:11px}
+ .grp{margin:12px 0 4px;font-weight:bold;color:#9fd0a0;font-size:12px}
  label{font-size:12px}.v{text-align:right;color:#c9a3e8}
  input[type=range]{width:100%}
  h2{margin:4px 0 12px;font-size:15px}.hint{color:#9a8f7d;font-size:11px;margin-bottom:10px}
@@ -239,7 +302,11 @@ __HEAD__
 <div id="side">
  <h2>worldgen tool</h2>
  <div class="hint">Drag a slider → biomes.yaml is patched and the game's --genmap re-runs, live.
- <b>3D terrain</b> meshes the real generator's heightfield (a slice) — orbit with the mouse.</div>
+ <b>3D terrain</b> renders the generator's real 3D solidity (overhangs, floating islands,
+ sea) as voxels: <b>size</b> = blocks of world shown, <b>blk/px</b> = blocks per voxel
+ cell — size 1600 at blk/px 8 shows the whole island coarsely; drop blk/px to 1 for a
+ block-true close-up. Layer rows (f/w/o = frequency, weight, octaves) edit the noise
+ STACKS the game actually runs; splines + biome list are edited in the YAML directly.</div>
  <div class="row"><label>view</label><select id="view" style="flex:1">__VIEWS__</select></div>
  <div class="row"><label>size</label><input id="px" type="number" value="640" min="128" max="2048" step="64"></div>
  <div class="row"><label>blk/px</label><input id="st" type="number" value="8" min="1" max="32"></div>
@@ -256,12 +323,13 @@ function is3D(){ return document.getElementById('view').value==='3d'; }
 // Slider edits are PREVIEW-only (written to the build copy, never the committed source)
 // until you hit Save. The dirty flag tracks unsaved edits; Restore reverts to source.
 function setDirty(b){ dirty=b; document.getElementById('dirty').textContent=b?'● unsaved':''; }
-function onSlide(el){document.getElementById('v_'+el.dataset.path).textContent=(+el.value);
+function onSlide(el){const v=document.getElementById('v_'+el.dataset.path);
+  if(v) v.textContent=(+el.value);
   setDirty(true); clearTimeout(timer); timer=setTimeout(regen,160);}
 
 function formData(){
   const fd=new FormData();
-  document.querySelectorAll('#side input[type=range][data-path]').forEach(s=>fd.append(s.dataset.path,s.value));
+  document.querySelectorAll('#side [data-path]').forEach(s=>fd.append(s.dataset.path,s.value));
   fd.append('__pixels__',document.getElementById('px').value);
   fd.append('__step__',document.getElementById('st').value);
   fd.append('__view__',document.getElementById('view').value);

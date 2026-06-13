@@ -202,7 +202,7 @@ def build_controls(docs):
 
 def run_genmap(pixels, step, view="top"):
     if view == "3d":
-        args = terrain3d.vox_args(exe_path(), pixels)
+        args = terrain3d.vox_args(exe_path(), pixels, step)
     else:
         args = [exe_path(), "--genmap", "--mapsize", str(pixels),
                 "--mapstep", str(step), "--out", MAP_OUT]

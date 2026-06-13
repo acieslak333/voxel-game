@@ -245,20 +245,27 @@ int runGenHeight(const std::string& assetDir, int pixels, int step, const std::s
     return EXIT_SUCCESS;
 }
 
-// Headless VOXEL-slice export for the live 3D terrain view â€” unlike the heightfield,
+// Headless VOXEL export for the live 3D terrain view — unlike the heightfield,
 // this shows real overhangs / caves / floating islands, because it queries the
-// generator's full 3D solidity (TerrainGenerator::isSolid) for every block in an
-// N x N x worldHeight slice. To keep it light it emits ONLY exposed voxels (a solid
-// block with at least one air neighbour) as a tight binary the browser instances as
-// cubes:  int32 N, int32 H, int32 count, then count * { u8 x, y, z, r, g, b }.
-// (little-endian). A sidecar (.sea) carries the sea level in block units.
-int runGenVoxels(const std::string& assetDir, int footprint, const std::string& outPath) {
-    const int N = std::clamp(footprint, 16, 96); // N x N block footprint (a slice)
+// generator's full 3D solidity (TerrainGenerator::isSolid). `step` = blocks per
+// voxel CELL on every axis: step 1 is true block resolution over a small patch;
+// larger steps sample the same solidity coarsely so a whole island (footprint /
+// step cells, up to 255 — cell coords pack into a byte) fits in one view instead
+// of a 96-block slice. Emits ONLY exposed cells (solid with an air neighbour) as
+// a tight binary the browser instances as cubes:
+//   int32 N, int32 H, int32 count, int32 step, then count * { u8 x,y,z, r,g,b }
+// (little-endian, all coords in CELL units). A sidecar (.sea) carries the sea
+// level, also in cell units, so the viewer floats its water plane directly.
+int runGenVoxels(const std::string& assetDir, int footprint, int step,
+                 const std::string& outPath) {
+    step = std::clamp(step, 1, 16);
+    const int N = std::clamp(footprint / step, 16, 255); // cells per side
     const vg::WorldConfig cfg = vg::WorldConfig::load(assetDir + "/world.yaml");
     const std::uint32_t seed = 1337u;
-    const int H = std::min(255, cfg.chunksY * 16); // y packs into a byte
+    const int worldHeight = cfg.chunksY * 16;
+    const int H = std::clamp(worldHeight / step, 1, 255); // vertical cells
     vg::BlockRegistry reg(assetDir + "/blocks.yaml");
-    vg::TerrainGenerator gen(seed, reg, assetDir, cfg.chunksY * 16);
+    vg::TerrainGenerator gen(seed, reg, assetDir, worldHeight);
     auto bid = [&](const char* n) -> int {
         try { return static_cast<int>(reg.idByName(n)); } catch (...) { return -1; }
     };
@@ -266,14 +273,14 @@ int runGenVoxels(const std::string& assetDir, int footprint, const std::string& 
     const int sea = gen.seaLevel();
     const int half = N / 2;
 
-    // Occupancy (1 = solid) + per-column surface colour, sampled once.
+    // Occupancy (1 = solid) + per-column surface colour, sampled once per cell.
     std::vector<unsigned char> solid(static_cast<size_t>(N) * N * H, 0);
     std::vector<unsigned char> surf(static_cast<size_t>(N) * N * 3);
     auto col = [&](int x, int z) { return static_cast<size_t>(z) * N + x; };
     auto vox = [&](int x, int y, int z) { return (static_cast<size_t>(z) * N + x) * H + y; };
     for (int z = 0; z < N; ++z) {
         for (int x = 0; x < N; ++x) {
-            const int wx = x - half, wz = z - half;
+            const int wx = (x - half) * step, wz = (z - half) * step;
             const int sh = gen.height(wx, wz);
             const vg::ColumnInfo ci = gen.columnInfo(wx, wz);
             unsigned char r, g, b;
@@ -282,7 +289,9 @@ int runGenVoxels(const std::string& assetDir, int footprint, const std::string& 
             else if (ci.topId == stoneId) { r = 132; g = 129; b = 124; }
             else                          { r = 86;  g = 140; b = 70;  }
             surf[col(x, z) * 3 + 0] = r; surf[col(x, z) * 3 + 1] = g; surf[col(x, z) * 3 + 2] = b;
-            for (int y = 0; y < H; ++y) solid[vox(x, y, z)] = gen.isSolid(sh, wx, y, wz) ? 1 : 0;
+            for (int y = 0; y < H; ++y) {
+                solid[vox(x, y, z)] = gen.isSolid(sh, wx, y * step, wz) ? 1 : 0;
+            }
         }
     }
 
@@ -298,7 +307,7 @@ int runGenVoxels(const std::string& assetDir, int footprint, const std::string& 
                 if (sol(x + 1, y, z) && sol(x - 1, y, z) && sol(x, y + 1, z) &&
                     sol(x, y - 1, z) && sol(x, y, z + 1) && sol(x, y, z - 1)) continue; // buried
                 unsigned char r, g, b;
-                if (y < sea)            { r = 46;  g = 110; b = 170; }   // submerged -> blue-ish
+                if (y * step < sea)     { r = 46;  g = 110; b = 170; }   // submerged -> blue-ish
                 else if (!sol(x, y + 1, z)) {                            // a TOP face -> biome colour
                     r = surf[col(x, z) * 3]; g = surf[col(x, z) * 3 + 1]; b = surf[col(x, z) * 3 + 2];
                 } else                  { r = 120; g = 116; b = 110; }   // side/underside -> stone
@@ -308,14 +317,16 @@ int runGenVoxels(const std::string& assetDir, int footprint, const std::string& 
                 data.insert(data.end(), rec, rec + 6);
             }
 
-    const std::int32_t header[3] = {N, H, static_cast<std::int32_t>(data.size() / 6)};
+    const std::int32_t header[4] = {N, H, static_cast<std::int32_t>(data.size() / 6), step};
     std::ofstream f(outPath, std::ios::binary);
     if (!f) { std::cerr << "[genmap] failed to write " << outPath << '\n'; return EXIT_FAILURE; }
     f.write(reinterpret_cast<const char*>(header), sizeof header);
     f.write(reinterpret_cast<const char*>(data.data()), static_cast<std::streamsize>(data.size()));
-    std::ofstream(outPath + ".sea") << sea << '\n'; // sea level in block units
+    // Sidecar: sea level in CELL units (the viewer's grid space).
+    std::ofstream(outPath + ".sea") << (static_cast<float>(sea) / static_cast<float>(step)) << '\n';
     std::cout << "[genmap] wrote " << outPath << " (voxels " << N << "x" << N << "x" << H
-              << ", " << header[2] << " exposed, seed " << seed << ", sea " << sea << ")\n";
+              << " cells, " << step << " blocks/cell, " << header[2] << " exposed, seed "
+              << seed << ", sea " << sea << ")\n";
     return EXIT_SUCCESS;
 }
 
@@ -1147,7 +1158,7 @@ int main(int argc, char** argv) {
         if (mapMode == "noise") return runGenNoise(VG_ASSET_DIR, px, st, mapOut, mapLayer);
         if (mapMode == "cross") return runGenCross(VG_ASSET_DIR, px, st, mapOut);
         if (mapMode == "height") return runGenHeight(VG_ASSET_DIR, px, st, mapOut);
-        if (mapMode == "voxels") return runGenVoxels(VG_ASSET_DIR, px, mapOut);
+        if (mapMode == "voxels") return runGenVoxels(VG_ASSET_DIR, px, st, mapOut);
         if (mapMode != "top") {
             std::cerr << "Unknown --mode '" << mapMode << "' (use top|noise|cross|height|voxels)\n";
             return EXIT_FAILURE;
