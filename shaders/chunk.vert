@@ -16,7 +16,7 @@ layout(set = 0, binding = 0) uniform CameraUBO {
     mat4 proj;
     vec4 sunDir; // xyz: toward the active light (sun/moon), w: ambient floor
     vec4 sunCol; // rgb: linear light tint, a: sky-light intensity
-    vec4 misc;   // x: animation time (seconds) for foliage sway / water waves
+    vec4 misc;   // x: animation time (seconds) for foliage sway
     vec4 heldLight;    // xyz: held-emitter world pos, w: radius (0 = off)
     vec4 heldLightCol; // rgb: linear colour, a: intensity (0..1)
 } camera;
@@ -41,7 +41,7 @@ layout(location = 7) noperspective out vec2 fragUVaffine;
 layout(location = 8) out vec3 fragWorldPos; // world-space position for the held point light
 
 void main() {
-    // --- Ambient motion (foliage sway + water waves) -------------------------
+    // --- Ambient motion (foliage sway) ---------------------------------------
     // Displace in chunk-local space (the chunk model is a pure translation, so a
     // local offset is a world offset). Phase varies by world position so plants
     // don't all wave in lockstep.
@@ -58,11 +58,6 @@ void main() {
         p.x += amp * sin(t * 1.6 + ph);
         p.z += amp * cos(t * 1.3 + ph * 1.1);
     }
-    // Water: the translucent pass (params.x < 1) gently bobs its top surface.
-    if (push.params.x < 0.999 && inNormal == 3u) {
-        p.y += 0.05 * sin(t * 1.1 + wp.x * 0.6 + wp.z * 0.6) - 0.02;
-    }
-
     gl_Position = camera.proj * camera.view * push.model * vec4(p, 1.0);
     // --- PS1 vertex jitter -----------------------------------------------------
     // Snap the projected position to a coarse grid (misc.y = grid resolution, 0 =
@@ -72,8 +67,6 @@ void main() {
         gl_Position.xy = floor(gl_Position.xy / gl_Position.w * g) / g * gl_Position.w;
     }
     vec2 outUV = inUV;
-    // Water scrolls its UV slightly so the surface reads as flowing, not glass.
-    if (push.params.x < 0.999) outUV += vec2(t * 0.04, t * 0.02);
     fragUV         = outUV;
     fragUVaffine   = outUV;
     fragLayer      = inLayer;

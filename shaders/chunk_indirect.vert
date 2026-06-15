@@ -3,7 +3,7 @@
 // -----------------------------------------------------------------------------
 //  chunk_indirect.vert — GPU-driven (multi-draw-indirect) variant of chunk.vert
 // -----------------------------------------------------------------------------
-//  Identical lighting / foliage-sway / water / PS1 logic to chunk.vert, with ONE
+//  Identical lighting / foliage-sway / PS1 logic to chunk.vert, with ONE
 //  difference: the per-chunk model transform no longer arrives as a push constant
 //  (indirect draws can't carry per-draw push constants). Instead every chunk's
 //  world translation lives in a storage buffer (binding 2), indexed by
@@ -78,17 +78,12 @@ void main() {
         p.x += amp * sin(t * 1.6 + ph);
         p.z += amp * cos(t * 1.3 + ph * 1.1);
     }
-    if (push.params.x < 0.999 && inNormal == 3u) {
-        p.y += 0.05 * sin(t * 1.1 + wp.x * 0.6 + wp.z * 0.6) - 0.02;
-    }
-
     gl_Position = camera.proj * camera.view * vec4(p + chunkPos, 1.0);
     if (camera.misc.y > 0.0) {
         vec2 g = vec2(camera.misc.y);
         gl_Position.xy = floor(gl_Position.xy / gl_Position.w * g) / g * gl_Position.w;
     }
     vec2 outUV = inUV;
-    if (push.params.x < 0.999) outUV += vec2(t * 0.04, t * 0.02);
     fragUV         = outUV;
     fragUVaffine   = outUV;
     fragLayer      = inLayer;
