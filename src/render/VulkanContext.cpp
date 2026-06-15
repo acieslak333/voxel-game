@@ -233,9 +233,17 @@ void VulkanContext::createLogicalDevice() {
         queueInfos.push_back(qi);
     }
 
-    // No special device features required yet; later milestones may enable
-    // e.g. samplerAnisotropy here.
+    // GPU-driven chunk rendering draws all chunks with one vkCmdDrawIndexedIndirect
+    // per pass (the cull compute shader / CPU fills a per-slot command array). That
+    // needs multiDrawIndirect (>1 command per indirect call) and
+    // drawIndirectFirstInstance (each command's firstInstance carries the chunk slot
+    // the vertex shader looks its world translation up by). Both are optional Vulkan
+    // 1.0 features but effectively universal on desktop GPUs; enable unconditionally
+    // (pickPhysicalDevice already selects a discrete/integrated GPU that supports
+    // them). samplerAnisotropy may join here later.
     VkPhysicalDeviceFeatures features{};
+    features.multiDrawIndirect         = VK_TRUE;
+    features.drawIndirectFirstInstance = VK_TRUE;
 
     VkDeviceCreateInfo createInfo{};
     createInfo.sType                   = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;

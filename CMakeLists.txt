@@ -195,6 +195,8 @@ endfunction()
 
 add_shader(chunk.vert)
 add_shader(chunk.frag)
+add_shader(chunk_indirect.vert) # GPU-driven (indirect) variant of chunk.vert
+add_shader(chunk_cull.comp)     # frustum cull -> indirect draw commands
 add_shader(ui.vert)
 add_shader(ui.frag)
 add_shader(sky.vert)
@@ -227,6 +229,7 @@ add_executable(voxelgame
     src/render/VulkanUtils.cpp
     src/render/Buffer.cpp
     src/render/GpuAllocator.cpp
+    src/render/SpanAllocator.cpp
     src/render/TextureArray.cpp
     src/render/Pipeline.cpp
     src/render/WorldRenderer.cpp

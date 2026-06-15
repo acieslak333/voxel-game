@@ -1,0 +1,88 @@
+#version 450
+
+// -----------------------------------------------------------------------------
+//  chunk_cull.comp — GPU frustum culling -> indirect draw commands
+// -----------------------------------------------------------------------------
+//  One invocation per resident chunk slot. Reads the slot's mesh metadata (AABB +
+//  index/vertex ranges), tests its AABB against the 6 camera frustum planes, and
+//  writes a VkDrawIndexedIndirectCommand for both its opaque and water ranges.
+//
+//  Culling is expressed as instanceCount, NOT as list compaction: a visible range
+//  gets instanceCount 1, a culled or empty range gets instanceCount 0 (a zero-
+//  instance indexed draw is a cheap GPU no-op). So the command arrays are dense by
+//  slot and the renderer issues ONE vkCmdDrawIndexedIndirect over the whole array
+//  per pass — no atomic compaction, no count buffer, no drawIndirectCount feature.
+//  Only multiDrawIndirect + drawIndirectFirstInstance are required (near-universal).
+//
+//  firstInstance carries the chunk's slot so chunk_indirect.vert can look up the
+//  chunk's world translation via gl_InstanceIndex. Conservative AABB-plane test —
+//  mirrors WorldRenderer.cpp's aabbInFrustum so CPU and GPU culling agree.
+// -----------------------------------------------------------------------------
+
+layout(local_size_x = 64) in;
+
+// Mirrors VkDrawIndexedIndirectCommand (std430 stride 20 bytes — 5x 4-byte words).
+struct DrawCmd {
+    uint indexCount;
+    uint instanceCount;
+    uint firstIndex;
+    int  vertexOffset;
+    uint firstInstance;
+};
+
+// Per-slot mesh metadata, filled by the renderer (one entry per mesh slot).
+//  aabbMin/Max : world-space chunk bounds (xyz; w padding).
+//  opaque/water: x=indexCount, y=firstIndex, z=vertexOffset (as uint), w=slot.
+struct ChunkMeta {
+    vec4  aabbMin;
+    vec4  aabbMax;
+    uvec4 opaque;
+    uvec4 water;
+};
+
+layout(std430, set = 0, binding = 0) readonly buffer Meta   { ChunkMeta meta[];  } inMeta;
+layout(std430, set = 0, binding = 1) writeonly buffer Opaque { DrawCmd cmds[]; } outOpaque;
+layout(std430, set = 0, binding = 2) writeonly buffer Water  { DrawCmd cmds[]; } outWater;
+
+layout(push_constant) uniform Push {
+    vec4 planes[6]; // frustum planes a*x+b*y+c*z+d >= 0 inside (Gribb-Hartmann)
+    uint slotCount; // number of valid entries in meta[]
+} push;
+
+// Conservative AABB-vs-frustum: outside iff the box's positive vertex (the corner
+// farthest along a plane normal) is still behind that plane. Never culls a partly
+// visible box — matches WorldRenderer::aabbInFrustum.
+bool aabbInFrustum(vec3 mn, vec3 mx) {
+    for (int i = 0; i < 6; ++i) {
+        vec4 pl = push.planes[i];
+        vec3 pv = vec3(pl.x >= 0.0 ? mx.x : mn.x,
+                       pl.y >= 0.0 ? mx.y : mn.y,
+                       pl.z >= 0.0 ? mx.z : mn.z);
+        if (dot(pl.xyz, pv) + pl.w < 0.0) return false;
+    }
+    return true;
+}
+
+void main() {
+    uint slot = gl_GlobalInvocationID.x;
+    if (slot >= push.slotCount) return;
+
+    ChunkMeta m = inMeta.meta[slot];
+    bool visible = aabbInFrustum(m.aabbMin.xyz, m.aabbMax.xyz);
+
+    DrawCmd op;
+    op.indexCount    = m.opaque.x;
+    op.instanceCount = (visible && m.opaque.x > 0u) ? 1u : 0u;
+    op.firstIndex    = m.opaque.y;
+    op.vertexOffset  = int(m.opaque.z);
+    op.firstInstance = m.opaque.w;
+    outOpaque.cmds[slot] = op;
+
+    DrawCmd wa;
+    wa.indexCount    = m.water.x;
+    wa.instanceCount = (visible && m.water.x > 0u) ? 1u : 0u;
+    wa.firstIndex    = m.water.y;
+    wa.vertexOffset  = int(m.water.z);
+    wa.firstInstance = m.water.w;
+    outWater.cmds[slot] = wa;
+}
