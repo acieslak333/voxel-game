@@ -276,7 +276,8 @@ void EntityRenderer::record(VkCommandBuffer cmd, uint32_t frameIndex, VkExtent2D
                             const std::vector<Draw>& draws) {
     if (draws.empty()) return;
 
-    CameraUBO ubo{view, proj, sunDirAmbient, sunColIntensity};
+    CameraUBO ubo{view, proj, sunDirAmbient, sunColIntensity,
+                  glm::vec4(retroJitter_, 0.0f, 0.0f, 0.0f)};
     uniformBuffers_[frameIndex].upload(&ubo, sizeof(ubo));
 
     // Concatenate every entity's baked mesh into this frame's vertex buffer,

@@ -55,9 +55,18 @@ public:
     // day, moon at night), w: ambient floor. `sunColIntensity` = rgb: linear
     // light tint, a: sky-light intensity (1 noon .. ~0.16 midnight). Both come
     // from DayNight::state() and feed the chunk shader's directional lighting.
+    // `heldLight` is a dynamic point light that travels with the player when they
+    // hold an emitter (a lit torch, glowstone, ...): xyz = world position, w =
+    // radius in blocks (0 = no held light). `heldLightCol` = rgb linear colour,
+    // a = intensity (0..1). Lit per-fragment in the chunk shader (no relight).
     void record(VkCommandBuffer cmd, uint32_t frameIndex, VkExtent2D extent,
                 const glm::mat4& view, const glm::mat4& proj,
-                const glm::vec4& sunDirAmbient, const glm::vec4& sunColIntensity);
+                const glm::vec4& sunDirAmbient, const glm::vec4& sunColIntensity,
+                const glm::vec4& heldLight, const glm::vec4& heldLightCol);
+
+    // PS1 retro geometry knobs (folded into the chunk UBO's `misc`): `jitter` is the
+    // vertex-snap grid resolution (0 = off), `affine` toggles affine texture warp.
+    void setRetro(float jitter, float affine) { retroJitter_ = jitter; retroAffine_ = affine; }
 
     // Rebuild one chunk's mesh and swap its GPU buffers, leaving every other
     // chunk untouched. Call after the world's blocks change (see World::setBlock,
@@ -122,8 +131,12 @@ private:
         glm::vec4 sunDir; // xyz: toward the active light, w: ambient floor
         glm::vec4 sunCol; // rgb: linear light tint, a: sky-light intensity
         glm::vec4 misc;   // x: animation time (seconds) for foliage sway / water waves
+        glm::vec4 heldLight;    // xyz: held-emitter world pos, w: radius (0 = off)
+        glm::vec4 heldLightCol; // rgb: linear colour, a: intensity (0..1)
     };
     float animTime_ = 0.0f; // accumulated per recorded frame; drives the sway/wave clock
+    float retroJitter_ = 0.0f; // PS1 vertex-jitter grid resolution (0 = off)
+    float retroAffine_ = 0.0f; // PS1 affine texture-warp flag (0/1)
     // Per-draw push constant: chunk model matrix + params (params.x = output
     // alpha — 1 for the opaque pass, < 1 for the translucent water pass).
     struct PushConstants {
@@ -198,12 +211,23 @@ private:
     [[nodiscard]] ChunkMesher::LightSampler makeLightSampler(int cx, int cy, int cz) const;
     // Resolves a tintable block at chunk-local (x,z) to its biome vegetation tint.
     [[nodiscard]] ChunkMesher::TintSampler makeTintSampler(int cx, int cy, int cz) const;
+
+    // The single chunk-mesh chokepoint every build path funnels through: greedy
+    // meshing normally, or (VG_SURFACENETS=1) a Surface Nets mesh of the analytic
+    // terrain density (docs/WORLDGEN.md Layer 2) — an experimental smooth-terrain
+    // preview. Both only READ the world, so this is safe on the worker pool.
+    [[nodiscard]] MeshData meshChunkData(int cx, int cy, int cz) const;
+    // Build a chunk mesh with Surface Nets over the generator's density field.
+    [[nodiscard]] MeshData buildSurfaceNetsMesh(int cx, int cy, int cz) const;
+
     [[nodiscard]] int chunkIndex(int cx, int cy, int cz) const;
     void createUniformBuffers(uint32_t n);
     void createDescriptorSets(uint32_t n);
 
     VulkanContext& ctx_;
     const World&   world_;
+    bool           surfaceNets_ = false; // VG_SURFACENETS: experimental Layer-2 mesher
+    int            landformMode_ = 0;    // VG_LANDFORM: 0 terrain, 1 pillars, 2 arch (SN demo)
 
     std::unique_ptr<TextureArray> textures_;
     std::unique_ptr<Pipeline>     pipeline_;            // opaque terrain

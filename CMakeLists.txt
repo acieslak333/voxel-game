@@ -217,6 +217,7 @@ add_executable(voxelgame
     src/core/AppUi.cpp
     src/core/Input.cpp
     src/core/Palette.cpp
+    src/core/ColorPalette.cpp
     src/core/DayNight.cpp
     src/core/Settings.cpp
     src/core/Ui.cpp
@@ -243,10 +244,12 @@ add_executable(voxelgame
     src/world/ChunkMesher.cpp
     src/world/Noise.cpp
     src/world/Feature.cpp
+    src/world/NoiseMask.cpp
     src/world/NoiseStack.cpp
     src/world/Raycast.cpp
     src/world/Shape.cpp
     src/world/Structure.cpp
+    src/world/SurfaceNets.cpp
     src/world/TerrainGenerator.cpp
     src/world/World.cpp
     src/world/WorldConfig.cpp

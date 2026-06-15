@@ -1,6 +1,8 @@
 #include "world/TerrainGenerator.h"
 
 #include "world/BlockRegistry.h"
+#include "world/Hash.h"        // shared floordiv/hash01 (were local copies here)
+#include "world/NoiseLoad.h"   // shared loadStack (was a local copy here)
 
 #include <yaml-cpp/yaml.h>
 
@@ -28,57 +30,10 @@ float Spline::at(float x) const {
 }
 
 namespace {
-// Floor division (correct for negatives) — for the coarse lake-placement grid.
-int floordiv(int a, int b) {
-    const int q = a / b, r = a % b;
-    return (r != 0 && ((r < 0) != (b < 0))) ? q - 1 : q;
-}
+// floordiv/hash01 now live in world/Hash.h (shared canonical worldgen hashes).
 
-// Deterministic [0,1) hash of an integer cell + salt (lake placement).
-float hash01(int x, int z, uint32_t salt) {
-    uint32_t h = static_cast<uint32_t>(x) * 0x8da6b343u ^
-                 static_cast<uint32_t>(z) * 0xd8163841u ^ (salt * 0x9e3779b9u);
-    h ^= h >> 16; h *= 0x7feb352du;
-    h ^= h >> 15; h *= 0x846ca68bu;
-    h ^= h >> 16;
-    return static_cast<float>(h & 0x00FFFFFFu) / static_cast<float>(0x01000000);
-}
-
-// Parse an optional `layers:` sequence under a field node into a NoiseStack. Each
-// list entry is a layer: {type, frequency, octaves, lacunarity, gain, weight,
-// offset:[x,z]}. Returns an empty stack (and leaves it unused) if there is no
-// `layers:` node, so a plain `{frequency, octaves}` field keeps the legacy path.
-// baseSeed salts each layer's own noise so the layers are independent.
-NoiseStack loadStack(const YAML::Node& fieldNode, uint32_t baseSeed) {
-    NoiseStack stack;
-    if (!fieldNode || !fieldNode["layers"] || !fieldNode["layers"].IsSequence()) {
-        return stack; // empty: caller falls back to the scalar fbm
-    }
-    uint32_t i = 0;
-    for (const YAML::Node& ln : fieldNode["layers"]) {
-        NoiseStack::Layer L;
-        if (ln["type"]) {
-            const std::string t = ln["type"].as<std::string>();
-            if (t == "ridged")      L.type = NoiseStack::Type::Ridged;
-            else if (t == "billow") L.type = NoiseStack::Type::Billow;
-            else                    L.type = NoiseStack::Type::Perlin;
-        }
-        if (ln["frequency"])  L.frequency  = ln["frequency"].as<float>();
-        if (ln["octaves"])    L.octaves    = ln["octaves"].as<int>();
-        if (ln["lacunarity"]) L.lacunarity = ln["lacunarity"].as<float>();
-        if (ln["gain"])       L.gain       = ln["gain"].as<float>();
-        if (ln["weight"])     L.weight     = ln["weight"].as<float>();
-        if (ln["offset"] && ln["offset"].IsSequence() && ln["offset"].size() == 2) {
-            L.offX = ln["offset"][0].as<float>();
-            L.offZ = ln["offset"][1].as<float>();
-        }
-        // Salt each layer so its noise is decorrelated from the others and from the
-        // field's legacy scalar noise (which uses a different seed derivation).
-        stack.addLayer(L, baseSeed * 2246822519u + i * 0x9e3779b9u + 0x5bd1e995u);
-        ++i;
-    }
-    return stack;
-}
+// (loadStack moved to world/NoiseLoad.h so TerrainGenerator and NoiseMask share one
+//  parser — terrain output is byte-identical, the code is just relocated.)
 
 // Resolve a block name to an id, falling back to `fallback` (then stone) if the
 // name is missing — so an authored biome can't crash generation.
@@ -94,6 +49,40 @@ uint16_t resolveBlock(const BlockRegistry& reg, const std::string& name,
         }
     }
 }
+
+// Pick a block id from a weighted palette for a roll in [0,1). One entry → always that
+// block, so a single-block biome is byte-identical to the old single-id path.
+uint16_t pickBlock(const std::vector<std::pair<uint16_t, float>>& pal, float roll) {
+    if (pal.empty()) return 0;
+    float total = 0.0f;
+    for (const auto& e : pal) total += e.second;
+    if (total <= 0.0f) return pal.front().first;
+    float t = roll * total;
+    for (const auto& e : pal) { t -= e.second; if (t < 0.0f) return e.first; }
+    return pal.back().first;
+}
+
+// Parse a biome `top:`/`filler:` value into a weighted palette — like a feature's block
+// list. Accepts a scalar name ("grass"), a list of names ([grass, dirt] = equal weight),
+// or a list of {name, w} maps. Falls back to `fallback` when empty.
+std::vector<std::pair<uint16_t, float>> parsePalette(const YAML::Node& n,
+        const BlockRegistry& reg, const char* fallback) {
+    std::vector<std::pair<uint16_t, float>> pal;
+    auto add = [&](const std::string& nm, float w) {
+        pal.emplace_back(resolveBlock(reg, nm, fallback), std::max(0.0f, w));
+    };
+    if (n && n.IsScalar()) {
+        add(n.as<std::string>(), 1.0f);
+    } else if (n && n.IsSequence()) {
+        for (const auto& e : n) {
+            if (e.IsScalar()) add(e.as<std::string>(), 1.0f);
+            else if (e.IsMap() && e["name"]) add(e["name"].as<std::string>(),
+                                                 e["w"] ? e["w"].as<float>() : 1.0f);
+        }
+    }
+    if (pal.empty()) add(fallback, 1.0f);
+    return pal;
+}
 } // namespace
 
 TerrainGenerator::TerrainGenerator(uint32_t seed, const BlockRegistry& registry,
@@ -104,7 +93,7 @@ TerrainGenerator::TerrainGenerator(uint32_t seed, const BlockRegistry& registry,
       peakNoise_(seed * 40503u + 0x77u),
       tempNoise_(seed ^ 0xC0FFEEu),
       humNoise_(seed * 668265263u + 0x55u),
-      riverNoise_(seed * 2246822519u + 0x99u),
+      coastNoise_(seed * 2246822519u + 0x99u),
       densityNoise_(seed * 374761393u + 0xABCDu),
       floatNoise_(seed * 1103515245u + 0x4Du) {
     seed_ = seed;
@@ -142,27 +131,26 @@ TerrainGenerator::TerrainGenerator(uint32_t seed, const BlockRegistry& registry,
     // Default biome table (first match wins; keep specific ones before plains).
     auto add = [&](const char* name, float t0, float t1, float h0, float h1,
                    int r0, int r1, const char* top, const char* filler, bool snow,
-                   float trees, float bushes) {
+                   float trees) {
         BiomeDef b;
         b.name = name;
         b.tempMin = t0; b.tempMax = t1;
         b.humMin = h0;  b.humMax = h1;
         b.relMin = r0;  b.relMax = r1;
-        b.topId = resolveBlock(registry, top, "grass");
-        b.fillerId = resolveBlock(registry, filler, "dirt");
+        b.top    = {{resolveBlock(registry, top, "grass"), 1.0f}};
+        b.filler = {{resolveBlock(registry, filler, "dirt"), 1.0f}};
         b.snow = snow;
         b.treeDensity = trees;
-        b.bushDensity = bushes;
         biomes_.push_back(b);
     };
-    //   name        temp        humidity     rel-elev      top      filler   snow  trees  bushes
-    add("beach",    -2,2,       -2,2,        -4, 2,        "sand",  "sand",  false, 0.0f,  0.0f);
-    add("mountain", -2,2,       -2,2,        34, 10000,    "stone", "stone", false, 0.003f,0.0f);
-    add("desert",    0.35f,2,   -2,-0.15f,    2, 10000,    "sand",  "sand",  false, 0.0f,  0.012f);
-    add("savanna",   0.2f,2,    -0.15f,0.3f,  2, 10000,    "grass", "dirt",  false, 0.006f,0.05f);
-    add("snowy",    -2,-0.35f,  -2,2,         2, 10000,    "grass", "dirt",  true,  0.012f,0.02f);
-    add("forest",   -0.35f,0.6f, 0.2f,2,      2, 10000,    "grass", "dirt",  false, 0.055f,0.05f);
-    add("plains",   -2,2,       -2,2,        -10000,10000, "grass", "dirt",  false, 0.018f,0.05f);
+    //   name        temp        humidity     rel-elev      top      filler   snow  trees
+    add("beach",    -2,2,       -2,2,        -4, 2,        "sand",  "sand",  false, 0.0f);
+    add("mountain", -2,2,       -2,2,        34, 10000,    "stone", "stone", false, 0.003f);
+    add("desert",    0.35f,2,   -2,-0.15f,    2, 10000,    "sand",  "sand",  false, 0.0f);
+    add("savanna",   0.2f,2,    -0.15f,0.3f,  2, 10000,    "grass", "dirt",  false, 0.006f);
+    add("snowy",    -2,-0.35f,  -2,2,         2, 10000,    "grass", "dirt",  true,  0.012f);
+    add("forest",   -0.35f,0.6f, 0.2f,2,      2, 10000,    "grass", "dirt",  false, 0.055f);
+    add("plains",   -2,2,       -2,2,        -10000,10000, "grass", "dirt",  false, 0.018f);
 
     loadConfig(assetDir, registry);
 
@@ -204,7 +192,7 @@ void TerrainGenerator::loadConfig(const std::string& assetDir, const BlockRegist
         if (n && n[k]) v = n[k].as<int>();
     };
     // Tolerant bool: yaml-cpp's as<bool>() only accepts true/false, but the tuning
-    // tools (tools/genmap_tool.py) write toggles as 0/1 sliders, so a tuned
+    // tools (tools/worldgen_tool.py) write toggles as 0/1 sliders, so a tuned
     // `enabled: 1` would otherwise throw "bad conversion" and crash worldgen /
     // --genmap / --selftest. Accept ints and the common yes/no/on/off forms too.
     auto asBool = [](const YAML::Node& n, bool fallback) -> bool {
@@ -228,17 +216,6 @@ void TerrainGenerator::loadConfig(const std::string& assetDir, const BlockRegist
     getI(root["peaks"], "octaves", peakOct_);
     getF(root["temperature"], "frequency", tempFreq_);
     getF(root["humidity"], "frequency", humFreq_);
-    getF(root["rivers"], "frequency", riverFreq_);
-    getF(root["rivers"], "width", riverWidth_);
-    getI(root["rivers"], "depth", riverDepth_);
-    getI(root["rivers"], "max_elevation", riverMaxRel_);
-    getI(root["lakes"], "spacing", lakeSpacing_);
-    getF(root["lakes"], "chance", lakeChance_);
-    getI(root["lakes"], "radius_min", lakeRadiusMin_);
-    getI(root["lakes"], "radius_max", lakeRadiusMax_);
-    getI(root["lakes"], "depth", lakeDepth_);
-    getI(root["lakes"], "min_elevation", lakeMinRel_);
-    getI(root["lakes"], "max_elevation", lakeMaxRel_);
     if (const YAML::Node is = root["island"]) {
         islandEnabled_ = asBool(is["enabled"], true);
         if (is["center"] && is["center"].IsSequence() && is["center"].size() == 2) {
@@ -249,6 +226,7 @@ void TerrainGenerator::loadConfig(const std::string& assetDir, const BlockRegist
         getF(is, "inner", islandInner_);
         getF(is, "coast_warp", islandCoastWarp_);
         getF(is, "land_base", islandLandBase_);
+        getF(is, "peak_height", islandPeakHeight_);
         getF(is, "interior_var", islandInteriorVar_);
         getF(is, "ocean_floor", islandDeepOcean_);
     }
@@ -270,6 +248,7 @@ void TerrainGenerator::loadConfig(const std::string& assetDir, const BlockRegist
     };
     loadSpline("continental_spline", contSpline_);
     loadSpline("erosion_spline", eroSpline_);
+    loadSpline("island_profile_spline", profileSpline_);
 
     // Optional data-driven noise stacks: a `<field>.layers:` sequence replaces the
     // single-fbm sample with a weighted blend. Absent -> empty stack -> legacy path.
@@ -278,7 +257,6 @@ void TerrainGenerator::loadConfig(const std::string& assetDir, const BlockRegist
     peakStack_  = loadStack(root["peaks"],           seed_ * 40503u + 0x77u);
     tempStack_  = loadStack(root["temperature"],     seed_ ^ 0xC0FFEEu);
     humStack_   = loadStack(root["humidity"],        seed_ * 668265263u + 0x55u);
-    riverStack_ = loadStack(root["rivers"],          seed_ * 2246822519u + 0x99u);
 
     // Worldgen v2: 3D volumetric terrain knobs (overhangs / floating islands). The
     // density + float fields can each be a weighted NoiseStack via nested `layers:`.
@@ -288,10 +266,16 @@ void TerrainGenerator::loadConfig(const std::string& assetDir, const BlockRegist
         getF(t3, "freq_y", densityFreqY_);
         getI(t3, "octaves", densityOct_);
         getF(t3, "amplitude", densityAmp_);
+        getI(t3, "blend", biomeBlendCells_);   // per-biome amplitude border-blend (blocks)
         getF(t3, "float_freq", floatFreq_);
         getF(t3, "float_threshold", floatThresh_);
         getI(t3, "float_gap", floatGap_);
         getI(t3, "float_reach", floatReach_);
+        if (const YAML::Node cf = t3["coast_flatten"]) {
+            coastFlatten_ = asBool(cf["enabled"], false);
+            getF(cf, "range", coastFlattenRange_);
+            getF(cf, "min",   coastFlattenMin_);
+        }
         densityStack_ = loadStack(t3["density"], seed_ * 374761393u + 0xABCDu);
         floatStack_   = loadStack(t3["float"],   seed_ * 1103515245u + 0x4Du);
         // Coarse-lattice density interpolation (REVIEW O6), opt-in. `lattice` is an
@@ -335,41 +319,66 @@ void TerrainGenerator::loadConfig(const std::string& assetDir, const BlockRegist
             if (!bn["name"]) continue;
             BiomeDef b;
             b.name = bn["name"].as<std::string>();
-            auto range = [&](const char* key, float& lo, float& hi) {
-                if (bn[key] && bn[key].IsSequence() && bn[key].size() == 2) {
-                    lo = bn[key][0].as<float>();
-                    hi = bn[key][1].as<float>();
-                }
-            };
-            range("temp", b.tempMin, b.tempMax);
-            range("humidity", b.humMin, b.humMax);
+            // Climate (temp/humidity) removed — biomes select by elevation band alone,
+            // varied by an optional `mask:` (noise selection mask, below).
             if (bn["elevation"] && bn["elevation"].IsSequence() && bn["elevation"].size() == 2) {
                 b.relMin = bn["elevation"][0].as<int>();
                 b.relMax = bn["elevation"][1].as<int>();
             }
-            b.topId    = resolveBlock(registry, bn["top"] ? bn["top"].as<std::string>() : "grass", "grass");
-            b.fillerId = resolveBlock(registry, bn["filler"] ? bn["filler"].as<std::string>() : "dirt", "dirt");
+            if (bn["mask"]) {
+                uint32_t h = seed_ * 374761393u + 0x5e1ec7u;
+                for (char c : b.name) h = h * 131u + static_cast<unsigned char>(c);
+                b.selMask = loadMask(bn["mask"], h);
+            }
+            b.top    = parsePalette(bn["top"],    registry, "grass");
+            b.filler = parsePalette(bn["filler"], registry, "dirt");
             b.snow        = asBool(bn["snow"], false);
             b.treeDensity = bn["trees"] ? bn["trees"].as<float>() : 0.0f;
-            b.bushDensity = bn["bushes"] ? bn["bushes"].as<float>() : 0.0f;
-            if (bn["plant"]) {
-                const std::string p = bn["plant"].as<std::string>();
-                b.plant = p == "none"   ? FloraKind::None
-                        : p == "grass"  ? FloraKind::GrassFlower
-                        : p == "forest" ? FloraKind::Forest
-                        : p == "desert" ? FloraKind::Desert
-                        : FloraKind::Bush;
-            }
             if (bn["tree"]) {
                 const std::string t = bn["tree"].as<std::string>();
-                b.tree = t == "birch"  ? TreeKind::Birch
-                       : t == "pine"   ? TreeKind::Pine
-                       : t == "maple"  ? TreeKind::Maple
-                       : t == "willow" ? TreeKind::Willow
+                b.tree = t == "birch" ? TreeKind::Birch
+                       : t == "pine"  ? TreeKind::Pine
                        : TreeKind::Oak;
             }
             if (const YAML::Node tn = bn["tint"]; tn && tn.IsSequence() && tn.size() >= 3) {
                 b.vegTint = {tn[0].as<float>(), tn[1].as<float>(), tn[2].as<float>()};
+            }
+            // Per-biome overrides of the global terrain3d knobs. Each is only read when
+            // the biome authors that key, so an unauthored biome keeps the global value
+            // and the default world stays byte-identical.
+            if (const YAML::Node bt = bn["terrain3d"]) {
+                if (bt["amplitude"])       b.amp3d       = bt["amplitude"].as<float>();
+                if (bt["enabled"])         b.en3d        = asBool(bt["enabled"], true) ? 1 : 0;
+                if (bt["float_threshold"]) b.floatThresh = bt["float_threshold"].as<float>();
+                if (bt["float_reach"])     b.floatReach  = bt["float_reach"].as<int>();
+                if (const YAML::Node cf = bt["coast_flatten"]) {
+                    if (cf["enabled"]) b.coastOn    = asBool(cf["enabled"], false) ? 1 : 0;
+                    if (cf["range"])   b.coastRange = cf["range"].as<float>();
+                    if (cf["min"])     b.coastMin   = cf["min"].as<float>();
+                }
+                // Per-biome 3D density layer stack (unlimited layers, like the global one).
+                if (bt["density"] && bt["density"]["layers"]) {
+                    b.densityStack = loadStack(bt["density"],
+                                               seed_ * 2654435761u + 0x9E37u +
+                                               static_cast<uint32_t>(loaded.size()) * 2246822519u);
+                    b.hasDensityStack = !b.densityStack.empty();
+                }
+            }
+            // Noise-driven surface block patches: each {block, threshold, width, falloff,
+            // gain, invert, bezier, layers:[...]} overrides the surface block where its
+            // mask passes (first match wins). Salted per biome+mask index for independence.
+            if (const YAML::Node sm = bn["surface_masks"]; sm && sm.IsSequence()) {
+                uint32_t mi = 0;
+                for (const YAML::Node& mn : sm) {
+                    if (!mn["block"]) { ++mi; continue; }
+                    BiomeDef::BlockMask bm;
+                    bm.id = resolveBlock(registry, mn["block"].as<std::string>(), "stone");
+                    bm.mask = loadMask(mn, seed_ * 2654435761u + 0x515Du +
+                                       static_cast<uint32_t>(loaded.size()) * 2246822519u +
+                                       mi * 0x9e3779b9u);
+                    if (!bm.mask.empty()) b.surfaceMasks.push_back(std::move(bm));
+                    ++mi;
+                }
             }
             loaded.push_back(b);
         }
@@ -378,15 +387,25 @@ void TerrainGenerator::loadConfig(const std::string& assetDir, const BlockRegist
         }
     }
 
-    // Guard against config values that would divide by zero / blow up.
-    lakeSpacing_ = std::max(16, lakeSpacing_);
-    lakeRadiusMax_ = std::max(lakeRadiusMin_, lakeRadiusMax_);
-    riverWidth_ = std::max(0.001f, riverWidth_);
-
     maxTreeDensity_ = 0.0f;
+    maxAmp_ = densityAmp_;
+    maxFloatReach_ = floatReach_;
+    anyAmpOverride_ = false;
+    anyDensityStackOverride_ = false;
     for (const BiomeDef& b : biomes_) {
         maxTreeDensity_ = std::max(maxTreeDensity_, b.treeDensity);
+        if (b.amp3d >= 0.0f) maxAmp_ = std::max(maxAmp_, b.amp3d);
+        if (b.floatReach >= 0) maxFloatReach_ = std::max(maxFloatReach_, b.floatReach);
+        // Any blended-scalar override (amp/enabled/float/coast) routes columns through
+        // the biomeParamsAt blend path instead of the global fast path.
+        if (b.amp3d >= 0.0f || b.en3d >= 0 || b.floatThresh >= 0.0f || b.floatReach >= 0 ||
+            b.coastOn >= 0 || b.coastRange >= 0.0f || b.coastMin >= 0.0f)
+            anyAmpOverride_ = true;
+        if (b.hasDensityStack)    anyDensityStackOverride_ = true;
     }
+    maxAmp_ = std::max(1.0f, maxAmp_);
+    maxFloatReach_ = std::max(floatGap_ + 1, maxFloatReach_);
+    biomeBlendCells_ = std::max(0, biomeBlendCells_);
 }
 
 int TerrainGenerator::shapeHeight(int wx, int wz) const {
@@ -437,98 +456,154 @@ int TerrainGenerator::shapeHeight(int wx, int wz) const {
         const float bayAmp = islandRadius_ * 0.36f;
         const float bigCoast = contNoise_.fbm((x + 12000.0f) * 0.00088f, (z - 9000.0f) * 0.00088f, 2);
         const float coast = contNoise_.fbm((x + 5000.0f) * 0.0016f, (z - 5000.0f) * 0.0016f, 3) * 0.6f +
-                            riverNoise_.fbm((x - 3300.0f) * 0.0044f, (z + 2100.0f) * 0.0044f, 3) * 0.4f;
+                            coastNoise_.fbm((x - 3300.0f) * 0.0044f, (z + 2100.0f) * 0.0044f, 3) * 0.4f;
         d += bigCoast * bayAmp + coast * warp;
-        const float inner = islandRadius_ * islandInner_;
-        float t = std::clamp((d - inner) / std::max(1.0f, islandRadius_ - inner), 0.0f, 1.0f);
-        const float m = 1.0f - t * t * (3.0f - 2.0f * t); // smoothstep: 1 inside, 0 outside
-        const float landRel = islandLandBase_ + c * islandInteriorVar_ + mountains * m;
+        // Radial rise multiplier `m` (1 at the core → 0 in open ocean). Authored
+        // `island_profile_spline` lets you DRAW this coast→core slope (x = d/radius:
+        // 0=core, 1=coast); else the built-in flat-core + smoothstep runs (byte-identical).
+        float m;
+        if (!profileSpline_.empty()) {
+            const float u = std::clamp(d / std::max(1.0f, islandRadius_), 0.0f, 1.0f);
+            m = std::clamp(profileSpline_.at(u), 0.0f, 1.0f);
+        } else {
+            const float inner = islandRadius_ * islandInner_;
+            const float t = std::clamp((d - inner) / std::max(1.0f, islandRadius_ - inner), 0.0f, 1.0f);
+            m = 1.0f - t * t * (3.0f - 2.0f * t); // smoothstep: 1 inside, 0 outside
+        }
+        // Smooth radial rise toward the core (peak_height·m) so the land climbs from
+        // the coast up to a central highland/peak plateau — this is what makes the
+        // elevation biome bands (beach→forest→highlands→peaks) read as concentric
+        // rings. The ridged `mountains` then add the sharp crests on the high core.
+        const float landRel = islandLandBase_ + islandPeakHeight_ * m +
+                              c * islandInteriorVar_ + mountains * m;
         rel = islandDeepOcean_ + (landRel - islandDeepOcean_) * m; // mix toward ocean
     } else {
         rel = contSpline_.at(c) + mountains;       // archipelago: continentalness spline
     }
 
-    int h = seaLevel_ + static_cast<int>(std::lround(rel));
-
-    // Rivers: where the river noise is near zero, carve a winding channel toward
-    // sea level — but only in lowlands, so mountains keep their relief instead of
-    // growing deep canals. The channel fills with water via the sea-level fill.
-    if (h - seaLevel_ < riverMaxRel_) {
-        const float r = sampleRiver(x, z);
-        const float t = std::clamp(1.0f - std::fabs(r) / riverWidth_, 0.0f, 1.0f);
-        if (t > 0.0f) {
-            const int bed = seaLevel_ - 1 - static_cast<int>(t * t * riverDepth_);
-            h = std::min(h, bed);
-        }
-    }
+    const int h = seaLevel_ + static_cast<int>(std::lround(rel));
     return std::clamp(h, 1, worldHeight_ - 1);
 }
 
-TerrainGenerator::LakeInfo TerrainGenerator::lakeAt(int wx, int wz) const {
-    // Coarse candidate-lake grid: check the 3x3 cells around this column for a lake
-    // whose disc covers it. Lake parameters (centre, radius, level) are deterministic
-    // per cell, so this is a pure function of world coords.
-    const int gx0 = floordiv(wx, lakeSpacing_), gz0 = floordiv(wz, lakeSpacing_);
-    for (int gz = gz0 - 1; gz <= gz0 + 1; ++gz) {
-        for (int gx = gx0 - 1; gx <= gx0 + 1; ++gx) {
-            if (hash01(gx, gz, seed_ ^ 0x1a4eu) >= lakeChance_) {
-                continue;
-            }
-            const int cxw = gx * lakeSpacing_ +
-                            static_cast<int>(hash01(gx, gz, seed_ ^ 0x1u) * lakeSpacing_);
-            const int czw = gz * lakeSpacing_ +
-                            static_cast<int>(hash01(gx, gz, seed_ ^ 0x2u) * lakeSpacing_);
-            const int rad = lakeRadiusMin_ +
-                            static_cast<int>(hash01(gx, gz, seed_ ^ 0x3u) *
-                                             (lakeRadiusMax_ - lakeRadiusMin_));
-            const long dx = wx - cxw, dz = wz - czw;
-            const long d2 = dx * dx + dz * dz;
-            if (d2 > static_cast<long>(rad) * rad) {
-                continue;
-            }
-            const int level = shapeHeight(cxw, czw); // water surface = land at centre
-            const int rel = level - seaLevel_;
-            if (rel < lakeMinRel_ || rel > lakeMaxRel_) {
-                continue; // only perch lakes on land in the allowed band
-            }
-            // Bowl: deepest at the centre, rising to the rim, so it holds water.
-            const float d = std::sqrt(static_cast<float>(d2)) / static_cast<float>(rad);
-            const int bed = level - 1 - static_cast<int>((1.0f - d) * lakeDepth_);
-            return {true, level, bed};
-        }
-    }
-    return {false, 0, 0};
-}
-
 int TerrainGenerator::height(int wx, int wz) const {
-    const int sh = shapeHeight(wx, wz);
-    const LakeInfo lk = lakeAt(wx, wz);
-    return lk.in ? std::min(sh, lk.bed) : sh;
+    return std::clamp(shapeHeight(wx, wz), 1, worldHeight_ - 1);
 }
 
 int TerrainGenerator::overhangReach() const {
-    return density3DEnabled_ ? floatReach_ : 0;
+    return density3DEnabled_ ? maxFloatReach_ : 0;  // max over biomes: don't clip tall floats
 }
 
 // Main-terrain solidity (overhangs/cliffs; NO floating islands) — the body of the
 // land. surfaceY() scans this to find the walkable ground top.
+const BiomeDef& TerrainGenerator::selectBiomeAt(int wx, int wz) const {
+    const int sh  = std::clamp(shapeHeight(wx, wz), 1, worldHeight_ - 1);
+    return selectBiome(wx, wz, sh - seaLevel_);
+}
+
+// The global terrain3d/coast knobs as a BiomeParams (the no-override default).
+BiomeParams TerrainGenerator::globalParams() const {
+    return {densityAmp_, density3DEnabled_, floatThresh_, floatReach_,
+            coastFlatten_, coastFlattenRange_, coastFlattenMin_};
+}
+
+// This column's terrain3d/coast knobs, each = the biome's override (if authored) else
+// the global value. Selection reads the BASE heightmap (3D modulation never moves it,
+// so no feedback loop).
+BiomeParams TerrainGenerator::biomeParamsRaw(int wx, int wz) const {
+    const BiomeDef& b = selectBiomeAt(wx, wz);
+    BiomeParams p;
+    p.amp         = b.amp3d       >= 0.0f ? b.amp3d        : densityAmp_;
+    p.en3d        = b.en3d        >= 0    ? (b.en3d != 0)  : density3DEnabled_;
+    p.floatThresh = b.floatThresh >= 0.0f ? b.floatThresh  : floatThresh_;
+    p.floatReach  = b.floatReach  >= 0    ? b.floatReach   : floatReach_;
+    p.coastOn     = b.coastOn     >= 0    ? (b.coastOn != 0): coastFlatten_;
+    p.coastRange  = b.coastRange  >= 0.0f ? b.coastRange    : coastFlattenRange_;
+    p.coastMin    = b.coastMin    >= 0.0f ? b.coastMin      : coastFlattenMin_;
+    return p;
+}
+
+// Blended per-biome params at a column. Fast path (no overrides) → the globals, so the
+// default world is byte-identical. Else a 3x3 box at ±blend smooths biome borders
+// (pure fn of coords → seam-safe): scalars average, the two booleans average their 0/1
+// and threshold at the midpoint. Cached per column.
+BiomeParams TerrainGenerator::biomeParamsAt(int wx, int wz) const {
+    if (!anyAmpOverride_) return globalParams();
+    struct Cache { uint32_t epoch; int x, z; BiomeParams v; bool valid; };
+    static thread_local Cache c{0, 0, 0, {}, false};
+    if (c.valid && c.epoch == densityEpoch_ && c.x == wx && c.z == wz) return c.v;
+    BiomeParams p;
+    const int b = biomeBlendCells_;
+    if (b <= 0) {
+        p = biomeParamsRaw(wx, wz);
+    } else {
+        float amp = 0, ft = 0, fr = 0, cr = 0, cm = 0, en = 0, co = 0;
+        for (int dz = -1; dz <= 1; ++dz)
+            for (int dx = -1; dx <= 1; ++dx) {
+                const BiomeParams q = biomeParamsRaw(wx + dx * b, wz + dz * b);
+                amp += q.amp; ft += q.floatThresh; fr += static_cast<float>(q.floatReach);
+                cr += q.coastRange; cm += q.coastMin;
+                en += q.en3d ? 1.0f : 0.0f; co += q.coastOn ? 1.0f : 0.0f;
+            }
+        p.amp = amp / 9.0f; p.floatThresh = ft / 9.0f;
+        p.floatReach = static_cast<int>(std::lround(fr / 9.0f));
+        p.coastRange = cr / 9.0f; p.coastMin = cm / 9.0f;
+        p.en3d = en >= 4.5f; p.coastOn = co >= 4.5f;
+    }
+    c = {densityEpoch_, wx, wz, p, true};
+    return p;
+}
+
+float TerrainGenerator::densityAmpAt(int wx, int wz) const {
+    return anyAmpOverride_ ? biomeParamsAt(wx, wz).amp : densityAmp_;
+}
+
+// The 3D density stack for a column: the biome's own override stack if it authored one,
+// else the global. Nearest-biome (no 3D pattern blend — the per-biome amplitude blend
+// softens the magnitude across borders); only consulted when an override exists.
+const NoiseStack* TerrainGenerator::densityStackAt(int wx, int wz) const {
+    struct Cache { uint32_t epoch; int x, z; const NoiseStack* s; bool valid; };
+    static thread_local Cache c{0, 0, 0, nullptr, false};
+    if (c.valid && c.epoch == densityEpoch_ && c.x == wx && c.z == wz) return c.s;
+    const BiomeDef& b = selectBiomeAt(wx, wz);
+    const NoiseStack* s = b.hasDensityStack ? &b.densityStack
+                        : (densityStack_.empty() ? nullptr : &densityStack_);
+    c = {densityEpoch_, wx, wz, s, true};
+    return s;
+}
+
 bool TerrainGenerator::mainSolid(int surfaceH, int wx, int wy, int wz) const {
+    const BiomeParams p = biomeParamsAt(wx, wz);   // == globals when no biome overrides
     const float grad = static_cast<float>(surfaceH - wy);
-    if (grad > densityAmp_)  return true;  // well below the surface: always solid
-    if (grad < -densityAmp_) return false; // well above the band: air (floats handled elsewhere)
+    if (!p.en3d) return grad >= 0.0f;  // this biome turns 3D off: pure heightmap body
+    const float ampB = p.amp;
+    if (grad > ampB)  return true;  // well below the surface: always solid
+    if (grad < -ampB) return false; // well above the band: air (floats handled elsewhere)
     const float fx = static_cast<float>(wx), fy = static_cast<float>(wy),
                 fz = static_cast<float>(wz);
     const float n = densityInterp_ ? densityInterpolated(fx, fy, fz) : rawDensity(fx, fy, fz);
-    return grad + n * densityAmp_ > 0.0f;
+    // Coast flatten: damp the 3D swell near sea level so the shoreline/beach reads as a
+    // smooth gentle slope, while inland (and the deep sea floor) keep the full relief.
+    float amp = ampB;
+    if (p.coastOn) {
+        const float rel = std::fabs(static_cast<float>(surfaceH - seaLevel_));
+        const float a = std::clamp(rel / std::max(1.0f, p.coastRange), 0.0f, 1.0f);
+        amp *= p.coastMin + (1.0f - p.coastMin) * a;
+    }
+    return grad + n * amp > 0.0f;
 }
 
-// The raw (exact) density perturbation: the authored NoiseStack blend, or the
-// scalar fbm fallback when no `density.layers:` was authored.
+// The 3D density perturbation: the authored `terrain3d.density` blend, or the scalar
+// fbm fallback when no `density.layers:` was authored. When a biome authors its own
+// density stack the column resolves to that one instead (densityStackAt); the default
+// (no per-biome stack) path is byte-identical.
 float TerrainGenerator::rawDensity(float fx, float fy, float fz) const {
-    return densityStack_.empty()
-        ? densityNoise_.fbm((fx + 26100.0f) * densityFreqXZ_, (fy + 9400.0f) * densityFreqY_,
-                            (fz + 14700.0f) * densityFreqXZ_, densityOct_)
-        : densityStack_.value(fx, fy, fz);
+    const NoiseStack* stk = anyDensityStackOverride_
+        ? densityStackAt(static_cast<int>(std::lround(fx)), static_cast<int>(std::lround(fz)))
+        : (densityStack_.empty() ? nullptr : &densityStack_);
+    return (stk && !stk->empty())
+        ? stk->value(fx, fy, fz)
+        : densityNoise_.fbm((fx + 26100.0f) * densityFreqXZ_, (fy + 9400.0f) * densityFreqY_,
+                            (fz + 14700.0f) * densityFreqXZ_, densityOct_);
 }
 
 // One lattice-corner density, memoised in a fixed-size per-thread direct-mapped
@@ -593,7 +668,7 @@ float TerrainGenerator::densityInterpolated(float fx, float fy, float fz) const 
 int TerrainGenerator::surfaceY(int wx, int wz) const {
     const int hh = height(wx, wz);
     if (!density3DEnabled_) return hh;
-    const int hi = std::min(worldHeight_ - 1, hh + static_cast<int>(densityAmp_) + 1);
+    const int hi = std::min(worldHeight_ - 1, hh + static_cast<int>(maxAmp_) + 1);
     for (int y = hi; y >= 1; --y) {
         if (mainSolid(hh, wx, y, wz)) return y;
     }
@@ -614,26 +689,49 @@ bool TerrainGenerator::mainTerrainSolid(int surfaceH, int wx, int wy, int wz) co
     return mainSolid(surfaceH, wx, wy, wz);
 }
 
+float TerrainGenerator::terrainDensity(int wx, int wy, int wz) const {
+    const int surfaceH = height(wx, wz);
+    const float grad = static_cast<float>(surfaceH - wy);
+    if (!density3DEnabled_) return grad; // pure heightmap: signed distance to surface
+    float amp = densityAmp_;
+    if (anyAmpOverride_) {
+        const BiomeParams p = biomeParamsAt(wx, wz);
+        if (!p.en3d) return grad;        // biome turns 3D off: heightmap signed distance
+        amp = p.amp;
+    }
+    // grad + n·amp — exactly mainSolid()'s test quantity (its ±amp early-outs only
+    // skip the noise eval; the value here is continuous and sign-consistent).
+    const float n = densityInterp_
+        ? densityInterpolated(static_cast<float>(wx), static_cast<float>(wy),
+                              static_cast<float>(wz))
+        : rawDensity(static_cast<float>(wx), static_cast<float>(wy),
+                     static_cast<float>(wz));
+    return grad + n * amp;
+}
+
 int TerrainGenerator::surfaceScanTop(int surfaceH) const {
     if (!density3DEnabled_) {
         // surfaceY() is just the (clamped) heightmap height in 2D mode; the scan
         // from here lands on it immediately since every cell at/below it is solid.
         return std::min(worldHeight_ - 1, std::max(1, surfaceH));
     }
-    return std::min(worldHeight_ - 1, surfaceH + static_cast<int>(densityAmp_) + 1);
+    return std::min(worldHeight_ - 1, surfaceH + static_cast<int>(maxAmp_) + 1);
 }
 
 bool TerrainGenerator::floatSolid(int surfaceH, int wx, int wy, int wz) const {
-    if (!density3DEnabled_) {
-        return false;
+    const BiomeParams p = biomeParamsAt(wx, wz);  // == globals when no biome overrides
+    if (!p.en3d) {
+        return false;  // global 3D off, or this biome turns it off
     }
+    const int floatReach = p.floatReach;
+    const float floatThresh = p.floatThresh;
     const float fx = static_cast<float>(wx), fy = static_cast<float>(wy),
                 fz = static_cast<float>(wz);
     // Floating islands: solid blobs well above the surface, from a WEIGHTED SUM OF
     // TWO FREQUENCIES (big island masses + smaller satellites) so they come in
     // diverse sizes — the Y axis is squashed (×1.8) so isles are flatter than wide.
     // The threshold tightens with altitude so they thin out toward the top.
-    if (wy >= surfaceH + floatGap_ && wy <= surfaceH + floatReach_) {
+    if (wy >= surfaceH + floatGap_ && wy <= surfaceH + floatReach) {
         float f;
         if (floatStack_.empty()) {
             // Large domain shifts keep the field off the noise lattice ORIGIN at world
@@ -649,8 +747,8 @@ bool TerrainGenerator::floatSolid(int surfaceH, int wx, int wy, int wz) const {
             f = floatStack_.value(fx, fy, fz);
         }
         const float alt = static_cast<float>(wy - surfaceH - floatGap_) /
-                          static_cast<float>(std::max(1, floatReach_ - floatGap_));
-        if (f > floatThresh_ + alt * 0.14f) {
+                          static_cast<float>(std::max(1, floatReach - floatGap_));
+        if (f > floatThresh + alt * 0.14f) {
             return true;
         }
     }
@@ -680,10 +778,6 @@ float TerrainGenerator::sampleHum(float x, float z) const {
     return humStack_.empty() ? humNoise_.fbm(x * humFreq_, z * humFreq_, climOct_)
                              : humStack_.value(x, z);
 }
-float TerrainGenerator::sampleRiver(float x, float z) const {
-    return riverStack_.empty() ? riverNoise_.fbm(x * riverFreq_, z * riverFreq_, 2)
-                               : riverStack_.value(x, z);
-}
 
 float TerrainGenerator::fieldValue(Field f, int wx, int wz) const {
     const float x = static_cast<float>(wx), z = static_cast<float>(wz);
@@ -693,72 +787,63 @@ float TerrainGenerator::fieldValue(Field f, int wx, int wz) const {
         case Field::Peaks:           return samplePeak(x, z);
         case Field::Temperature:     return sampleTemp(x, z);
         case Field::Humidity:        return sampleHum(x, z);
-        case Field::River:           return sampleRiver(x, z);
         case Field::Relief:          return static_cast<float>(shapeHeight(wx, wz) - seaLevel_);
         case Field::Height:          return static_cast<float>(height(wx, wz));
     }
     return 0.0f;
 }
 
-const BiomeDef& TerrainGenerator::selectBiome(float temp, float hum, int relHeight) const {
-    for (const BiomeDef& b : biomes_) {
-        if (temp >= b.tempMin && temp <= b.tempMax && hum >= b.humMin && hum <= b.humMax &&
-            relHeight >= b.relMin && relHeight <= b.relMax) {
-            return b;
+int TerrainGenerator::selectBiomeIndex(int wx, int wz, int relHeight) const {
+    if (forcedBiome_ >= 0 && forcedBiome_ < static_cast<int>(biomes_.size()))
+        return forcedBiome_;                                 // preview "solo biome" mode
+    const float fx = static_cast<float>(wx), fz = static_cast<float>(wz);
+    for (size_t i = 0; i < biomes_.size(); ++i) {
+        const BiomeDef& b = biomes_[i];
+        // Pure elevation band + optional noise selection mask (climate removed). The
+        // biome wins only where rel is in its band AND its mask passes — so a masked
+        // biome carves patches out of a later catch-all in the same band.
+        if (relHeight >= b.relMin && relHeight <= b.relMax &&
+            (b.selMask.empty() || b.selMask.weight(fx, fz) >= 0.5f)) {
+            return static_cast<int>(i);
         }
     }
-    return biomes_.back(); // catch-all (authored last)
+    return static_cast<int>(biomes_.size()) - 1; // catch-all (authored last)
+}
+
+const BiomeDef& TerrainGenerator::selectBiome(int wx, int wz, int relHeight) const {
+    return biomes_[static_cast<size_t>(selectBiomeIndex(wx, wz, relHeight))];
 }
 
 ColumnInfo TerrainGenerator::columnInfo(int wx, int wz) const {
     const float x = static_cast<float>(wx), z = static_cast<float>(wz);
     ColumnInfo ci;
-    // Shape + lake once (height() would recompute both); a perched lake lowers the
-    // terrain into a bowl and raises this column's water surface above sea level.
-    const int sh = shapeHeight(wx, wz);
-    const LakeInfo lk = lakeAt(wx, wz);
-    ci.height     = lk.in ? std::min(sh, lk.bed) : sh;
-    ci.waterLevel = lk.in ? lk.level : seaLevel_;
+    ci.height     = std::clamp(shapeHeight(wx, wz), 1, worldHeight_ - 1);
+    ci.waterLevel = seaLevel_;
     const int rel = ci.height - seaLevel_;
 
-    // Climate. Temperature cools with altitude so highlands trend snowy.
-    float temp = sampleTemp(x, z);
-    const float hum = sampleHum(x, z);
-    if (rel > 0) {
-        temp -= static_cast<float>(rel) * 0.010f;
-    }
-
-    int index = 0;
-    for (size_t i = 0; i < biomes_.size(); ++i) {
-        const BiomeDef& b = biomes_[i];
-        if (temp >= b.tempMin && temp <= b.tempMax && hum >= b.humMin && hum <= b.humMax &&
-            rel >= b.relMin && rel <= b.relMax) {
-            index = static_cast<int>(i);
-            break;
-        }
-        if (i + 1 == biomes_.size()) {
-            index = static_cast<int>(i); // catch-all
-        }
-    }
+    const int index = selectBiomeIndex(wx, wz, rel);
     const BiomeDef& b = biomes_[static_cast<size_t>(index)];
     ci.biome    = index;
-    ci.topId    = b.topId;
-    ci.fillerId = b.fillerId;
+    // Per-column pick from the biome's weighted palette (single-entry → that block).
+    ci.topId    = pickBlock(b.top,    hash01(wx, wz, seed_ ^ 0x70905u));
+    ci.fillerId = pickBlock(b.filler, hash01(wx, wz, seed_ ^ 0xF11e5u));
+    // Noise-mask surface patches: first mask that passes (weight >= 0.5) overrides the
+    // surface block. Empty list → no cost. Water/snow below still take precedence.
+    for (const BiomeDef::BlockMask& sm : b.surfaceMasks) {
+        if (sm.mask.weight(x, z) >= 0.5f) { ci.topId = sm.id; break; }
+    }
     ci.treeDensity = b.treeDensity;
-    ci.bushDensity = b.bushDensity;
-    ci.plantKind   = b.plant;
     ci.treeKind    = b.tree;
     ci.vegTint     = b.vegTint;
 
     if (ci.height < ci.waterLevel) {
-        // Submerged (ocean or under a perched lake): floor block, nothing grows.
+        // Submerged (ocean): floor block, nothing grows.
         ci.topId = oceanFloorId_;
         ci.fillerId = oceanFillerId_;
-        ci.treeDensity = 0.0f;
-        ci.bushDensity = 0.0f;
-        ci.plantKind   = FloraKind::None;
+        ci.treeDensity = 0.0f; // nothing grows underwater (no far-terrain impostors)
     } else if (b.snow || rel > snowLineRel_) {
         ci.topId = snowId_; // cold biome, or above the snow line on any peak
+        // Trees stay — pine can still root through the snow cap on the peaks.
     }
     return ci;
 }

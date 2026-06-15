@@ -1,5 +1,7 @@
 #pragma once
 
+#include "world/NoiseMask.h"
+
 #include <glm/glm.hpp>
 
 #include <cstdint>
@@ -56,6 +58,11 @@ struct FeatureScatter {
     int   maxSlope    = 100000;     //   a small neighbourhood, in blocks)
     bool  onWater     = false;      // root on the WATER surface (lilypads) not the land
     int   nearWater   = 0;          // 0 = off; else only within this many blocks of water
+
+    // Noise MASK (`scatter.mask:`): a multi-layer noise field + threshold + steepness
+    // curve whose weight [0,1] multiplies the placement probability — the upgraded,
+    // appendable form of the single-noise `distribution: noise` above. Empty = off.
+    NoiseMask mask;
 };
 
 struct Feature {
@@ -127,7 +134,7 @@ public:
     // Load every *.yaml under `dir` (missing dir -> empty, features off). Block
     // names resolve via the registry; biome names via the supplied lookup.
     FeatureSet(const std::string& dir, const BlockRegistry& registry,
-               const std::vector<std::string>& biomeNames);
+               const std::vector<std::string>& biomeNames, uint32_t seed = 0);
 
     [[nodiscard]] bool empty() const { return features_.empty(); }
     [[nodiscard]] const std::vector<Feature>& all() const { return features_; }

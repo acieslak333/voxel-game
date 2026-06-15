@@ -55,18 +55,19 @@ async_streaming: true
 #   e.g. view_radius 9 -> 19x19 chunks = 304 blocks wide. Larger = sees farther but
 #   costs more memory, a longer startup, and a bigger hitch each time you cross a
 #   chunk boundary (more columns to generate/relight/remesh on the leading edge).
-#   Lowered 11 -> 9 for performance with the taller 128-block biome terrain; raise
-#   it back if you want more view distance and can take the startup/hitch cost.
-view_radius: 4   # the world is back to 128 tall (height_chunks 8), so each column is
-                 # half the vertical work — affording a wider window AND faster loads
-                 # than the old 256-tall@6 setup. Raise it for even more view distance.
+#   Kept low (4) because the world is 256 blocks tall (height_chunks 16): every
+#   column the window streams in is 16 chunks of generate/relight/remesh, so a wide
+#   radius makes each boundary crossing hitch. Raise it for more view distance only
+#   if you can take the bigger per-boundary cost (or lower height_chunks first).
+view_radius: 4
 
-# Vertical extent of the world, in chunks (no vertical streaming). 8 * 16 = 128
-# blocks, sea level 64 in the middle (biomes.yaml sea_level + splines + snow_line
-# are scaled to match this). Half the vertical memory + light/gen work of the
-# 256-tall world, so it loads faster and leaves headroom for a wider view_radius.
-# To go taller again (e.g. 16 = 256 for dramatic mountains) double biomes.yaml's
-# sea_level + the spline y-values + snow_line, and the caves/ores max_y below.
+# Vertical extent of the world, in chunks (no vertical streaming). 16 * 16 = 256
+# blocks tall, sea level 48 (biomes.yaml sea_level; snow_line + splines are scaled
+# to match). This is the dominant per-boundary streaming cost: each entering column
+# is height_chunks chunks of generate + relight + remesh. Dropping to 8 (= 128 tall)
+# roughly HALVES that cost (the biggest streaming-lag lever) — but check the island
+# /mountains still look right, and halve biomes.yaml's sea_level + spline y-values +
+# snow_line + the ores max_y to match.
 height_chunks: 16
 
 # -----------------------------------------------------------------------------
@@ -81,7 +82,7 @@ stream_tuning:
   # GPU; too low and a streamed-in edge melts in visibly. what: per-frame upload
   # count; where: WorldRenderer::streamPump; effect: higher = fills faster, costs
   # more per frame.
-  pump_budget: 12
+  pump_budget: 20
   # Boosted pump_budget used WHILE a large backlog melts in (startup rings, a
   # falloff-driven remesh-all). Higher = the view fills faster after a load at the
   # cost of a few busier frames. Clamped to >= pump_budget.
@@ -110,97 +111,20 @@ liquids:
   max_level: 3
 
 # -----------------------------------------------------------------------------
-#  terrain: the noise + material rules that shape the surface. Two noise fields
-#  drive it: a HEIGHT field (the surface shape) and a MATERIAL field (rocky vs
-#  grassy, dirt thickness). Both are fbm (fractal/Perlin) sampled in world space.
+#  Terrain SHAPE + surface materials (height, mountains, beaches, biome rings) are
+#  authored in assets/biomes.yaml and driven by vg::TerrainGenerator. The old
+#  `terrain:` (single-noise height/material) and `island:` (radial mask) blocks that
+#  lived here were removed — they were no longer read by generation.
 # -----------------------------------------------------------------------------
-terrain:
-  # --- Surface height field ---------------------------------------------------
-  # Spatial frequency of the height noise. LOWER = broader, smoother hills;
-  # HIGHER = more frequent, choppier terrain. Sampled as fbm(wx*freq, wz*freq).
-  height_frequency: 0.05
-  # Number of fbm octaves for the height field. More octaves add finer detail on
-  # top of the broad shape (and cost a little more per column).
-  octaves: 4
-  # Lowest possible surface height, in blocks (the valley floor).
-  base_height: 18
-  # How much the surface rises above base_height at the peaks. The surface height
-  # of any column lands in [base_height, base_height + height_amplitude].
-  #   NOTE: keep base_height + height_amplitude < chunks.y * 16, or peaks clamp.
-  height_amplitude: 32
-
-  # --- Material field (rocky surfaces & dirt depth) ---------------------------
-  # Spatial frequency of the material noise (independent of the height field).
-  # Controls how large the rocky/grassy patches and dirt-depth variation are.
-  material_frequency: 0.04
-  # fbm octaves for the material field.
-  material_octaves: 3
-
-  # --- Surface material rules -------------------------------------------------
-  # Thickness of the dirt layer directly under a grass surface, in blocks. The
-  # actual depth varies with the material noise between min and max (inclusive);
-  # everything below the dirt is stone.
-  dirt_depth_min: 3
-  dirt_depth_max: 5
-  # A surface within this many blocks of the maximum possible height is bare
-  # stone (mountain tops), regardless of the material noise.
-  rocky_height_margin: 3
-  # Where the material noise (range ~[-1, 1]) exceeds this, the surface is bare
-  # stone instead of grass — scatters rocky outcrops. Higher => rarer outcrops.
-  rocky_material_threshold: 0.45
-  # Low-lying ground (surface height <= base_height + this) becomes sand, so the
-  # valley floors read as beaches. The shallow layer beneath also turns to sand.
-  beach_height_margin: 2
-  # Domain warp, in blocks: before sampling the height noise, the sample point is
-  # nudged by a second low-frequency noise. 0 = plain axis-y noise; larger values
-  # give organic, swirly hills and ridgelines that don't look grid-aligned.
-  terrain_warp: 14
 
 # -----------------------------------------------------------------------------
-#  island: a TEMPORARY radial mask that makes the world one island ringed by flat
-#  sandy sea-floor (real water comes later). Terrain height above sea level is
-#  multiplied by this mask. Distance is normalized: 0 at the world centre, ~1 at
-#  the edge mid-points. (This whole section gets revisited when chunk streaming
-#  replaces the fixed grid.)
+#  Surface decoration (trees, bushes, ground cover, lanterns, cairns, geodes) is
+#  authored entirely as procedural FEATURES — assets/features/*.yaml, edited in
+#  tools/feature_tool.py. The old built-in `features:` scatter block (lantern_/
+#  cairn_/geode_/tree_/bush_density) was removed; it is no longer read.
+#  NOTE: the biomes.yaml per-biome `trees:`/`tree:` values still drive the
+#  far-terrain LOD tree impostors (far_terrain.trees), not near-chunk geometry.
 # -----------------------------------------------------------------------------
-island:
-  # Inside this normalized radius the land keeps its full height (the highlands).
-  falloff_start: 0.55
-  # By this radius the land has sunk all the way to sea level (open shore/sea).
-  # The band between start and end is the sloping coast — widen it for gentler
-  # beaches, narrow it for cliffier shores.
-  falloff_end: 0.95
-  # How much the coastline wiggles (fraction of the radius). 0 = a clean circle;
-  # higher carves bays, capes, and the odd offshore sandbar.
-  coast_warp: 0.20
-
-# -----------------------------------------------------------------------------
-#  features: whimsical things scattered across the surface during generation.
-#  Each value is a per-column probability (0..1). All are single-column so they
-#  generate deterministically and never straddle chunk seams.
-# -----------------------------------------------------------------------------
-features:
-  # Lantern-trees: an oak-log stalk topped with a glowstone cap — little natural
-  # lampposts that pool warm light across the island after dusk. Grass only.
-  lantern_density: 0.0000
-  # Cairns: a short stack of cobblestone, like a hiker's trail marker. Any land.
-  cairn_density: 0.0
-  # Geodes / lanterns / cairns are now procedural features too (assets/features/
-  # geode.yaml, lantern.yaml, cairn.yaml — edited in tools/feature_tool.py). These
-  # built-in densities are all 0 so nothing is generated twice; the feature files
-  # own them now.
-  geode_density: 0.0
-  # Oak trees: a slender (4-px-wide) trunk topped with a crossed-quad leaf canopy.
-  # Per-column probability that a tree is *rooted* here; the canopy spreads over
-  # the neighbouring columns. Grass only. The generator stamps each tree from every
-  # column it overlaps (a pure function of world coords), so canopies cross chunk
-  # seams cleanly. 0 = no trees.
-  # NOTE: MASTER SWITCHES now. Trees & ground plants are authored as procedural
-  # features (assets/features/*.yaml, edited in tools/feature_tool.py). Set these
-  # back above 0 to re-enable the original built-in trees/plants instead.
-  tree_density: 0.0
-  # Ground bushes: a single crossed-quad shrub on a grass surface. Single-column.
-  bush_density: 0.0
 
 # -----------------------------------------------------------------------------
 #  structures: hand-authored voxel templates (assets/structures/*.yaml) stamped
@@ -219,60 +143,14 @@ structures:
   density: 0.0     # chance a candidate cell actually roots a structure (0 = off)
 
 # -----------------------------------------------------------------------------
-#  caves: tunnels carved through the stone. They are hollowed where two 3D-noise
-#  fields are BOTH near zero — the intersection of two surfaces is a winding line,
-#  so caves snake instead of forming round blobs. Only stone is carved (dirt and
-#  the surface stay intact), so caves open onto hillsides as natural entrances.
+#  ores: iron replaces stone in small clusters (one roll shared across a 2x2x2
+#  block cell, so it comes in little veins) anywhere below max_y.
+#    density  per-cell probability (0..1). ↑ = more common ore; ↓ = rarer.
+#    max_y    absolute world Y ceiling for ore (relative to sea_level 24 and the
+#             world ceiling). ↑ = ore reaches higher up; scale with height_chunks.
 # -----------------------------------------------------------------------------
-caves:
-  # Spatial frequency of the cave noise. Higher = tighter, twistier, more frequent
-  # tunnels; lower = broader, rarer caverns.
-  frequency: 0.036
-  # Half-width of the |noise| band that counts as hollow. Bigger = wider tunnels
-  # and more of them (too big merges everything into open voids); 0 = no caves.
-  threshold: 0.060
-  # Never carve at or below this world Y, so the world keeps a solid floor.
-  floor: 2
-  # Large caverns: a low-frequency 3D blob carved only below cavern_max_y (deep),
-  # giving big open rooms that the tunnels connect into. Lower threshold = bigger,
-  # more frequent caverns; raise it for rarer ones. Tunnels also taper near the
-  # surface so the strongest ones open as cave mouths on hillsides.
-  cavern_threshold: 0.58
-  cavern_max_y: 45
-  # Ravines: long, narrow, deep slot canyons where a low-frequency 2D winding noise
-  # sits in a thin band. Carved over floor..max_y and can breach a hillside. Sparse
-  # + narrow so they stay rare; width: 0 disables them.
-  ravines:
-    frequency: 0.0009   # lower = longer, sparser canyons
-    width: 0.011        # |noise| half-band counted as canyon (narrow = thin slot)
-    max_y: 55           # carve ravines only below this world Y
-    floor: 6            # ...and never at/below this (keeps a base under the slot)
-  # Cave fluid pools. A carved cell at/below lava_max_y floods with lava (deep magma
-  # at the cave bottom); higher up (<= water_max_y) a carved cell resting on a SOLID
-  # floor becomes a shallow water film with probability water_chance.
-  pools:
-    lava_max_y: 8
-    water_max_y: 32
-    water_chance: 0.46
-
-# -----------------------------------------------------------------------------
-#  ores: each ore replaces stone in small clusters (one roll shared across a
-#  2x2x2 block cell, so ores come in little veins) anywhere below its max world Y.
-#  Rarer ores have lower density and sit deeper. They are checked rarest-first, so
-#  a deep block that could be several ores becomes the rarer one.
-#    density  per-cell probability (0..1) — higher = more common
-#    max_y    only generated at or below this world height
-# -----------------------------------------------------------------------------
-# Rebalanced alongside ravines + cave pools (ISSUES #13C): slightly wider depth
-# bands and a touch more of each ore, so the deeper, more-exposed cave network
-# (ravine + cavern walls) yields a steadier ore supply across the tiers.
 ores:
-  coal: {density: 0.022, max_y: 60}
   iron: {density: 0.014, max_y: 48}
-  gold: {density: 0.006, max_y: 30}
-  ruby: {density: 0.0038, max_y: 20}
-  emerald: {density: 0.0032, max_y: 18}
-  mythril: {density: 0.0018, max_y: 11}
 
 # NOTE: light falloff (how fast sky/block light dies per spread step) is a
 # player-facing option — it lives in assets/settings.yaml ("skyFalloff" /

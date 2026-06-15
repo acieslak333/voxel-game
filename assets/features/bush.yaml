@@ -1,7 +1,7 @@
 # Forest-floor shrubs — a single sprite (bush / mushroom / fern) on damp shaded
 # ground. Replaces the built-in bush/forest plant scatter.
 name: bush
-scatter: {density: 0.4, spacing: 5, surface: true, biomes: [forest, swamp, snowy]}
+scatter: {density: 0.4, spacing: 5, surface: true, biomes: [plains, oak_forest, birch_forest, highlands]}
 size: [1, 2, 1]
 anchor: [0, 0, 0]
 ops:

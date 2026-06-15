@@ -1,5 +1,7 @@
 #pragma once
 
+#include "world/NoiseMask.h"
+
 #include <cstdint>
 #include <string>
 
@@ -80,38 +82,13 @@ struct WorldConfig {
                                 // (level 0 source .. liquidMaxLevel edge); bigger = wider
                                 // puddles but more cells filled + remeshed per tick
 
-    // --- Surface height noise --------------------------------------------------
-    float heightFrequency = 0.006f; // lower => broader, smoother hills
-    int   octaves         = 4;      // fbm octaves for the height field (detail)
-    int   baseHeight      = 18;     // lowest surface height, in blocks
-    int   heightAmplitude = 32;     // surface spans [baseHeight, baseHeight+amp]
+    // (Removed: the old single-noise height/material fields and the radial island
+    //  mask. Terrain shape + surface materials are now authored in assets/biomes.yaml
+    //  and driven by vg::TerrainGenerator; columnHeight() calls gen_.height().)
 
-    // --- Material / biome noise ------------------------------------------------
-    float materialFrequency = 0.04f; // frequency of the rocky/dirt-depth variation
-    int   materialOctaves   = 3;     // fbm octaves for the material field
-
-    // --- Surface materials -----------------------------------------------------
-    int   dirtDepthMin           = 3;     // thinnest dirt layer under grass
-    int   dirtDepthMax           = 5;     // thickest dirt layer under grass
-    int   rockyHeightMargin      = 3;     // within this many blocks of the peak => bare stone
-    float rockyMaterialThreshold = 0.45f; // material noise above this => bare stone surface
-    int   beachHeightMargin      = 2;     // surfaces <= baseHeight+this become sand (beaches)
-    float terrainWarp            = 14.0f; // domain-warp the height field (blocks) => swirly hills
-
-    // --- Island shaping (temporary; revisited when streaming lands) ------------
-    // Terrain only rises above sea level (baseHeight) where a radial mask is high,
-    // so the world is one island ringed by flat sandy sea-floor. Distances are
-    // normalized: 0 at the world centre, ~1 at the edge mid-points.
-    float islandFalloffStart = 0.55f; // land is full height inside this radius
-    float islandFalloffEnd   = 0.95f; // ...and has sunk to sea level by this radius
-    float coastWarp          = 0.10f; // wiggle added to the coastline (fraction of radius)
-
-    // --- Whimsical scatter features (per-column probabilities) -----------------
-    float lanternDensity = 0.004f; // glowing lantern-tree (oak-log stalk + glowstone cap)
-    float cairnDensity   = 0.003f; // little stacked cobblestone cairn (a trail marker)
-    float geodeDensity   = 0.006f; // glowstone geode buried in the stone (glows when dug)
-    float treeDensity    = 0.02f;  // oak tree (thin trunk + crossed-quad leaf canopy), grass only
-    float bushDensity     = 0.02f; // single-cell crossed-quad shrub on grass
+    // (Removed: the built-in lantern/cairn/geode/tree/bush scatter densities. All
+    //  surface decoration is now authored as procedural features — assets/features/
+    //  *.yaml — so these per-column built-in scatters no longer exist.)
 
     // --- Structures (assets/structures/*.yaml) --------------------------------
     // Hand-authored voxel templates stamped sparsely on land. Candidate origins sit
@@ -121,42 +98,16 @@ struct WorldConfig {
     int   structureSpacing = 80;
     float structureDensity = 0.35f;
 
-    // --- Caves -----------------------------------------------------------------
-    // Tunnels are carved through the stone where two 3D-noise fields are both near
-    // zero (their intersection is a 1D-ish curve), so they wind rather than blob.
-    float caveFrequency = 0.035f; // spatial frequency of the cave noise (higher => tighter, twistier)
-    float caveThreshold = 0.085f; // |noise| band that counts as hollow (bigger => wider/more caves)
-    int   caveFloor     = 2;      // never carve at or below this world Y (keeps a solid base)
-    // Large caverns: a low-frequency 3D blob carved only below cavernMaxY (deep), so
-    // big open rooms form down low. Higher threshold => rarer/smaller caverns.
-    float cavernThreshold = 0.52f;
-    int   cavernMaxY      = 40;
-
-    // Ravines: long, narrow, deep canyons. Carved where a low-frequency 2D winding
-    // noise sits inside a thin band, over the tall span (ravineFloor..ravineMaxY) —
-    // so they read as slot canyons that can breach a hillside. Sparse + narrow so
-    // they stay rare; 0 width disables them.
-    float ravineFrequency = 0.0009f; // lower => longer, sparser canyons
-    float ravineWidth     = 0.016f;  // |noise| half-band counted as canyon (narrow => thin slot)
-    int   ravineMaxY      = 52;      // carve ravines only below this world Y
-    int   ravineFloor     = 6;       // ...and never at/below this (keeps a base under the slot)
-
-    // Cave fluid pools. A carved cell at/below lavaPoolMaxY floods with lava (deep
-    // magma at the cave bottom). Higher up (<= caveWaterMaxY), a carved cell resting
-    // on a SOLID floor becomes a shallow water film with probability caveWaterChance.
-    int   lavaPoolMaxY    = 8;
-    int   caveWaterMaxY   = 30;
-    float caveWaterChance = 0.45f;
-
-    // --- Ores ------------------------------------------------------------------
-    // Each ore replaces stone in small clusters (a roll shared across a 2x2x2 cell)
-    // up to its max world-Y, so rarer ores sit deeper. Checked rarest-first.
-    float coalDensity    = 0.020f;  int coalMaxY    = 56;
-    float ironDensity    = 0.013f;  int ironMaxY    = 44;
-    float goldDensity    = 0.006f;  int goldMaxY    = 28;
-    float rubyDensity    = 0.0035f; int rubyMaxY    = 18;
-    float emeraldDensity = 0.0030f; int emeraldMaxY = 16;
-    float mythrilDensity = 0.0016f; int mythrilMaxY = 9;
+    // --- Ore (iron only) -------------------------------------------------------
+    // Iron replaces stone in small clusters (a roll shared across a 2x2x2 cell) up
+    // to its max world-Y.
+    float ironDensity = 0.013f;  int ironMaxY = 44;
+    // Optional noise MASK (`ores.iron.mask:` in world.yaml): a multi-layer field +
+    // threshold + steepness curve whose [0,1] weight MULTIPLIES the ore density, so
+    // iron concentrates into authored ore-rich regions/veins instead of a flat
+    // sprinkle. Empty (default) → weight 1 → unchanged. Same primitive + tool editor
+    // as the biome surface masks / feature scatter.
+    NoiseMask oreMask;
 
     // --- Lighting --------------------------------------------------------------
     // Light lost per block while *spreading* (the BFS flood), per source. Levels

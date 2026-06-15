@@ -1,7 +1,7 @@
-# Pine — a conical needle crown (cone op tapers to a point) on a tall trunk. Cold /
-# high biomes.
+# Pine — a conical needle crown (cone op tapers to a point) on a tall trunk. The ONLY
+# tree on the mountains (the `peaks` biome — bare stone + snow cap).
 name: pine_tree
-scatter: {density: 0.55, spacing: 6, surface: true, biomes: [mountain, snowy]}
+scatter: {density: 0.1, spacing: 6, surface: true, biomes: [peaks, highlands]}
 size: [7, 12, 7]
 anchor: [3, 0, 3]
 ops:

@@ -1,5 +1,14 @@
 # Worldgen tooling — state, how to continue, and the editor-merge plan
 
+> **STATUS 2026-06-14: the editor-merge plan below is DONE.** `tools/genmap_tool.py`
+> and `tools/biome_tool.py` were merged into **`tools/worldgen_tool.py`** (hub port
+> 5000): one app with all shape + 3D-relief + noise-stack + per-biome-tree +
+> caves/ores controls, the shared live 2D/3D view, plus NEW **seed regenerate** (🎲,
+> `--genmap --seed`) and **window panning** (←↑↓→ / arrow keys, `--genmap --center
+> CX CZ`). The two old tools were deleted; `run-editor` aliases (genmap/biome/flora/
+> worldgen) and the hub now point at the merged tool. The notes below are kept as the
+> historical design record.
+
 *(2026-06-13. Continuation notes for the "tools are missing biomes.yaml fields /
 only a slice is visible" task — partially done, wrap-up below.)*
 

@@ -961,3 +961,129 @@ Core Optimizations:
     - Fold all of it into the genmap+biome editor MERGE (tools/worldgen_studio
       .py) per the step-by-step plan in docs/TOOLING.md - do the merge FIRST,
       then polish once, not twice.
+
+20. **RENDER OPTIMIZATION PASS 2** (the algorithms the O1–O7 backlog did NOT cover)
+    The 2026-06-13 perf backlog (REVIEW.md O1–O7) is fully resolved, and the
+    standard voxel catalogue is already in: greedy meshing + cross-chunk face
+    culling (ChunkMesher.cpp `sample()` defers to the `NeighborSampler` one block
+    past each edge, so a boundary face is culled against the real neighbour block),
+    GPU back-face cull (`VK_CULL_MODE_BACK_BIT`), per-chunk **frustum** culling
+    (`extractFrustum`/`aabbInFrustum`, WorldRenderer.cpp record() ~L951-996),
+    far-terrain LOD (#18), the shared GPU sub-allocator (O5), and opt-in density
+    interpolation (O6). This issue is the *next* tier — three algorithms none of
+    that touched. None of it is fixing felt slowness (steady state 250-800 fps);
+    the motivation is **headroom for a larger view_radius and the coming caves**,
+    which is exactly what O5/O6 unblocked. Measure every step against quiet-run
+    `VG_MESH_TIME`/`VG_FRAME_TIME` phase stamps, NOT wall-clock totals (the
+    CLAUDE.md 10x-contention caveat). Build as three independently-shippable phases,
+    cheapest-and-most-certain first.
+
+    --- Phase A — Vertex format compression (memory + bandwidth) ----------------
+    **The cheap, high-certainty win; do this first.** `vg::Vertex` (src/render/
+    Vertex.h) is currently **44 bytes** of mostly wasted precision:
+    `pos` vec3 (12) + `uv` vec2 (8) + `layer` u32 (4) + `light` vec2 (8) +
+    `normal` u32 (4) + `blockColor` RGBA8 (4) + `tint` RGBA8 (4). Almost every
+    field is far over-sized:
+    - `pos` is **chunk-local** (0..16, and the only sub-integer positions come from
+      shape boxes / cross quads / liquid corner heights) — fits in 3x `uint16` as a
+      fixed-point value (e.g. 1/16-block units -> 0..256), or tighter. The draw
+      already translates by `m.worldPos` via the model push constant, so local
+      coords are all the vertex needs.
+    - `normal` is a 0..5 face index (the Face enum) — 3 bits, decoded in chunk.vert.
+    - `layer` is a texture-array slice — a `uint16` is ample.
+    - `uv` is in block units up to the greedy quad span — `uint16`/`uint8` fixed
+      point (the REPEAT sampler only needs the fractional tile + integer repeat).
+    - `light` is two 0..1 terms (sky/block, AO already folded in) — `unorm8` x2.
+    - `blockColor`/`tint` are already packed RGBA8.
+    Target ~12-16 B/vertex, **roughly halving resident mesh memory AND vertex-fetch
+    bandwidth** — a direct GPU-bound-frame win that also raises the chunk ceiling
+    (compounds with O5's sub-allocator). This is purely a render-side representation
+    change: it does NOT touch worldgen, so the cross-process determinism property
+    and the `--selftest` golden are unaffected.
+    Work: pack in ChunkMesher's vertex emit (`pushQuad` + the greedy `emit`, the
+    Surface-Nets path in WorldRenderer, the foliage/shape/liquid emitters — every
+    site that writes a `Vertex`); update `Vertex::attributeDescriptions()` to the
+    new `VK_FORMAT_*` (e.g. `R16G16B16_UNORM`/`*_USCALED`, `R8G8_UNORM`); decode in
+    chunk.vert + entity.vert + farterrain.vert (if it shares the format) so the
+    shader sees the same values it does today. GOTCHAS: (1) respect vertex-attribute
+    format/alignment rules — keep the struct's total a multiple of 4 and each attr
+    on a valid offset; (2) `_USCALED` vs `_UNORM` matters (integer-valued coords
+    want USCALED so the shader reads 0..256, not 0..1); (3) the combined buffer
+    layout (verts then indices, O5) and `firstWaterVertex`/`indexOffset` arithmetic
+    in `swapChunkBuffers` are in BYTES — recompute against the new stride. Verify:
+    `VG_MESH_TIME` GPU-upload bytes + the GpuAllocator live-MiB line should drop
+    ~2x; a flycam `--screenshot` must be visually identical (texture density, AO
+    gradient, emitter hue, biome tint, foliage sway all intact); Vulkan validation
+    layers clean on a Debug autowalk (alignment/format errors surface there).
+
+    --- Phase B — Occlusion / visibility culling (the big algorithmic win) ------
+    **Frustum culling rejects only what is off-screen; it does NOTHING when you are
+    underground or standing behind a hill** — you still record a draw for every cave
+    wall and for the terrain occluded by the ridge in front of you. The standard fix
+    is Minecraft-style **flood-fill visibility culling**:
+    1. **Per-chunk connectivity (mesh-time, on the worker):** while meshing, flood
+       the chunk's air/transparent cells to compute which of the 6 faces are
+       mutually visible *through open space* — a 6x6 "can you see from face A out
+       face B?" bit-set (15 unordered pairs). Caves/solid rock yield a near-empty
+       set; open air yields all-connected. Store it on `ChunkMesh` (it is cheap and
+       derived only from block data the worker already reads — no new world access,
+       keeps the "workers only READ" invariant). Recompute on remesh (version-
+       stamped like the mesh, so it is always consistent with the geometry).
+    2. **BFS from the camera (render-time, main thread):** start at the camera's
+       chunk, breadth-first walk to neighbours, but only step from chunk to chunk
+       through a boundary whose two connectivity sets say light can pass, AND only
+       in directions that do not point back toward the camera (the classic "don't
+       re-enter" + frustum-plane prune). Only chunks reached by the flood get added
+       to the per-frame draw set; everything else (occluded behind solid rock or
+       hills) is skipped. Underground and in dense terrain this routinely culls
+       50-80% of what frustum culling passes through.
+    Integration: this replaces the flat `for (slot : drawList_)` + `aabbInFrustum`
+    loop in record() with "build a visible set via BFS, then draw it." Keep
+    `aabbInFrustum` as the per-chunk frustum prune *inside* the BFS. `drawList_`
+    stays the universe of non-empty slots; the BFS produces a subset. Because the
+    window is a fixed ring (counts_.{x,y,z}, `chunkIndex`), neighbour lookup is O(1)
+    and the BFS visits at most the window's chunk count once per frame — cheap. Do
+    NOT let the BFS read mutable world state mid-frame beyond the already-built
+    connectivity sets (respect the four-actor threading invariants; the sets are
+    produced on the worker and installed with the mesh, same as geometry). Verify:
+    a `VG_FRAME_TIME` draw-call / drawn-chunk counter (add one) should fall sharply
+    when the camera is in a cave or behind terrain and be ~unchanged on an open
+    plain looking out; no geometry may pop in/out as the camera turns (a too-
+    aggressive prune shows as chunks vanishing at screen edges — keep the
+    conservative frustum test). Pairs naturally with the caves work in the roadmap
+    (memory: game-features-direction) — that is when underground occlusion pays off
+    most.
+
+    --- Phase C — Multi-draw indirect + GPU culling (later; CPU draw cost) ------
+    **Lowest priority — do only after a much larger view_radius makes the CPU
+    record loop actually hot.** Today record() issues one `vkCmdDrawIndexed` per
+    visible chunk with a per-draw push-constant model matrix and per-draw vertex/
+    index binds (WorldRenderer.cpp ~L957-1012). O7 already made this loop lean
+    (compact `drawList_`, water pass skipped wholesale when `drawnWaterChunks_==0`),
+    so at current draw counts the CPU is not the bottleneck. When view distance grows
+    enough that it is:
+    - Put all chunk meshes' vertices/indices in shared big buffers (the O5
+      `GpuAllocator` already backs every chunk buffer with a few device blocks — the
+      step is to bind ONE VkBuffer spanning a block and draw sub-ranges by offset,
+      rather than rebinding per chunk).
+    - Replace per-chunk model push constants with a per-chunk **instance/SSBO** of
+      `worldPos` (chunk-local positions from Phase A make this a small int3 per
+      chunk) indexed by `gl_DrawID`/instance.
+    - Drive draws with `vkCmdDrawIndexedIndirect` over a GPU-written count/command
+      buffer, and move the frustum test (and ideally Phase B's visibility BFS, or at
+      least the AABB frustum cull) into a **compute pre-pass** that compacts the
+      visible commands — culling moves off the CPU entirely.
+    This is a larger Vulkan refactor (indirect command buffers, an SSBO of per-chunk
+    transforms, a compute cull pass — the `vulkan-compute` skill covers the compute
+    side) and it interacts with the deferred-buffer retire path (`retired_`,
+    `tickRetired`) and version-stamped remesh, so stage it carefully behind the
+    cheaper two phases. Gate behind a world.yaml flag like O6's `interpolate` so it
+    is opt-in until proven on this hardware. Verify: `VG_FRAME_TIME` `rec` (CPU
+    recording) time should drop at high view_radius while `wait` (GPU) is unchanged;
+    Vulkan validation clean; identical image.
+
+    **Recommended order & rationale:** A (cheap, certain, no determinism risk,
+    unblocks more chunks) -> B (the real un-tapped headroom, especially with caves)
+    -> C (only once the CPU record loop is measurably hot at a big view distance).
+    A and B are independent and can land in either order; C depends on A (chunk-local
+    positions) and ideally B (the cull it moves to the GPU).

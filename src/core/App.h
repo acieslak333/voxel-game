@@ -30,6 +30,7 @@
 #include <future>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace vg {
@@ -155,6 +156,16 @@ private:
     void buildMenu(class Ui& ui, float px, float py, float pw, float ph); // Esc menu column
     // Second column: live atmosphere tuning (clouds/fog/weather/sky). Ephemeral.
     void buildTuning(class Ui& ui, float px, float py, float pw, float ph);
+    // Modal palette picker (opened from the Retro tab): one row per palette showing
+    // its name and a live swatch strip, so you can see each look before choosing.
+    void buildPalettePicker(class Ui& ui, float w, float h, const InputState& in);
+    // (Re)scan assets/colorpalettes/ into paletteList_ (Off + each .hex with its
+    // colours) and rebuild each palette's remapped preview thumbnail. Called when
+    // the picker opens.
+    void refreshPaletteCache();
+    // Load assets/palette_preview.png once and box-downsample it into previewThumb_
+    // (the reference game frame the picker shows remapped through each palette).
+    void loadPreviewThumb();
     // F1 debug overlay: position, chunk, facing, FPS, light levels, target, ...
     void buildDebugOverlay(class Ui& ui);
     // Centre-screen aiming reticle (pixel-art outlined plus).
@@ -176,6 +187,9 @@ private:
     // Push every value in settings_ to the subsystem that owns it.
     void applySettings();
     void cycleFont(int dir);
+    // Load settings_.retroPalette from disk and bind it to the composite pass
+    // (empty name -> palette off). Called from applySettings() and cyclePalette().
+    void applyRetroPalette();
     // Where the persisted settings live (next to the game's assets).
     [[nodiscard]] static std::string settingsPath();
 
@@ -301,6 +315,19 @@ private:
     float      pickerSelPos_    = 0.0f;             // selector position (cell units) the mouse slides
     float            smoothedDt_ = 1.0f / 60.0f; // EMA of frame time, for the overlay's FPS
 
+    int   retroParity_ = 0;     // flips 0/1 each frame to drive the PS2 interlace field
+    // Retro colour-palette picker (Retro tab -> modal popup). paletteList_ caches
+    // the selectable palettes (name + swatches; index 0 = "" Off) for the preview.
+    bool  palettePickerOpen_ = false;
+    std::vector<std::pair<std::string, std::vector<glm::vec3>>> paletteList_;
+    // Per-palette preview: previewThumb_ is the reference frame downsampled to
+    // previewW_ x previewH_ (sRGB); palettePreview_[i] is that frame remapped
+    // through paletteList_[i] (index 0 = Off = the unmodified frame).
+    std::vector<glm::vec3>              previewThumb_;
+    int                                 previewW_ = 0, previewH_ = 0;
+    std::vector<std::vector<glm::vec3>> palettePreview_;
+    // Escape-menu tabs (left column). Groups the options so they fit one panel.
+    int   menuTab_     = 0;     // 0 display, 1 effects, 2 game, 3 world, 4 retro
     // Atmosphere tuning panel (ephemeral 2nd menu column; not persisted).
     int   tuningTab_   = 0;     // 0 weather, 1 clouds, 2 fog, 3 sky
     int   colorTarget_ = 0;     // which colour the RGB sliders edit (Sky tab)
@@ -330,13 +357,31 @@ private:
     // bounded drain (join relight + streamBarrier) and applies anyway (REVIEW R5).
     int        windowStepStarveFrames_ = 0;
     static constexpr int kMaxWindowStepStarveFrames = 30; // ~0.5s at 60fps before forcing
-    // The in-flight background strip pregeneration (World::pregenStrip): the next
-    // entering edge column's chunks, generated off-thread so the window step itself
-    // is just a swap (the per-boundary frame spike was this generation). Reads only
-    // the immutable generator + save files, so it may overlap the relight — but the
-    // window must not move while it runs (all recenter paths are gated on it).
-    // Declared last, like relightFuture_, so its destructor joins first.
-    std::future<World::PregenStrip> pregenFuture_;
+    // Background strip pregeneration (World::pregenStrip): the entering edge columns,
+    // generated off-thread so the window step itself is just a swap (the per-boundary
+    // frame spike was this generation). Reads only the immutable generator + save
+    // files, so it may overlap the relight — but the window must not move while a
+    // strip is being APPLIED (all recenter paths are gated on it).
+    //
+    // A small FIFO queue stages several columns ahead of the player along the current
+    // travel axis: each entry's strip steps from origin+k, so when the window advances
+    // (front applied, origin += step) the next entry is already generating or ready —
+    // the per-column pregen never lands on the critical path even when the player
+    // crosses several boundaries per second. The queue is for a single (dir,alongX);
+    // a turn clears it (pregenDir_/pregenAlongX_ track what it was built for). Declared
+    // last, like relightFuture_, so the futures' destructors join before world_ dies.
+    std::deque<std::future<World::PregenStrip>> pregenQueue_;
+    // Stale strips (a turn abandoned their axis/dir) drain here instead of being joined
+    // on the main thread — joining a mid-flight pregen would reintroduce the per-turn
+    // hitch. Their results are discarded; they are reaped (destroyed) once ready, which
+    // never blocks. SAFE to keep running through a window move: a pregen only writes its
+    // own staging chunks and reads the immutable generator + its leading-edge save file,
+    // while a move touches in-memory ring slots and the trailing-edge departing files —
+    // disjoint memory, disjoint files (leading vs trailing edge are >=1 chunk apart).
+    std::vector<std::future<World::PregenStrip>> pregenRetired_;
+    int  pregenDir_    = 0;     // +1/-1 along the queued axis (0 = queue empty/idle)
+    bool pregenAlongX_ = true;  // axis the queued strips step along
+    static constexpr int kPregenAhead = 2; // columns staged ahead of the player
 };
 
 } // namespace vg

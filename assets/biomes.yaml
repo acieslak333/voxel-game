@@ -1,326 +1,189 @@
-﻿# =============================================================================
-#  World generation: terrain shape + biomes  (data-driven; see docs/WORLDGEN.md)
 # =============================================================================
-#  READ BY:  vg::TerrainGenerator (src/world/TerrainGenerator.{h,cpp}).
-#  This is THE file a future generation-tuning tool edits. Everything here is a
-#  pure function of world coordinates, so changes are deterministic and stream-safe
-#  (after an edit, the --selftest golden hash changes â€” that's expected).
+#  World generation — "BETA 1.7.3 ISLAND + FLOATING ISLANDS"
+# =============================================================================
+#  READ BY: vg::TerrainGenerator (src/world/TerrainGenerator.{h,cpp}).
 #
-#  MODEL (Minecraft-1.18 style): terrain SHAPE is separate from CLIMATE.
-#   * Shape â€” three noises (continentalness, erosion, peaks) mapped through the
-#     splines below give the surface height: deep ocean -> coast -> plains ->
-#     mountains. Biome never controls height, so biome borders never cliff.
-#   * Climate â€” temperature + humidity noises pick a biome for the SURFACE only
-#     (which blocks, snow, trees). Temperature also cools with altitude.
+#  Goal: the look of classic Minecraft Beta 1.7.3 — rolling grassy hills, oak
+#  forests, sandy shores, dramatic overhangs and cliffs — shaped into ONE big
+#  island, with sparse GRASS-TOPPED FLOATING ISLANDS drifting in the sky above it.
 #
-#  Heights are in BLOCKS RELATIVE TO SEA LEVEL (negative = underwater).
+#  Layout (the world is 256 tall, sea level 64 like classic MC):
+#    deep ocean  ->  sand beach  ->  oak/birch forest  ->  grassy highlands  ->
+#    snow-capped stone peaks ...  and, high overhead, floating sky islands.
+#
+#  Pure function of world coords (deterministic / stream-safe). After an edit the
+#  --selftest hash changes — that's expected. Heights are BLOCKS vs sea level.
 # =============================================================================
 
-# Sea surface height (absolute block Y). Air at/below this over the terrain floods
-# with water; terrain whose surface is at/below it gets an ocean/lake floor.
-#   Tuned for a 128-block-tall world (world.yaml height_chunks: 8) with sea at the
-#   middle. To go taller (e.g. height_chunks: 16 = 256), raise sea_level (~128) and
-#   roughly scale the spline y-values + snow_line with it.
-sea_level: 70
-# Blocks above sea level where any surface gets a snow cap (mountain snow line).
-snow_line: 82
+# Classic Minecraft sea level. The ocean fills to here; land height is measured
+# relative to it. With a 256-tall world this leaves ~30 below for the seabed and
+# ~190 above for hills, peaks and the sky-island layer.
+sea_level: 12
+# Snow caps any surface this many blocks above sea — only the high peaks reach it.
+snow_line: 112
 
 # --- Shape noises -----------------------------------------------------------
-# frequency = how large the features are (smaller = broader); octaves = detail.
-# Each shape field is now a STACK of noises (richer, more detailed terrain). The
-# `frequency`/`octaves` on the first line are the legacy fallback (used by tools); the
-# `layers:` blend is what actually runs. perlin = rolling, ridged = sharp ridges,
-# billow = rounded blobs. weights are relative; offset:[x,z] decorrelates layers.
-
-# CONTINENTALNESS -> land vs ocean. Archipelago: a big continental field + island
-# clusters + bumpy, bay-cut coastlines so you get many irregular islands.
-continentalness:
-  frequency: 0.0034
-  octaves: 4
-  layers:
-  - {type: perlin, frequency: 0.0010, octaves: 4, weight: 1.00}                         # big continents / open ocean (dominant)
-  - {type: perlin, frequency: 0.0030, octaves: 3, weight: 0.38, offset: [4200, -1800]}  # island clusters
-  - {type: billow, frequency: 0.0075, octaves: 2, weight: 0.16, offset: [-2600, 3300]}  # gentle coastal bumps / bays
-  - {type: ridged, frequency: 0.0160, octaves: 2, weight: 0.08, offset: [1500, 900]}    # subtle peninsulas / inlets
-
-# EROSION -> how mountainous a region is (low erosion = tall ranges). Mixed by region:
-# broad mountain-vs-flat zones, ridge belts, and rolling erosion patches.
-erosion:
-  frequency: 0.0032
-  octaves: 3
-  layers:
-  - {type: perlin, frequency: 0.0020, octaves: 3, weight: 1.00}                         # broad: mountainous vs flat regions
-  - {type: ridged, frequency: 0.0060, octaves: 3, weight: 0.42, offset: [-3100, 2200]}  # ridge belts (alpine zones)
-  - {type: billow, frequency: 0.0120, octaves: 2, weight: 0.30, offset: [800, -2700]}   # rolling erosion (rounded zones)
-
-# PEAKS -> the mountain ridgelines themselves. Mixed character: sharp alpine ridges +
-# rounded massifs + crag jitter, so different ranges read differently.
+# frequency = feature size (↑ = smaller/busier); octaves = detail (↑ = craggier).
+# Continentalness drives the gentle ROLLING of the interior (the Beta-1.7.3 hills).
+continentalness: {frequency: 0.006, octaves: 8}
+erosion: {frequency: 0.004, octaves: 3}           # where peaks are tall vs worn
+# Ridged peaks = the mountain crests at the island core.
 peaks:
-  frequency: 0.0065
+  frequency: 0.008
   octaves: 4
   layers:
-  - {type: ridged, frequency: 0.0072, octaves: 4, weight: 1.00}                         # sharp alpine ridgelines
-  - {type: billow, frequency: 0.0140, octaves: 3, weight: 0.45, offset: [2600, 1400]}   # rounded massifs (region mix)
-  - {type: perlin, frequency: 0.0320, octaves: 2, weight: 0.22, offset: [-1900, -3300]} # crag jitter / fine texture
+  - {type: ridged, frequency: 0.012, octaves: 5, weight: 1.6}                       # sharp dominant ridges
+  - {type: ridged, frequency: 0.028, octaves: 3, weight: 0.9, offset: [1800, -900]} # secondary spikes
+  - {type: ridged, frequency: 0.055, octaves: 2, weight: 0.5, offset: [-2400, 1300]} # crag jitter
 
-# BIOME SIZE: temperature + humidity frequency sets how big biomes are. HIGHER
-# frequency = SMALLER biomes (more variety packed in, all visible per island); lower =
-# bigger sprawling biomes. Bumped up from 0.0009/0.0012 so you can actually see them all.
-temperature: {frequency: 0.0052}                   # hot <-> cold biome axis  (biome size)
-humidity:    {frequency: 0.0061}                   # dry <-> wet biome axis   (biome size)
-#
-# COMPOSABLE NOISE STACKS (optional, opt-in). Any of the six noise fields above
-# (continentalness / erosion / peaks / temperature / humidity / rivers) can replace
-# its single noise with a WEIGHTED BLEND of layers by adding a `layers:` list. Each
-# layer is an fbm of one shape â€” perlin (rolling field), ridged (sharp mountain
-# ridgelines) or billow (rounded blobs) â€” combined by `weight` (may be negative to
-# subtract) and normalised back to ~[-1, 1]. `offset: [x, z]` shifts a layer in
-# world blocks so layers don't correlate. Read by vg::NoiseStack via TerrainGenerator;
-# preview a field with `voxelgame --genmap --mode noise --layer cont` (or ero/peak/...).
-# When `layers:` is ABSENT the legacy single-noise path runs (worlds are unchanged).
-# Example â€” continentalness as a perlin base + ridged detail + billow blobs:
-#   continentalness:
-#     frequency: 0.0034            # kept for the legacy path / tools; ignored when layers: present
-#     octaves: 4
-#     layers:
-#       - {type: perlin, frequency: 0.0034, octaves: 4, weight: 1.0}
-#       - {type: ridged, frequency: 0.012,  octaves: 3, weight: 0.5, offset: [1000, -2000]}
-#       - {type: billow, frequency: 0.006,  octaves: 2, weight: 0.3, offset: [-3000, 500]}
+# Unused by selection now (climate removed) but kept as decorrelated noise sources.
+temperature: {frequency: 0.003}
+humidity: {frequency: 0.005}
 
-# --- Rivers -----------------------------------------------------------------
-# Winding channels carved toward sea level where the river noise is near zero.
-# Only carved in LOWLANDS (land below sea + max_elevation), so mountains keep
-# their relief instead of growing deep canals; the channel fills via the sea fill.
-rivers:
-  frequency: 0.0018     # smaller = longer, broader river basins
-  width: 0.11           # |noise| band counted as channel (bigger = wider rivers)
-  depth: 6              # blocks the channel bed cuts below sea level at its centre
-  max_elevation: 18     # no rivers where the land sits more than this above sea
-
-# --- Lakes (perched) --------------------------------------------------------
-# A coarse grid of candidate lakes; each carves a bowl filled to its own level
-# (the land height at its centre), so lakes can sit ABOVE sea level. Kept to
-# flattish lowland/upland bands and small radii so the bowls stay contained.
-lakes:
-  spacing: 190          # average blocks between candidate lakes
-  chance: 0.45          # probability a candidate cell actually has a lake
-  radius_min: 11
-  radius_max: 24
-  depth: 7              # bowl depth below the water surface at the centre
-  min_elevation: 3      # only perch lakes on land at least this far above sea
-  max_elevation: 30     # ...and at most this far (no lakes on high peaks)
-
-# --- Island (single landmass) -----------------------------------------------
-# When enabled, ONE big island sits at `center`, its land sinking to deep ocean
-# beyond `radius` with a noise-warped (irregular) coastline â€” the rest of the
-# infinite world is open sea. Disable for a continentalness-driven archipelago.
+# --- The island -------------------------------------------------------------
+#   radius/inner   size + core fraction (inner ignored when island_profile_spline set)
+#   coast_warp     coastline raggedness (↑ = more fjords/capes)
+#   land_base      coastal land height vs sea
+#   peak_height    radial rise to the core (the macro mountain)
+#   interior_var   continentalness -> rolling hills amplitude (the Beta-1.7.3 roll)
+#   ocean_floor    seabed depth far out
 island:
-  enabled: 1            # OFF = continentalness-driven archipelago (many islands). The
-                        # continental_spline below now drives land/ocean.
-  center: [0, 0]        # world coords of the island centre (genmap is centred here)
-  radius: 2550          # blocks from centre where land has fully sunk to ocean
-  inner: 0.5            # inner fraction kept at full land height (the island's body)
-  coast_warp: 560       # blocks of coastline noise (0 = a clean circle)
-  land_base: 18         # base interior land height above sea level
-  interior_var: 26      # continentalness -> interior hills/valleys amplitude
-  ocean_floor: -92      # deep sea-floor elevation far from the island
+  enabled: 1
+  center: [0, 0]
+  radius: 2560         # big island — room for long beach / plains / forest / hills rings
+  inner: 0.1
+  coast_warp: 2400     # gently irregular shoreline (lower = a cleaner, longer beach)
+  land_base: 0         # the coast sits right around sea level
+  peak_height: 128     # the core rises into the PEAKS band — a real mountainous centre
+  interior_var: 150    # rolling green hills across the interior
+  ocean_floor: -8      # a proper deep-ish ocean around the island
 
-# --- 3D volumetric terrain (overhangs / cliffs / floating islands) ----------
-# The heightmap above gives a base surface; this perturbs it in true 3D so the
-# land grows overhangs, cliffs and ledges (solid where heightmap-gradient + a 3D
-# weighted-noise sum is positive), plus sparse floating islands above it. Scaled
-# for the 128-tall world (sea_level 16): amplitude is the up/down swell in blocks
-# â€” keep amplitude + tallest peak under ~127 or the highest peaks flat-top.
+# --- 3D terrain: overhangs, cliffs & FLOATING ISLANDS -----------------------
+#   amplitude       overhang/cliff intensity (blocks of 3D swell)
+#   density.layers  the noise blend that carves the overhangs
+#   float_threshold sky-island cutoff (↓ = more/bigger floats); float_reach = how
+#                   far above the surface they form; float_gap = min gap above land
 terrain3d:
   enabled: 1
-  # interpolate (REVIEW O6): approximate the 3D density on a coarse world-aligned
-  # lattice and trilinearly interpolate, instead of evaluating the noise stack at
-  # EVERY cell. ~10-100x fewer density evals (the most expensive function in
-  # worldgen) — the headroom for a larger view_radius — at the cost of smoothing
-  # density detail finer than one lattice cell. OFF by default: leaving it off keeps
-  # generated terrain byte-identical (and the --selftest golden stable). Turn on
-  # when running a big render distance. `lattice` is the [x,y,z] cell size in blocks
-  # (default 4×8×4, Minecraft's; keep each a divisor of 16 so chunk seams land on
-  # lattice points). Where used: TerrainGenerator::mainSolid. Effect of raising the
-  # cell size: cheaper still, but blockier/blobbier sub-cell terrain.
-  interpolate: false
-  # lattice: [4, 8, 4]
-  # amplitude = how far (blocks) the 3D noise pushes the surface up/down. This is an
-  # ACCENT on top of the heightmap shape (splines + erosion-gated peaks), NOT the main
-  # relief — keep it modest or it floods the world with chop and over-saturates the
-  # 128 ceiling. ~20 gives believable cliffs/overhangs; the big shape comes from the
-  # splines + island settings below.
-  amplitude: 64          # moderate: smooth rolling relief with OCCASIONAL cliffs (not chop)
+  amplitude: 0
   density:
-    # SMOOTH-DOMINANT mix: a big gentle perlin swell carries most of it (rolling, not
-    # harsh), one low-freq ridged layer adds the OCCASIONAL clean cliff/escarpment, and a
-    # gentle medium roll breaks up the slopes. Cliff FACES are rendered as bare rock AND
-    # geometrically ERODED in code (carved back with smooth noise, more toward the base),
-    # so they round off / undercut instead of standing as flat walls.
-    # NOTE on octaves: each octave doubles the sample frequency and halves its
-    # amplitude, and EVERY octave costs a 3D Perlin eval per generated cell —
-    # millions of times at startup. Past ~1 cycle/block (sub-voxel wavelength) or
-    # ~1/512 amplitude an octave is invisible; the engine clamps such octaves at
-    # load (see NoiseStack::addLayer) and these values are the clamped equivalents
-    # of the previous 24/18/12 — identical-looking terrain, ~2x cheaper to generate.
     layers:
-    - {type: perlin, frequency: 0.2, octaves: 3, weight: 0.3, offset: [-3300, -1500]}                         # broad rolls
-    - {type: perlin, frequency: 0.05, octaves: 3, weight: 0.5, offset: [3300, -1500]}                         # broad rolls
-    - {type: perlin, frequency: 0.0090, octaves: 3, weight: 0.7, offset: [3300, -1500]}                         # broad rolls
-    - {type: perlin, frequency: 0.0045, octaves: 3, weight: 0.6}                         # smooth broad swells (dominant)
-    - {type: perlin, frequency: 0.0015, octaves: 3, weight: 0.6}                         # smooth broad swells (dominant)
-    - {type: perlin, frequency: 0.0001, octaves: 3, weight: 0.7}                         # smooth broad swells (dominant)
-    - {type: perlin, frequency: 0.0120, octaves: 3, weight: 0.40, offset: [-3300, 1500]}  # gentle medium rolls
-    - {type: ridged, frequency: 0.0090, octaves: 3, weight: 0.38, offset: [1700, -900]}   # occasional clean cliffs / steps
-  # Floating islands: solid masses ABOVE the surface. Dramatic fantasy -> COMMON, big,
-  # and reaching high into the sky (now that the world is 256 tall).
-  float_threshold: 0.15  # LOWER = bigger / more islands (0.34 = lots of sky islands)
-  float_freq: 0.0060     # LOWER = bigger, chunkier island masses
-  float_gap: 2          # min blocks above the surface an island can start
-  float_reach: 64       # max blocks above the surface islands appear (big sky archipelago)
-  # float: { layers: [ ... ] }   # optional: author island shapes with the same blend
+    - {type: perlin, frequency: 0.013, octaves: 4, weight: 3}                        # main overhang carve
+    - {type: ridged, frequency: 0.02, octaves: 3, weight: 1.2, offset: [600, 200]}   # sharp cliff edges
+    - {type: perlin, frequency: 0.045, octaves: 2, weight: 0.8}                      # fine roughness
+    - {type: perlin, frequency: 0.0035, octaves: 3, weight: 1}                       # broad swell
+  # Floating islands ON: a scatter of chunky grass-topped sky-land above the LAND.
+  # ~0.30 = a generous scatter, ~0.40 = rare; low float_freq = big islands. reach 80
+  # keeps them under the 256 ceiling. (Beaches/ocean and the tall peaks turn this OFF.)
+  float_threshold: 0.14
+  float_freq: 0.017
+  float_gap: 16
+  float_reach: 20
+  # Smooth the swell down at the waterline so beaches read as gentle sand, not cliffs.
+  coast_flatten: {enabled: 1, range: 6, min: 50000000}
 
-# --- Shape splines ----------------------------------------------------------
-# continental_spline: continentalness noise (-1..1) -> base elevation (blocks vs
-# sea). This is what carves ocean basins and raises the land.
-# Tuned for ISLANDS: most of the continentalness range is below sea level (ocean),
-# with land only emerging where the noise is high (c > ~0.25). Raise the crossing
-# point (the [x, 0] knee) for more ocean / smaller islands; lower it for more land.
-# Archipelago tuning: deep ocean for most of the range, land emerging where c > ~0.1.
-# The near-vertical step at the coast (0.06 -> 0.16) makes abrupt shorelines/sea-cliffs,
-# and the flat shelf (0.30 -> 0.42) is a mid-elevation PLATEAU (terracing). Mountains
-# add on top via the erosion spline.
-continental_spline:
-- [-1.00, -118]  # deep ocean trench
-- [-0.40, -76]
-- [-0.18, -30]
-- [-0.06, -6]    # ┐ coast step: abrupt shoreline / sea-cliffs (crossing near c=0
-- [0.06, 18]     # ┘ -> roughly half land, big coherent islands)
-- [0.28, 60]     # ┐ flat plateau shelf (terrace)
-- [0.42, 68]     # ┘
-- [0.70, 100]
-- [1.00, 128]     # high inland base (mountains stack on top)
-# erosion_spline: erosion noise (-1..1) -> mountain amplitude (blocks). The ridged
-# `peaks` noise (0..1) scales this, so low-erosion areas grow tall ranges and
-# high-erosion areas stay flat.
-#   The STEEP segment between -0.55 and -0.40 is the "sudden jump": as erosion crosses
-#   that narrow band the mountain amplitude leaps 60 -> 18 blocks, so where the erosion
-#   noise passes through it you get an abrupt mountain FRONT / escarpment instead of a
-#   gentle ramp. Most of the erosion range (-0.4 .. 1.0) is low, flat-ish land, so
-#   mountains stay rare and dramatic rather than covering everything.
+# erosion noise (-1..1) -> mountain crest height (blocks). Low erosion (core) -> tall
+# spiky peaks. A steep drop between rows = a sharp mountain front (rigid, jagged top).
 erosion_spline:
-- [-1.00, 132]   # lowest erosion: TOWERING ranges (scaled by the ridged peaks)
-- [-0.62, 118]   # ┐ steep segment = abrupt mountain front / escarpment (the "sudden jump"):
-- [-0.45, 30]    # ┘ amplitude leaps 118 -> 30 across a narrow erosion band
-- [-0.10, 16]
-- [0.25, 6]
-- [1.00, 0]      # high erosion: worn-flat plains
+- [-0.95, 54]
+- [-0.55, 36]
+- [-0.20, 12]
+- [0.30, 3]
+- [1.0, 0]
 
-# --- Biomes -----------------------------------------------------------------
-# Tested top-to-bottom; the FIRST biome whose temp + humidity + elevation ranges
-# all contain the column wins. Put elevation-specific biomes (beach, mountain)
-# and climate extremes before the temperate catch-all (plains, last).
-#   temp/humidity : [min, max] over the noise range (~ -1..1)
-#   elevation     : [min, max] blocks relative to sea level
-#   top / filler  : surface block / the few blocks beneath it (names from blocks.yaml)
-#   snow          : surface is snow (cold biomes); peaks also snow via snow_line
-#   trees / bushes: per-column spawn probability (bushes = any ground plant)
-#   plant         : ground-plant family â€” none / bush / grass (tall grass +
-#                   flowers) / forest (ferns, mushrooms, bushes, flowers) /
-#                   desert (cacti). A per-column variety hash in
-#                   World::generateColumn turns the family into a specific plant.
-#   tree          : tree species rooted here â€” oak / birch / pine / maple /
-#                   willow (default oak). Shapes the canopy (rounded / conical /
-#                   drooping) and picks the trunk + leaf blocks.
-#   tint          : [r, g, b] (0..1) MULTIPLIED into grass/leaf/foliage albedo so
-#                   the same green texture reads per-biome (lush / dry / pale /
-#                   dark). White [1,1,1] = no tint (default). Only multiplies, so
-#                   it can darken/shift but not brighten past the texture colour.
+# Island radial profile: x = distance from core (0) to coast (1), y = land rise.
+# A FLAT high plateau across the inner third (y stays 1.0 to u=0.34) so the peaks
+# core forms reliably despite the domain-warp, then a LONG gentle descent so the
+# hills, forest, plains and beach each get a wide radial band.
+island_profile_spline:
+- [0, 1]
+- [0.22, 1]
+- [0.74, 0.55]
+- [0.83, 0.5]
+- [0.87, 0.34]
+- [0.94, 0.15]
+- [1, 0]
 biomes:
+# LONG sandy shoreline — also the low/underwater catch-all, so the OCEAN resolves to
+# beach (floats OFF) instead of the peaks catch-all (which was making sky-sand over sea).
 - name: beach
-  temp: [-2, 2]
-  humidity: [-2, 2]
-  elevation: [-4, 2]
+  elevation: [-3000, 6]
   top: sand
   filler: sand
-  trees: 0.0
-  bushes: 0.0
-  plant: none
-- name: mountain
-  temp: [-2, 2]
-  humidity: [-2, 2]
-  elevation: [60, 10000]
-  top: stone
-  filler: stone
-  trees: 0.003
-  bushes: 0.0
-  plant: none
-  tree: pine
-- name: desert
-  temp: [0.35, 2]
-  humidity: [-2, -0.15]
-  elevation: [2, 10000]
-  top: sand
-  filler: sand
-  trees: 0.0
-  bushes: 0.012
-  plant: desert
-- name: savanna
-  temp: [0.2, 2]
-  humidity: [-0.15, 0.3]
-  elevation: [2, 10000]
-  top: grass
-  filler: dirt
-  trees: 0.006
-  bushes: 0.05
-  plant: grass
-  tree: maple
-  tint: [0.85, 0.78, 0.42]   # dry olive savanna grass
-- name: snowy
-  temp: [-2, -0.35]
-  humidity: [-2, 2]
-  elevation: [2, 10000]
-  top: grass
-  filler: dirt
-  snow: true
-  trees: 0.012
-  bushes: 0.02
-  plant: bush
-  tree: pine
-  tint: [0.78, 0.86, 0.82]   # pale, cold-tinted snowy grass
-# Swamp: low, wet temperate ground just above the waterline. Tested before forest
-# so only the lowest wet land becomes swamp (higher wet land stays forest). Home
-# of the drooping willows.
-- name: swamp
-  temp: [-0.35, 0.6]
-  humidity: [0.45, 2]
-  elevation: [2, 5]
-  top: grass
-  filler: dirt
-  trees: 0.03
-  bushes: 0.06
-  plant: forest
-  tree: willow
-  tint: [0.55, 0.68, 0.42]   # dark, murky swamp green
-- name: forest
-  temp: [-0.35, 0.6]
-  humidity: [0.2, 2]
-  elevation: [2, 10000]
-  top: grass
-  filler: dirt
-  trees: 0.055
-  bushes: 0.05
-  plant: forest
-  tree: oak
-  tint: [0.72, 1.00, 0.55]   # lush, deep forest green
+  trees: 0
+  terrain3d:
+    amplitude: 0
+    float_threshold: 1                       # no floating islands over sand / the sea
+    coast_flatten: {enabled: 1, range: 32, min: -100}
+    enabled: 1
+    density:
+      layers:
+      - {type: perlin, frequency: 0.0001, octaves: 3, weight: 1}
+      - {type: perlin, frequency: 0.001, octaves: 3, weight: 1}
+      - {type: perlin, frequency: 1e-05, octaves: 3, weight: 1}
+
+# PLAINS — flat open grassland with scattered oaks (low 3D swell = flat, not overhangy).
 - name: plains
-  temp: [-2, 2]
-  humidity: [-2, 2]
-  elevation: [-10000, 10000]
+  elevation: [6, 30]
   top: grass
   filler: dirt
-  trees: 0.018
-  bushes: 0.05
-  plant: grass
+  trees: 0.06
+  tree: oak
+  tint: [0.66, 0.9, 0.45]
+  terrain3d:
+    amplitude: 8                             # flat plains, gentle relief
+
+# Birch groves — organic patches (selection mask) within the forest band.
+- name: birch_forest
+  elevation: [24, 78]
+  mask:
+    threshold: 0.12
+    width: 0.22
+    falloff: smoothstep
+    layers:
+    - {type: perlin, frequency: 0.0045, octaves: 3, weight: 1}
+  top: grass
+  filler: dirt
+  trees: 0.16
   tree: birch
-  tint: [0.80, 0.95, 0.50]   # fresh plains green
+  tint: [0.78, 0.93, 0.6]
+
+# Oak forest — dense green woodland (catch-all for the forest band).
+- name: oak_forest
+  elevation: [24, 78]
+  top: grass
+  filler: dirt
+  trees: 1
+  tree: oak
+  tint: [0.62, 0.86, 0.46]
+
+# LONG rolling HILLS — grassy upland with trees, where the overhangs read best.
+- name: highlands
+  elevation: [74, 116]
+  top: grass
+  filler: dirt
+  trees: 0.1
+  tree: oak
+  tint: [0.66, 0.8, 0.5]
+
+# Spiky snow-capped stone peaks (snow via snow_line) with hardy pines on the slopes.
+- name: peaks
+  elevation: [112, 10000]
+  top:
+  - {name: stone, w: 1}
+  - {name: cobblestone, w: 0.12}
+  filler: stone
+  trees: 0.1
+  tree: pine
+  terrain3d:
+    amplitude: 97                            # jagged 3D relief on the crests
+    float_threshold: 0.39                    # peaks are tall — no floats (they'd hit the ceiling)
+    enabled: 1
+    float_reach: 110
+    coast_flatten:
+      enabled: 0
+    density:
+      layers:
+      - {type: perlin, frequency: 0.01, octaves: 3, weight: 5}
+      - {type: perlin, frequency: 0.001, octaves: 3, weight: 1}
+      - {type: perlin, frequency: 0.0001, octaves: 3, weight: 1}

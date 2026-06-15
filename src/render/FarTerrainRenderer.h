@@ -92,7 +92,12 @@ public:
                 const glm::vec3& camPos, const glm::vec3& hazeColor,
                 float fadeStart, float fadeEnd);
 
+    // PS1 vertex-jitter grid resolution for the far shell (0 = off).
+    void setRetro(float jitter) { retroJitter_ = jitter; }
+
 private:
+    float retroJitter_ = 0.0f; // PS1 vertex-jitter grid resolution (0 = off)
+
     // Interleaved far-terrain vertex (matches farterrain.vert attributes).
     struct FarVertex {
         glm::vec3 pos;
@@ -144,9 +149,9 @@ private:
     uint32_t       framesInFlight_ = 0;
 
     // Resolved once on the first update (needs a registry). leafLayer_ is indexed
-    // by TreeKind (oak/birch/pine/maple/willow), trunkLayer_ shared.
+    // by TreeKind (oak/birch/pine), trunkLayer_ shared.
     mutable uint32_t waterLayer_ = 0;
-    mutable uint32_t leafLayer_[5] = {0, 0, 0, 0, 0};
+    mutable uint32_t leafLayer_[3] = {0, 0, 0};
     mutable uint32_t trunkLayer_ = 0;
     mutable bool     layersResolved_ = false;
 

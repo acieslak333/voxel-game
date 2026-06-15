@@ -10,6 +10,9 @@ layout(set = 0, binding = 0) uniform CameraUBO {
     mat4 proj;
     vec4 sunDir; // xyz: toward the active light (sun/moon), w: ambient floor
     vec4 sunCol; // rgb: linear light tint, a: sky-light intensity
+    vec4 misc;   // x: time, y: PS1 jitter grid, z: PS1 affine-warp flag (0/1)
+    vec4 heldLight;    // xyz: held-emitter world pos, w: radius in blocks (0 = off)
+    vec4 heldLightCol; // rgb: linear colour, a: intensity (0..1)
 } camera;
 
 layout(location = 0) in vec2      fragUV;
@@ -19,6 +22,8 @@ layout(location = 3) in flat uint fragNormal; // face index (Face enum, 0..5)
 layout(location = 4) in flat float fragAlpha; // 1 opaque pass, <1 translucent water
 layout(location = 5) in vec3      fragBlockColor; // emitter hue for the block-lit term
 layout(location = 6) in vec3      fragTint;        // biome vegetation tint (white = none)
+layout(location = 7) noperspective in vec2 fragUVaffine; // PS1 affine-warped UV
+layout(location = 8) in vec3 fragWorldPos; // world-space position (held point light)
 
 layout(location = 0) out vec4 outColor;
 
@@ -36,7 +41,10 @@ const float kBayer[16] = float[16](
     15.0,  7.0, 13.0,  5.0);
 
 void main() {
-    vec3 uvw = vec3(fragUV, float(fragLayer));
+    // PS1 affine warp: use the non-perspective-corrected UV so textures swim/stretch
+    // across polygons (misc.z on); otherwise the normal perspective-correct UV.
+    vec2 uv = camera.misc.z > 0.5 ? fragUVaffine : fragUV;
+    vec3 uvw = vec3(uv, float(fragLayer));
     vec4 texel = texture(texArray, uvw); // mip-filtered colour (anti-shimmer)
     // Cut-out test against the FULL-RES alpha (LOD 0), not the mip-averaged alpha:
     // averaging alpha shrinks/grows a thin shape's coverage and dissolves foliage,
@@ -70,6 +78,20 @@ void main() {
     // black, but wSky -> 1 there so the sky tint wins and the black is ignored.
     const vec3 kSourceFallback = vec3(1.00, 0.66, 0.32);
     vec3 blockCol = block > 1e-4 ? fragBlockColor : kSourceFallback;
+
+    // --- Held point light ----------------------------------------------------
+    // A lit emitter in the player's hand (torch/glowstone) casts a dynamic light
+    // that follows them. Distance attenuation with a quadratic-ish falloff to the
+    // radius; folded into the block term so it shares the colour + dither ramp.
+    // When it out-shines the baked block light here, it also drives the hue.
+    if (camera.heldLight.w > 0.0) {
+        float d   = distance(fragWorldPos, camera.heldLight.xyz);
+        float att = clamp(1.0 - d / camera.heldLight.w, 0.0, 1.0);
+        float pl  = att * att * camera.heldLightCol.a;
+        if (pl > block) blockCol = camera.heldLightCol.rgb;
+        block = max(block, pl);
+    }
+
     float wSky = sky / max(sky + block, 1e-4);
     vec3 lightCol = mix(blockCol, camera.sunCol.rgb, wSky);
     vec3 surf = texel.rgb * lightCol; // fully-lit surface colour

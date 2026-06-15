@@ -131,12 +131,10 @@ void FarTerrainRenderer::update(const World& world, const glm::vec3& camPos) {
             try { return reg.faceLayer(reg.idByName(name), FacePosY); } catch (...) { return fallback; }
         };
         waterLayer_   = layerOf("water", 0);
-        // Indexed by TreeKind: 0 Oak, 1 Birch, 2 Pine, 3 Maple, 4 Willow.
+        // Indexed by TreeKind: 0 Oak, 1 Birch, 2 Pine.
         leafLayer_[0] = layerOf("oak_leaves", 0);
         leafLayer_[1] = layerOf("birch_leaves", leafLayer_[0]);
         leafLayer_[2] = layerOf("pine_leaves", leafLayer_[0]);
-        leafLayer_[3] = layerOf("maple_leaves", leafLayer_[0]);
-        leafLayer_[4] = layerOf("willow_leaves", leafLayer_[0]);
         trunkLayer_   = layerOf("oak_log_side", 0);
         layersResolved_ = true;
     }
@@ -355,7 +353,7 @@ std::vector<FarTerrainRenderer::FarVertex> FarTerrainRenderer::buildMesh(const W
 
                 const float csz = hash01(ox, oz, seed ^ 0x7241u); // canopy-size roll
                 const float hh  = hash01(ox, oz, seed ^ 0x7234u); // trunk-height roll
-                const int k = std::clamp(static_cast<int>(oc.treeKind), 0, 4);
+                const int k = std::clamp(static_cast<int>(oc.treeKind), 0, 2);
                 const uint32_t leaf = leafLayer_[k];
                 // Alpha 0 marks impostor geometry so the shader can screen-door
                 // dissolve it near the window edge (the trunk lambda matches).
@@ -371,14 +369,7 @@ std::vector<FarTerrainRenderer::FarVertex> FarTerrainRenderer::buildMesh(const W
                         cone({bx, oh + trunkH * 0.12f, bz}, r, trunkH + 1.0f, leaf, tint);
                         break;
                     }
-                    case TreeKind::Willow: {
-                        const float trunkH = 6.0f + hh * 5.0f;
-                        const float rH = 3.0f + csz * 2.0f;
-                        trunk(bx, bz, oh, oh + trunkH, 0.5f);
-                        blob({bx, oh + trunkH, bz}, rH + 1.0f, rH * 0.8f, leaf, tint);
-                        break;
-                    }
-                    default: { // Oak / Birch / Maple — round canopy on a trunk
+                    default: { // Oak / Birch — round canopy on a trunk
                         const float trunkH = (oc.treeKind == TreeKind::Birch)
                                                  ? 7.0f + hh * 6.0f
                                                  : 5.0f + hh * 6.0f;
@@ -437,7 +428,7 @@ void FarTerrainRenderer::record(VkCommandBuffer cmd, uint32_t frameIndex, VkExte
 
     CameraUBO ubo{view, proj, sunDirAmbient, sunColIntensity,
                   glm::vec4(camPos, fadeStart), glm::vec4(hazeColor, fadeEnd),
-                  glm::vec4(fadeNear_, 56.0f, 0.0f, 0.0f)};
+                  glm::vec4(fadeNear_, 56.0f, retroJitter_, 0.0f)};
     uniformBuffers_[frameIndex].upload(&ubo, sizeof(ubo));
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_);

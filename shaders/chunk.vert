@@ -17,6 +17,8 @@ layout(set = 0, binding = 0) uniform CameraUBO {
     vec4 sunDir; // xyz: toward the active light (sun/moon), w: ambient floor
     vec4 sunCol; // rgb: linear light tint, a: sky-light intensity
     vec4 misc;   // x: animation time (seconds) for foliage sway / water waves
+    vec4 heldLight;    // xyz: held-emitter world pos, w: radius (0 = off)
+    vec4 heldLightCol; // rgb: linear colour, a: intensity (0..1)
 } camera;
 
 // Per-draw model transform (chunk world position) + params: params.x is the
@@ -33,6 +35,10 @@ layout(location = 3) out flat uint fragNormal;
 layout(location = 4) out flat float fragAlpha;
 layout(location = 5) out vec3      fragBlockColor;
 layout(location = 6) out vec3      fragTint;
+// Same UV without perspective correction -> PS1 affine texture warp. The frag
+// picks this one when misc.z (affine flag) is on; otherwise it uses fragUV.
+layout(location = 7) noperspective out vec2 fragUVaffine;
+layout(location = 8) out vec3 fragWorldPos; // world-space position for the held point light
 
 void main() {
     // --- Ambient motion (foliage sway + water waves) -------------------------
@@ -58,13 +64,23 @@ void main() {
     }
 
     gl_Position = camera.proj * camera.view * push.model * vec4(p, 1.0);
-    fragUV         = inUV;
+    // --- PS1 vertex jitter -----------------------------------------------------
+    // Snap the projected position to a coarse grid (misc.y = grid resolution, 0 =
+    // off) so the low-precision look makes geometry quiver as it/the camera moves.
+    if (camera.misc.y > 0.0) {
+        vec2 g = vec2(camera.misc.y);
+        gl_Position.xy = floor(gl_Position.xy / gl_Position.w * g) / g * gl_Position.w;
+    }
+    vec2 outUV = inUV;
     // Water scrolls its UV slightly so the surface reads as flowing, not glass.
-    if (push.params.x < 0.999) fragUV += vec2(t * 0.04, t * 0.02);
+    if (push.params.x < 0.999) outUV += vec2(t * 0.04, t * 0.02);
+    fragUV         = outUV;
+    fragUVaffine   = outUV;
     fragLayer      = inLayer;
     fragLight      = inLight;
     fragNormal     = inNormal;
     fragAlpha      = push.params.x;
     fragBlockColor = inBlockColor.rgb;
     fragTint       = inTint.rgb;
+    fragWorldPos   = (push.model * vec4(p, 1.0)).xyz;
 }

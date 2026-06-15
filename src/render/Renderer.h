@@ -82,6 +82,13 @@ public:
     // the most recent value when it draws.
     void setFog(const CompositeRenderer::Fog& fog) { fog_ = fog; }
 
+    // Bind the selectable retro colour palette for the composite pass (sRGB
+    // swatches; empty = off). Forwarded to CompositeRenderer::setPalette. Called
+    // when the player picks a palette in the Retro settings tab.
+    void setRetroPalette(const std::vector<glm::vec3>& srgbColors) {
+        composite_->setPalette(srgbColors);
+    }
+
     // Write the most-recently-rendered frame to a PNG. Call after the render
     // loop (and after waitIdle). Used by the --screenshot flag for verification.
     void saveScreenshot(const std::string& path) const;

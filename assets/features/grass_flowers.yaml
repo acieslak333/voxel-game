@@ -2,7 +2,7 @@
 # grass with the odd flower / fern (per-cell weighted pick). Dense, on temperate
 # grass biomes. Replaces the built-in grass/flower scatter.
 name: grass_flowers
-scatter: {density: 0.7, spacing: 4, surface: true, biomes: [plains, savanna, forest]}
+scatter: {density: 0.7, spacing: 4, surface: true, biomes: [plains, oak_forest, birch_forest, highlands]}
 size: [1, 2, 1]
 anchor: [0, 0, 0]
 ops:

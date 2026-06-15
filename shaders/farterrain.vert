@@ -12,6 +12,7 @@ layout(set = 0, binding = 0) uniform CameraUBO {
     vec4 sunCol;  // rgb: linear light tint, a: sky-light intensity
     vec4 camPos;  // xyz: camera world pos, w: haze fade-start distance
     vec4 haze;    // rgb: horizon haze colour, w: haze fade-end distance
+    vec4 lodFade; // x,y: impostor dissolve; z: PS1 vertex-jitter grid (0 = off)
 } cam;
 
 layout(location = 0) in vec3 inPos;     // world-space position
@@ -28,6 +29,11 @@ layout(location = 4) out vec3      fragWorld;
 
 void main() {
     gl_Position = cam.proj * cam.view * vec4(inPos, 1.0);
+    // PS1 vertex jitter (cam.lodFade.z = grid resolution, 0 = off).
+    if (cam.lodFade.z > 0.0) {
+        vec2 g = vec2(cam.lodFade.z);
+        gl_Position.xy = floor(gl_Position.xy / gl_Position.w * g) / g * gl_Position.w;
+    }
     fragNormal  = inNormal;
     fragUV      = inUV;
     fragLayer   = inLayer;

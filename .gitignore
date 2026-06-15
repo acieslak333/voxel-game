@@ -22,7 +22,7 @@ __pycache__/
 
 # Tools-launcher per-tool capture logs (tools/hub.py)
 /tools/_hub_logs/
-# Map-tool scratch renders (tools/genmap_tool.py, biome_tool.py)
+# Map-tool scratch renders (tools/worldgen_tool.py)
 /tools/_genmap.png
 /tools/_biomemap.png
 /tools/_genvox.bin

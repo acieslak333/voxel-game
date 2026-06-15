@@ -493,6 +493,8 @@ PAGE = r"""<!DOCTYPE html>
       <div><label>on water</label><input id="s-onw" type="checkbox"></div>
       <div><label>near water</label><input id="s-nearw" type="number" value="0"></div>
     </div>
+    <h2>Noise mask <span class="status">optional — clump scatter by a multi-layer noise + steepness curve</span></h2>
+    <div id="smask"></div>
     <label>biomes (none = any)</label>
     <div id="biomes" class="palette" style="max-height:90px"></div>
     <h2>Variants <span class="status">each instance randomly picks one form</span></h2>
@@ -772,6 +774,7 @@ function loadFeature(d){
   $('#s-surf').checked=sc.surface!==false;$('#s-mine').value=sc.min_elevation??-9999;$('#s-maxe').value=sc.max_elevation??9999;
   $('#s-dist').value=sc.distribution==='noise'?'noise':'grid';$('#s-nfreq').value=sc.noise_freq??0.02;$('#s-nthr').value=sc.noise_threshold??0.3;
   $('#s-mins').value=sc.min_slope??0;$('#s-maxs').value=sc.max_slope??100000;$('#s-onw').checked=!!sc.on_water;$('#s-nearw').value=sc.near_water??0;
+  SMASK = sc.mask ? desMask(sc.mask) : null; renderMask();
   const bset=new Set(sc.biomes||[]);document.querySelectorAll('#biomes .pill').forEach(p=>p.classList.toggle('sel',bset.has(p.dataset.n)));
   VARIANTS=[desOps(d.ops),...(d.variants||[]).map(v=>desOps(v.ops))];
   if(!VARIANTS.length)VARIANTS=[[newOp()]];
@@ -798,6 +801,73 @@ function serOp(op){const o={shape:op.shape,at:op.at};
   if(op.fill==="scatter")o.scatter=op.scatter;
   o.place=op.place;return o;}
 function serOps(a){return a.map(serOp);}
+// ---- scatter noise mask (optional) ----------------------------------------
+// Held as a JS object; serialised into scatter.mask. layers + threshold/width +
+// steepness falloff (incl. a draggable bezier curve). Same primitive as the engine
+// NoiseMask / the worldgen-tool biome masks. No layers -> omitted (no mask).
+let SMASK=null;
+const MFALLOFFS=["step","linear","smoothstep","smootherstep","gain","bezier"];
+function newMask(){return {threshold:0,width:0.5,falloff:"smoothstep",gain:0.5,invert:false,
+  layers:[{type:"perlin",frequency:0.02,octaves:3,weight:1}], bezier:[[0,0],[1,1]]};}
+function serMask(m){const o={threshold:m.threshold,width:m.width,falloff:m.falloff};
+  if(m.gain!==0.5)o.gain=m.gain; if(m.invert)o.invert=true;
+  o.layers=m.layers.map(l=>({type:l.type,frequency:l.frequency,octaves:l.octaves,weight:l.weight}));
+  if(m.falloff==='bezier')o.bezier=m.bezier.map(p=>[p[0],p[1]]); return o;}
+function desMask(m){return {threshold:m.threshold??0,width:m.width??0.5,falloff:m.falloff||'smoothstep',
+  gain:m.gain??0.5,invert:!!m.invert,
+  layers:(m.layers||[]).map(l=>({type:l.type||'perlin',frequency:l.frequency??0.02,octaves:l.octaves??3,weight:l.weight??1})),
+  bezier:(m.bezier&&m.bezier.length>=2)?m.bezier.map(p=>[+p[0],+p[1]]):[[0,0],[1,1]]};}
+function renderMask(){
+  const c=$('#smask'); if(!c)return;
+  if(!SMASK){ c.innerHTML='<button class="btn ghost" onclick="SMASK=newMask();renderMask();">+ enable noise mask</button>'; return; }
+  const m=SMASK;
+  const fo=MFALLOFFS.map(o=>`<option value="${o}"${o===m.falloff?' selected':''}>${o}</option>`).join('');
+  const lay=m.layers.map((l,j)=>`<div class="row">`
+    +`<div><label>type</label><select onchange="SMASK.layers[${j}].type=this.value">`
+      +['perlin','ridged','billow','worley'].map(t=>`<option${t===l.type?' selected':''}>${t}</option>`).join('')+`</select></div>`
+    +`<div><label>freq</label><input type="number" step="any" value="${l.frequency}" oninput="SMASK.layers[${j}].frequency=+this.value"></div>`
+    +`<div><label>oct</label><input type="number" step="1" value="${l.octaves}" oninput="SMASK.layers[${j}].octaves=+this.value"></div>`
+    +`<div><label>weight</label><input type="number" step="0.05" value="${l.weight}" oninput="SMASK.layers[${j}].weight=+this.value"></div>`
+    +`<button class="btn ghost" onclick="SMASK.layers.splice(${j},1);renderMask();">✖</button></div>`).join('');
+  c.innerHTML=
+    `<div class="row"><div><label>threshold</label><input type="number" step="0.02" value="${m.threshold}" oninput="SMASK.threshold=+this.value"></div>`
+    +`<div><label>width (steepness)</label><input type="number" step="0.02" value="${m.width}" oninput="SMASK.width=+this.value"></div></div>`
+    +`<div class="row"><div><label>falloff</label><select onchange="SMASK.falloff=this.value;renderMask()">${fo}</select></div>`
+    +`<div><label>gain</label><input type="number" step="0.02" value="${m.gain}" oninput="SMASK.gain=+this.value"></div>`
+    +`<div><label>invert</label><input type="checkbox" ${m.invert?'checked':''} onchange="SMASK.invert=this.checked"></div></div>`
+    +`<label>noise layers (none = mask off)</label>`+lay
+    +`<button class="btn ghost" onclick="SMASK.layers.push({type:'perlin',frequency:0.02,octaves:3,weight:1});renderMask();">+ layer</button>`
+    +(m.falloff==='bezier'?`<div style="margin-top:6px"><svg id="mcurve" viewBox="0 0 240 130" preserveAspectRatio="none" style="width:100%;height:150px;background:#15131a;border-radius:6px;cursor:crosshair;touch-action:none"><rect x="26" y="8" width="206" height="106" fill="none" stroke="#3a3340"></rect><polyline fill="none" stroke="#d6b3f0" stroke-width="2" vector-effect="non-scaling-stroke"></polyline><g></g></svg><div><button class="btn ghost" onclick="maskCurveAdd()">+ point</button> <span class="status">drag a point · right-click to delete</span></div></div>`:'')
+    +`<button class="btn ghost" style="margin-top:6px" onclick="SMASK=null;renderMask();">remove mask</button>`;
+  if(m.falloff==='bezier')initMaskCurve();
+}
+function maskCurveAdd(){ const ps=SMASK.bezier.slice().sort((a,b)=>a[0]-b[0]);
+  let x=0.5,y=0.5; if(ps.length>=2){let gi=0,gw=-1;for(let k=0;k<ps.length-1;k++){const w=ps[k+1][0]-ps[k][0];if(w>gw){gw=w;gi=k;}}x=(ps[gi][0]+ps[gi+1][0])/2;y=(ps[gi][1]+ps[gi+1][1])/2;}
+  SMASK.bezier.push([Math.round(x*100)/100,Math.round(y*100)/100]); initMaskCurve(); }
+function initMaskCurve(){
+  const svg=$('#mcurve'); if(!svg)return;
+  const NS='http://www.w3.org/2000/svg', W=240,H=130,L=26,Rt=8,T=8,B=16,pw=W-L-Rt,ph=H-T-B;
+  const tx=x=>L+x*pw, ty=y=>T+(1-y)*ph, ix=p=>(p-L)/pw, iy=p=>1-(p-T)/ph;
+  const poly=svg.querySelector('polyline'), pg=svg.querySelector('g');
+  function cr(p0,p1,p2,p3,t){const t2=t*t,t3=t2*t;return 0.5*((2*p1)+(-p0+p2)*t+(2*p0-5*p1+4*p2-p3)*t2+(-p0+3*p1-3*p2+p3)*t3);}
+  function pts(){return SMASK.bezier.map((p,i)=>({i,x:p[0],y:p[1]})).sort((a,b)=>a.x-b.x);}
+  function draw(){const ps=pts();while(pg.firstChild)pg.removeChild(pg.firstChild);let s='';
+    for(let k=0;k<ps.length-1;k++){const p0=ps[k>0?k-1:k],p1=ps[k],p2=ps[k+1],p3=ps[k+2<ps.length?k+2:k+1];
+      for(let st=0;st<=8;st++){const t=st/8;const yy=Math.min(1,Math.max(0,cr(p0.y,p1.y,p2.y,p3.y,t)));const xx=p1.x+(p2.x-p1.x)*t;s+=tx(xx)+','+ty(yy)+' ';}}
+    poly.setAttribute('points',s.trim());
+    ps.forEach(p=>{const c=document.createElementNS(NS,'circle');c.setAttribute('cx',tx(p.x));c.setAttribute('cy',ty(p.y));c.setAttribute('r',5);c.setAttribute('fill','#ffce6b');c.setAttribute('stroke','#1b1a1a');c.dataset.i=p.i;c.style.cursor='grab';pg.appendChild(c);});}
+  let active=null;
+  const at=e=>{const r=svg.getBoundingClientRect();return [ix((e.clientX-r.left)/r.width*W),iy((e.clientY-r.top)/r.height*H)];};
+  svg.onmousedown=e=>{if(e.target.tagName==='circle'){active=+e.target.dataset.i;e.preventDefault();}};
+  svg.oncontextmenu=e=>{if(e.target.tagName==='circle'){e.preventDefault();if(SMASK.bezier.length>2){SMASK.bezier.splice(+e.target.dataset.i,1);initMaskCurve();}}};
+  window.addEventListener('mousemove',e=>{if(active===null||!document.body.contains(svg))return;let p=at(e);
+    const ps=pts(),pos=ps.findIndex(q=>q.i===active);
+    const lo=pos>0?ps[pos-1].x+0.01:0,hi=pos<ps.length-1?ps[pos+1].x-0.01:1;
+    const x=Math.min(hi,Math.max(lo,p[0])),y=Math.min(1,Math.max(0,p[1]));
+    SMASK.bezier[active]=[Math.round(x*100)/100,Math.round(y*100)/100];draw();});
+  window.addEventListener('mouseup',()=>{active=null;});
+  draw();
+}
 function gather(){
   const biomes=[...document.querySelectorAll('#biomes .pill.sel')].map(p=>p.dataset.n);
   const sc={density:+$('#s-den').value,spacing:+$('#s-spc').value,surface:$('#s-surf').checked,
@@ -808,6 +878,7 @@ function gather(){
   if(+$('#s-maxs').value<100000)sc.max_slope=+$('#s-maxs').value;
   if($('#s-onw').checked)sc.on_water=true;
   if(+$('#s-nearw').value>0)sc.near_water=+$('#s-nearw').value;
+  if(SMASK && SMASK.layers.length)sc.mask=serMask(SMASK);
   return {name:$('#f-name').value,scatter:sc,
     size:[+$('#f-sx').value,+$('#f-sy').value,+$('#f-sz').value],
     anchor:[Math.floor(+$('#f-sx').value/2),0,Math.floor(+$('#f-sz').value/2)],
@@ -942,7 +1013,7 @@ function open3D(op){
   // Open showing a real feature (the first existing one) so it's immediately
   // inspectable, not a blank canvas. Falls back to the default new feature.
   if(fl.length){$('#load').value=fl[0];loadFeature(await (await fetch('/api/feature/'+fl[0])).json());}
-  else {renderVariantBar();rebuild();}
+  else {renderVariantBar();rebuild();renderMask();}
 })();
 </script>
 </body></html>"""

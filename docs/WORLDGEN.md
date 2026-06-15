@@ -1,114 +1,139 @@
-# World Generation
+# World generation — the simple concentric island
 
-The terrain/biome generator is **data-driven** and split into a *shape* stage and
-a *climate* stage, in the spirit of Minecraft 1.18. All of it is a pure function of
-world coordinates, so it is deterministic and chunk-streaming-safe (the
-`--selftest` golden hash changes whenever output changes — rebaseline on purpose).
+> **2026-06-14: the previous zone-based / metroidvania spec was SCRAPPED.** The world
+> is now a single, simple island with concentric biome rings. The old design (region
+> partition → zone graph → lock-and-key mission graph → connectors/dungeons, plus
+> baked hydrology / droplet erosion / archipelago) is gone from the shipped world.
+> The C++ that implemented it still exists but is **inert opt-in** (no shipped config
+> authors it); see *Legacy code* at the bottom. The historical spec is preserved in
+> git history if it is ever wanted again.
 
-This file is the contract a future **generation-tuning tool** edits: everything
-lives in `assets/biomes.yaml`, read by `vg::TerrainGenerator`
-(`src/world/TerrainGenerator.{h,cpp}`). `World` just calls into it.
+## The design
 
-## Pipeline
+One island at the world origin. From the coast inward the land rises smoothly through
+four bands, chosen by **elevation**, so they read as concentric rings:
 
 ```
-                          assets/biomes.yaml (all knobs)
-                                     │
-   continentalness ┐                 │ splines
-   erosion         ├─ TerrainShaper ─┴─► surface HEIGHT  ── oceans, plains, mountains
-   peaks (ridged)  ┘                          │
-                                              ▼
-   temperature ┐                         ColumnInfo ──► World::generateColumn
-   humidity    ┴─ selectBiome ──► biome ─► surface block + filler + snow + tree/bush density
+        ocean  →  beach (sand)  →  forest  →  highlands  →  ridged peaks (stone)
+                                   oak / birch            (gray, snow-capped tips)
 ```
 
-### Shape (height) — biome-independent, so borders never cliff
-Three noises map through **splines** to a height in blocks relative to sea level:
-- **continentalness** (largest scale) → base elevation via `continental_spline`
-  (deep ocean → shelf → coast → inland highlands).
-- **erosion** → a *mountain amplitude* via `erosion_spline` (low erosion = tall
-  ranges, high erosion = flat).
-- **peaks** → a ridged value in `[0,1]` that scales the amplitude, so mountains
-  read as ridgelines, not blobs.
+The **forest ring** is split into oak / birch patches by temperature (cool → birch,
+the rest → oak). That is the whole design — no zones, rivers,
+hydrology, baked erosion, cave layers, archipelago or cliffs-as-structures.
 
-`height = sea_level + continental_spline(c) + erosion_spline(e) * ridged(peaks)`,
-clamped to the world. Any air at/below the column's **water level** floods with
-water, and submerged surfaces become an ocean/lake floor.
+Everything is a **pure function of world coordinates** (deterministic, streaming-safe).
 
-**Rivers** carve a winding channel toward sea level where a river noise is near
-zero, but only in lowlands (`rivers.max_elevation`), so mountains keep their relief
-instead of growing canals. **Perched lakes** come from a coarse candidate grid
-(`lakes:`): each carves a bowl and raises that column's water level to its own
-(above-sea) surface, so lakes sit inland on high ground. Both feed a per-column
-`waterLevel` (= sea level, or the lake's level) that `World` fills to.
+## How the shape is built (`TerrainGenerator`, `assets/biomes.yaml`)
 
-### Climate (surface) — picks a biome for the surface only
-**temperature** + **humidity** noises (temperature also cools with altitude) select
-a biome from the `biomes:` table — the *first* biome whose `temp`, `humidity` and
-`elevation` (blocks vs sea) ranges all contain the column wins, so author specific
-biomes (beach, mountain, desert…) before the temperate catch-all (`plains`, last).
-A biome sets the surface block, the filler under it, whether it's snowy, and the
-per-column tree/bush probabilities. Peaks above `snow_line` get a snow cap
-regardless of biome.
+`island.enabled: 1` selects the single-island path in `TerrainGenerator::shapeHeight`.
+For a column at warped distance `d` from `center`, with the smoothstep land mask `m`
+(1 in the inner core, 0 past `radius`):
 
-## Tuning (`assets/biomes.yaml`)
-- `sea_level`, `snow_line` (blocks above sea).
-- Per-noise `frequency` / `octaves` for continentalness/erosion/peaks/temperature/humidity.
-- `continental_spline` / `erosion_spline`: lists of `[x, y]` control points.
-- `biomes:` each with `temp`, `humidity`, `elevation` ranges, `top`/`filler` block
-  names, `snow`, and `trees`/`bushes` densities.
+```
+landRel = land_base  +  peak_height·m  +  continentalness·interior_var  +  mountains·m
+rel     = ocean_floor + (landRel − ocean_floor)·m        # mixes to deep ocean outside
+height  = sea_level + round(rel)                          # clamped to the world
+```
 
-Missing keys fall back to sensible baked-in defaults (the game runs without the file).
+- **`peak_height·m`** is the key term: a smooth radial rise toward the core. This is
+  what turns the elevation bands into concentric rings (without it the island is flat
+  forest, because the legacy `mountains` term only lifts land where the erosion noise
+  happens to be low). Added 2026-06-14 as `island.peak_height` (default 0 = legacy).
+- **`mountains = erosion_spline(erosion)·ridged_peaks`** adds the sharp ridged crests
+  on the high core → the *ridged* peaks. `peaks:` uses ridged noise.
+- **`coast_warp`** gives the irregular coastline; **`terrain3d.coast_flatten`** damps
+  the 3D swell near sea level so beaches are smooth sandy slopes, not choppy cliffs.
+- `terrain3d` adds a modest 3D swell (overhangs are mild); floating islands are OFF.
 
-### Composable noise stacks (`vg::NoiseStack`)
-Any of the six noise fields (continentalness / erosion / peaks / temperature /
-humidity / rivers) can replace its single fbm with a **weighted blend of layers**
-by adding a `layers:` list under it:
+### Biome selection (`columnInfo`)
+Biomes are matched by `(temperature, humidity, elevation)`, first match wins, tested
+top-to-bottom. Ordering: the low band (beach) and high band (peaks) first, then the
+forest-ring climate splits with **oak as the catch-all**. Elevation is what makes the
+rings; temperature only splits the forest species.
+
+## Tuning knobs (all in `assets/biomes.yaml`)
+
+| knob | effect |
+|------|--------|
+| `island.radius` | island size (currently 512 ≈ 64 chunks) |
+| `island.inner` | size of the full-height core; smaller → longer slope = wider rings |
+| `island.peak_height` | how high the core rises (the ring gradient). **See the cap below.** |
+| `island.land_base` / `interior_var` | coastal land height / gentle interior variation |
+| `island.coast_warp` | coastline irregularity |
+| `erosion_spline` | the ridged crest height on the core |
+| `terrain3d.coast_flatten` | beach smoothness near sea level |
+| biome `elevation` bands | where each ring starts/ends (must track `peak_height`) |
+| `temperature` / `humidity` frequency | forest oak/birch patch size |
+
+> ⚠️ **`peak_height` is capped (~26) by a latent lighting bug.** A large, uniformly-tall
+> central dome trips an incremental-relight box-too-small bug in `World.cpp` (the same
+> failure mode that disables floating islands — the `streaming recenter relight …` and
+> `placing a sky-blocker …` logictests fail). Until that relight box is fixed, keep the
+> peaks moderate. Floating islands stay disabled for the same reason
+> (`terrain3d.float_threshold: 0.97`).
+
+## Underground (`assets/world.yaml`)
+Standard caves + ores, unchanged by the simplification: `caves`/`cavern_*` (noise
+caves), `ores` (vein densities), `pools` (deep lava / shallow cave water). The **lava
+ravines were removed** (`ravines.width: 0`).
+
+## Build / test
+```
+& "C:/Program Files/Microsoft Visual Studio/2022/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/cmake.exe" --build build --config Release
+build/bin/Release/voxelgame.exe --logictest                 # must stay green
+build/bin/Release/voxelgame.exe --selftest                  # in-process h1==h2 only
+build/bin/Release/voxelgame.exe --genmap --mode top --mapsize 768 --mapstep 2 --out out.png
+```
+`--genmap --mode top` colours by surface block (sand=tan, grass=green, stone=gray,
+snow=white) — the quickest way to check the concentric rings.
+
+## Removed (2026-06-14 cleanup)
+The scrapped zone-design modules were **deleted**: `LayoutMap`, `ZoneGraph`,
+`MissionGraph`, `Connector`, `ErosionMap`, `CaveAutomata`, `HydroMap`, `DungeonLayout`
+(+ their `layout:` / `erosion_bake:` / `hydro_bake:` / `island.archipelago` / `layout.caves`
+/ `connectors` config paths and logictests). Also removed the unused **blocks** — cactus,
+maple, willow, lily pad, vine, and every ore except iron — and the tree species `Maple`/
+`Willow` and flora family `Desert`. Kept as general utilities: `Sdf.h`, `SurfaceNets`,
+`Landforms.h`, `Noise`/`NoiseStack`.
+
+## Per-biome shape (Option C — 2026-06-14)
+
+Biomes can modulate the global 3D terrain instead of only painting the surface. The
+design (see the tool discussion) is **Option C: per-biome override of the global
+`terrain3d`, blended across borders** — the world structure stays global; biomes
+locally tune it.
+
+**Schema.** A biome may carry a `terrain3d:` block that *merges over* the global one
+(omitted keys inherit). A global `terrain3d.blend` (blocks) sets the border-blend width.
 
 ```yaml
-continentalness:
-  layers:
-    - {type: perlin, frequency: 0.0034, octaves: 4, weight: 1.0}
-    - {type: ridged, frequency: 0.012,  octaves: 3, weight: 0.5, offset: [1000, -2000]}
-    - {type: billow, frequency: 0.006,  octaves: 2, weight: 0.3, offset: [-3000, 500]}
+terrain3d: { amplitude: 62, blend: 16, density: { layers: [...] } }
+biomes:
+- name: plains
+  terrain3d: { amplitude: 6 }     # flat
+- name: badlands
+  terrain3d: { amplitude: 48 }    # jagged
 ```
 
-Each layer is an fbm of one **shape** — `perlin` (rolling field), `ridged` (sharp
-mountain ridgelines along the zero-crossings) or `billow` (rounded blobs) — combined
-by `weight` (negative subtracts) and renormalised to ~[-1, 1]. `offset: [x, z]` shifts
-a layer in world blocks so layers decorrelate. **Opt-in:** with no `layers:` block the
-legacy single-noise path runs and worlds are byte-identical (the `--selftest` golden is
-unchanged). Preview a field with `voxelgame --genmap --mode noise --layer cont`.
+**The invariant that makes it safe.** Biome *selection* reads the BASE heightmap
+(`shapeHeight`/`columnInfo`), which per-biome 3D modulation does NOT move (it perturbs
+*solidity*, not the selection height). So there is no biome→height→biome feedback loop.
 
-## Inspecting generation (`--genmap`)
-Headless, no window/GPU, fixed seed (1337) so runs are comparable:
-- `--genmap` (or `--mode top`) — top-down surface map (block colour + hillshade).
-- `--genmap --mode noise --layer <cont|ero|peak|temp|hum|river|relief>` — one raw
-  noise layer as a diverging blue/white/red field (relief draws the sea-level coast).
-- `--genmap --mode cross` — vertical cross-section through Z=0 (terrain profile,
-  water column, soil/stone/snow layers).
+**Blending.** `densityAmpAt(x,z)` = the biome's amplitude (its override, else global)
+averaged over a 3×3 box at ±`blend` blocks → borders ramp smoothly, no cliffs. It is a
+pure function of `(seed,x,z)` (samples the same fields at offset points), so streaming
+stays seam-safe. Cached per column (mainSolid hits it for every y).
 
-Size with `--mapsize N` (px), `--mapstep B` (blocks/px), `--out PATH`.
+**Byte-identical default.** If no biome sets a `terrain3d` override, `densityAmpAt`
+returns the global `densityAmp_` and `maxAmp_ == densityAmp_`, so generation is
+unchanged (the shipped world's `--selftest` hash does not move).
 
-## World height
-`assets/world.yaml` `height_chunks` sets the vertical extent (× 16 blocks). It's
-currently **8 (128 tall)** with sea level 64 in the middle. For taller, more
-dramatic mountains set `height_chunks: 16` (256) and scale `sea_level` (~128) and
-the spline y-values / `snow_line` up with it — note it costs ~2× the vertical
-memory and light/generation work, so consider lowering `view_radius`.
+**Vertical budget, per biome.** `sea_level + base + biome.amplitude + crest` must stay
+under `height_chunks×16` or that biome's peaks clamp. `maxAmp_` (max over global +
+overrides) bounds the surface scans so a taller biome isn't clipped.
 
-Caves (in `World::caveAt`, tuned in `world.yaml` `caves:`) are now two kinds:
-winding **spaghetti tunnels** plus deep **large caverns**, and they carve the whole
-solid column with a surface taper so the strongest tunnels **breach as cave mouths**
-on hillsides (a submerged surface is never breached, to avoid air pockets under water).
-
-## Still TODO (next passes)
-- **Ravines** — long narrow vertical canyons (optional cave-system flavour).
-- **The tuning tool** — a headless `--genmap` top-down PNG export is the cheap
-  backend; an in-game live panel (like the sky tuner) on top later.
-- **256-tall bump** — `world.yaml height_chunks: 16` + scale `biomes.yaml`.
-
-## Done
-- Shape + climate biomes (oceans, beaches, plains, mountains, snow).
-- Rivers (lowland channels) and perched lakes (inland, above sea level).
-- Cave variety: spaghetti tunnels + deep caverns + surface cave-mouths.
+**Phase 1 (shipped):** per-biome `terrain3d.amplitude`. **Phase 2 (deferred):** per-biome
+`density` stack (frequency/character — needs 2-stack crossfade in border bands) and
+per-biome `float_*` (blocked on the latent incremental-relight box bug — floats are
+globally off for the same reason).

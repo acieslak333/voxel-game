@@ -20,10 +20,14 @@ enabled: true
 # *live* band is now driven per day by the weather state (clear/fair/broken/
 # overcast/stormy/foggy each set their own height range in CloudSystem); these
 # values seed frame 0 before the state machine takes over.
+# layerBottom/layerTop bracket the slab: layerTop MUST be > layerBottom, and their
+# gap is the cloud-height range (↑ gap = taller cloudscapes, slower march).
 layerBottom: 140
 layerTop: 330
-# Clouds further than this fade into the sky colour (aerial perspective); the
-# march stops entirely at maxDistance.
+# Clouds further than this fade into the sky colour (aerial perspective); the march
+# stops entirely at maxDistance. RELATIVE: aerialDistance must be < maxDistance (the
+# fade has to finish before the cutoff or clouds pop out). ↑ maxDistance = clouds
+# visible further (more march steps/cost); ↑ aerialDistance = they stay crisp further.
 aerialDistance: 1000
 maxDistance: 9000
 

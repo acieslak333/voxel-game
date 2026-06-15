@@ -2,7 +2,7 @@
 # op (later) overrides the centre column, leaving the trunk visible through it. Both
 # air_only so they never carve the terrain. Biome-gated to forests.
 name: oak_tree
-scatter: {density: 0.8, spacing: 4, surface: true, biomes: [forest]}
+scatter: {density: 0.25, spacing: 4, surface: true, biomes: [plains, oak_forest, highlands]}
 size: [7, 9, 7]
 anchor: [3, 0, 3]
 ops:

@@ -1,5 +1,8 @@
 #include "world/World.h"
 
+#include "world/FeatureScatter.h"
+#include "world/Hash.h"
+
 #include <algorithm>
 #include <cmath>
 #include <execution>
@@ -18,17 +21,8 @@
 namespace vg {
 
 namespace {
-// Floor division / modulo — correct for negative operands. Truncating `/` and
-// `%` round toward zero, which mis-addresses chunks/blocks west or south of the
-// origin once the streaming window can sit at negative world coords.
-constexpr int floordiv(int a, int b) {
-    const int q = a / b, r = a % b;
-    return (r != 0 && ((r < 0) != (b < 0))) ? q - 1 : q;
-}
-constexpr int floormod(int a, int b) {
-    const int r = a % b;
-    return (r != 0 && ((r < 0) != (b < 0))) ? r + b : r;
-}
+// floordiv/floormod/hash01 now live in world/Hash.h (the canonical worldgen hashes,
+// shared so copies can't drift); used here unqualified via the vg namespace.
 
 // Block-light hue packing: a linear RGB colour (0..1) <-> RGBA8 with R in the low
 // byte, matching the GPU vertex format (render/Vertex.h packColorRGBA8). The flood
@@ -51,7 +45,7 @@ inline glm::vec3 unpackLightColor(uint32_t p) {
 // seed, so they are never written). Format: magic + version + edge length, then
 // id(u16)+metadata(u8) per voxel in the chunk's storage order. See docs/STREAMING.md.
 constexpr uint32_t kChunkMagic   = 0x4B4E4843u; // 'CHNK'
-constexpr uint32_t kChunkVersion = 1u;
+constexpr uint32_t kChunkVersion = 13u; // bump: removed rivers, lakes, and the cave/cavern/ravine system → default world changes
 
 std::string chunkPath(const std::string& dir, int cx, int cy, int cz) {
     return dir + "/c." + std::to_string(cx) + '.' + std::to_string(cy) + '.' +
@@ -114,10 +108,6 @@ World::World(const WorldConfig& config, const std::string& blocksFile)
     : config_(config),
       counts_(config.chunksX, config.chunksY, config.chunksZ),
       registry_(blocksFile),
-      heightNoise_(config.seed),
-      // Offset the material noise's seed so it is independent of the height noise.
-      materialNoise_(config.seed * 2654435761u + 1u),
-      caveNoise_(config.seed * 40503u + 0x9e37u),
       // Data-driven shape + biome pipeline. Reads assets/biomes.yaml from the same
       // asset dir as blocks.yaml; worldHeight is the vertical block extent.
       gen_(config.seed, registry_,
@@ -127,7 +117,7 @@ World::World(const WorldConfig& config, const std::string& blocksFile)
                   registry_),
       featureNoise_(config.seed * 2246822519u + 0xFEA7u),
       features_((std::filesystem::path(blocksFile).parent_path() / "features").string(),
-                registry_, gen_.biomeNames()) {
+                registry_, gen_.biomeNames(), config.seed) {
     // Resolve the block types the generator places (throws if a name is absent
     // from the block-definition file).
     grassId_  = registry_.idByName("grass");
@@ -146,39 +136,15 @@ World::World(const WorldConfig& config, const std::string& blocksFile)
     flowerRedId_    = registry_.idByName("flower_red");
     flowerYellowId_ = registry_.idByName("flower_yellow");
     redMushroomId_  = registry_.idByName("red_mushroom");
-    cactusId_       = registry_.idByName("cactus");
-    vineId_         = registry_.idByName("vine");
-    lilypadId_      = registry_.idByName("lilypad");
     birchTrunkId_   = registry_.idByName("birch_trunk");
     birchLeavesId_  = registry_.idByName("birch_leaves");
     pineTrunkId_    = registry_.idByName("pine_trunk");
     pineLeavesId_   = registry_.idByName("pine_leaves");
-    mapleTrunkId_   = registry_.idByName("maple_trunk");
-    mapleLeavesId_  = registry_.idByName("maple_leaves");
-    willowTrunkId_  = registry_.idByName("willow_trunk");
-    willowLeavesId_ = registry_.idByName("willow_leaves");
     waterId_  = registry_.idByName("water");
     lavaId_   = registry_.idByName("lava");
-    coalId_    = registry_.idByName("coal_ore");
     ironId_    = registry_.idByName("iron_ore");
-    goldId_    = registry_.idByName("gold_ore");
-    rubyId_    = registry_.idByName("ruby_ore");
-    emeraldId_ = registry_.idByName("emerald_ore");
-    mythrilId_ = registry_.idByName("mythril_ore");
 
     buildLightColorPalette();
-
-    // Sanity-check the configured vertical extent: columnHeight() clamps to the
-    // world's top, so any terrain taller than chunks.y*kSize gets sheared flat.
-    // Warn (don't silently rewrite the user's world.yaml) so plateaued hilltops
-    // are not a mystery.
-    const int worldTop = counts_.y * Chunk::kSize;
-    if (config_.baseHeight + config_.heightAmplitude >= worldTop) {
-        std::cerr << "[world] warning: base_height + height_amplitude ("
-                  << (config_.baseHeight + config_.heightAmplitude)
-                  << ") >= world height (" << worldTop << " = chunks.y * " << Chunk::kSize
-                  << "); hilltops will be clamped flat. Raise chunks.y in assets/world.yaml.\n";
-    }
 
     chunks_.resize(static_cast<size_t>(counts_.x) * counts_.y * counts_.z);
     chunkDirty_.assign(chunks_.size(), 0);
@@ -236,129 +202,35 @@ const Chunk& World::chunk(int cx, int cy, int cz) const {
     return chunks_[chunkIndex(cx, cy, cz)];
 }
 
-namespace {
-// Deterministic per-column pseudo-random in [0,1) from integer coords + a salt
-// (so the same world column always grows the same feature). A small integer
-// hash — fmix-style avalanche — keeps scatter cheap and seed-stable.
-float hash01(int x, int z, uint32_t salt) {
-    uint32_t h = static_cast<uint32_t>(x) * 0x8da6b343u ^
-                 static_cast<uint32_t>(z) * 0xd8163841u ^ (salt * 0x9e3779b9u);
-    h ^= h >> 16; h *= 0x7feb352du;
-    h ^= h >> 15; h *= 0x846ca68bu;
-    h ^= h >> 16;
-    return static_cast<float>(h & 0x00FFFFFFu) / static_cast<float>(0x01000000);
-}
-
-// 3D variant — deterministic [0,1) from integer (x,y,z) + salt. Used to scatter
-// ore veins: the caller hashes a coarsened cell so a small block cluster shares
-// one roll (a little vein) rather than every voxel rolling independently.
-float hash01(int x, int y, int z, uint32_t salt) {
-    uint32_t h = static_cast<uint32_t>(x) * 0x8da6b343u ^
-                 static_cast<uint32_t>(y) * 0xcb1ab31fu ^
-                 static_cast<uint32_t>(z) * 0xd8163841u ^ (salt * 0x9e3779b9u);
-    h ^= h >> 16; h *= 0x7feb352du;
-    h ^= h >> 15; h *= 0x846ca68bu;
-    h ^= h >> 16;
-    return static_cast<float>(h & 0x00FFFFFFu) / static_cast<float>(0x01000000);
-}
-} // namespace
-
-float World::islandFalloff(int wx, int wz) const {
-    // Streaming makes the world endless: there is no single centre to ring with
-    // sea, so the radial island mask is disabled and terrain is full-height
-    // everywhere (roadmap: no island shaping). Only the fixed-grid (streaming
-    // off) world keeps the island.
-    if (config_.streaming) {
-        return 1.0f;
-    }
-    const glm::ivec3 s = sizeInBlocks();
-    const float cxw = s.x * 0.5f, czw = s.z * 0.5f;
-    const float rx = std::max(1.0f, cxw), rz = std::max(1.0f, czw);
-    const float dx = (wx - cxw) / rx, dz = (wz - czw) / rz;
-    float d = std::sqrt(dx * dx + dz * dz); // 0 at centre, ~1 at the edge mid-points
-    // Warp the distance so the shoreline grows bays and capes, not a clean circle.
-    d += materialNoise_.fbm(wx * 0.011f, wz * 0.011f, 2) * config_.coastWarp;
-    // Land (1) in the middle, fading to sea (0) across the falloff band.
-    const float m =
-        1.0f - glm::smoothstep(config_.islandFalloffStart, config_.islandFalloffEnd, d);
-    return std::clamp(m, 0.0f, 1.0f);
-}
+// (hash01 2D/3D moved to world/Hash.h — shared canonical worldgen hashes.)
 
 int World::columnHeight(int wx, int wz) const {
-    // The surface height now comes from the data-driven shape pipeline (continental
-    // /erosion/peaks splines -> oceans, plains, mountains). See TerrainGenerator and
-    // assets/biomes.yaml. The old single-noise + island-mask height was replaced by
-    // this; heightNoise_/materialNoise_/islandFalloff remain for other callers.
+    // The surface height comes from the data-driven shape pipeline (continental/
+    // erosion/peaks splines -> oceans, plains, mountains). See TerrainGenerator and
+    // assets/biomes.yaml.
     return gen_.height(wx, wz);
-}
-
-bool World::caveAt(int wx, int wy, int wz, float surfaceTaper) const {
-    if (wy <= config_.caveFloor) {
-        return false; // keep a solid floor
-    }
-    const float f = config_.caveFrequency;
-    // Spaghetti tunnels = the intersection of two independent 3D fields' zero-
-    // crossings: where BOTH are near zero the carve traces a winding line, not a
-    // fat blob, so caves snake. `surfaceTaper` shrinks the channel near the surface
-    // so only the strongest tunnels breach as cave mouths (caller tapers by depth).
-    const float a = caveNoise_.fbm(wx * f, wy * f, wz * f, 2);
-    const float b = caveNoise_.fbm((wx + 137) * f, (wy - 91) * f, (wz + 53) * f, 2);
-    // Worldgen v2: caves shrunk (~half-width tunnels) so the dramatic 3D surface
-    // isn't undercut into swiss-cheese — and to afford the heavier density gen.
-    const float t = config_.caveThreshold * surfaceTaper * 0.55f;
-    if (a * a + b * b < t * t) {
-        return true;
-    }
-    // Large caverns: a low-frequency 3D blob, deep only — big open rooms that the
-    // tunnels connect into. Tapered the same way so a deep cavern can also surface.
-    if (wy < config_.cavernMaxY) {
-        const float cf = f * 0.45f;
-        const float c = caveNoise_.fbm((wx - 311) * cf, (wy + 177) * cf, (wz + 97) * cf, 2);
-        if (c > config_.cavernThreshold + (1.0f - surfaceTaper) * 0.5f) {
-            return true;
-        }
-    }
-    // Ravines: a long, narrow, deep slot canyon. Where a low-frequency 2D winding
-    // noise sits inside a thin band, carve the whole tall span — so the canyon is a
-    // continuous vertical slit (not blobs) that can breach a hillside. Independent
-    // of surfaceTaper so it DOES open at the top (its narrowness keeps it rare).
-    if (config_.ravineWidth > 0.0f && wy > config_.ravineFloor && wy < config_.ravineMaxY) {
-        const float rf = config_.ravineFrequency;
-        const float r = caveNoise_.fbm((wx + 911) * rf, (wz - 733) * rf, 3);
-        if (std::abs(r) < config_.ravineWidth) {
-            return true;
-        }
-    }
-    return false;
 }
 
 uint16_t World::oreAt(int wx, int wy, int wz) const {
     // One roll shared across a 2x2x2 block cell, so an ore "hit" fills a little
-    // cluster instead of a single lonely voxel.
+    // cluster instead of a single lonely voxel. Iron is the only ore.
     const int cx = floordiv(wx, 2), cy = floordiv(wy, 2), cz = floordiv(wz, 2);
-    const uint32_t seed = config_.seed;
-    struct OreDef { int maxY; float density; uint16_t id; uint32_t salt; };
-    const OreDef ores[] = {
-        {config_.mythrilMaxY, config_.mythrilDensity, mythrilId_, 0x4d17u},
-        {config_.emeraldMaxY, config_.emeraldDensity, emeraldId_, 0x3e11u},
-        {config_.rubyMaxY,    config_.rubyDensity,    rubyId_,    0x2b07u},
-        {config_.goldMaxY,    config_.goldDensity,    goldId_,    0x1a93u},
-        {config_.ironMaxY,    config_.ironDensity,    ironId_,    0x0c55u},
-        {config_.coalMaxY,    config_.coalDensity,    coalId_,    0x0911u},
-    };
-    for (const OreDef& o : ores) { // rarest-first: a deep block becomes the rarer ore
-        if (wy <= o.maxY && hash01(cx, cy, cz, seed ^ o.salt) < o.density) {
-            return o.id;
-        }
+    // Optional ore mask concentrates iron into authored regions/veins: its [0,1]
+    // weight scales the density. Empty mask → weight 1 → unchanged (byte-identical).
+    float density = config_.ironDensity;
+    if (!config_.oreMask.empty())
+        density *= config_.oreMask.weight(static_cast<float>(wx), static_cast<float>(wz));
+    if (wy <= config_.ironMaxY &&
+        hash01(cx, cy, cz, config_.seed ^ 0x0c55u) < density) {
+        return ironId_;
     }
     return 0; // stays stone
 }
 
 bool World::isVegTintable(uint16_t id) const {
     return id == grassId_ || id == leavesId_ || id == bushId_ ||
-           id == tallGrassId_ || id == fernId_ || id == vineId_ ||
-           id == birchLeavesId_ || id == pineLeavesId_ ||
-           id == mapleLeavesId_ || id == willowLeavesId_;
+           id == tallGrassId_ || id == fernId_ ||
+           id == birchLeavesId_ || id == pineLeavesId_;
 }
 
 glm::vec3 World::vegTintAt(int wx, int wz) const {
@@ -500,8 +372,6 @@ void World::generateColumnInto(int cx, int cz, Chunk* const* stack,
             const uint16_t subId = ci.fillerId;
             const int dirtDepth  = 4;                  // filler blocks under the surface
             const int seaLevel   = gen_.seaLevel();
-            const bool onLand    = h > seaLevel;       // above the sea surface
-            const bool grassy    = ci.treeDensity > 0.0f || ci.bushDensity > 0.0f;
 
             // Cliffs: a column whose real 3D surface drops sharply to a neighbour. The
             // exposed face is (a) rendered as bare ROCK (a sand/grass skin down a vertical
@@ -524,29 +394,9 @@ void World::generateColumnInto(int cx, int cz, Chunk* const* stack,
                         !gen_.isSolid(nhNZ, wx, probe, wz - 1);
             }
 
-            // --- Whimsical scatter (single-column, so chunk-seam safe) ---------
-            // A buried glowstone geode a few blocks down in the stone.
-            int geodeY = -1;
-            if (onLand && hash01(wx, wz, seed ^ 0x6e0deu) < config_.geodeDensity) {
-                geodeY = colSurf - (3 + static_cast<int>(hash01(wx, wz, seed ^ 0x6e1u) * 6.0f));
-                if (geodeY <= 1) geodeY = -1;
-            }
-            // Above-surface features: a glowing lantern-tree, else a cobble cairn.
-            int stalkTop = -1, capY = -1, cairnTop = -1;
-            if (grassy && hash01(wx, wz, seed ^ 0x1a27u) < config_.lanternDensity) {
-                const int trunk = 3 + static_cast<int>(hash01(wx, wz, seed ^ 0x1a28u) * 5.0f);
-                stalkTop = colSurf + trunk; // oak-log colSurf+1..stalkTop
-                capY     = stalkTop + 1; // glowstone cap
-            } else if (onLand && hash01(wx, wz, seed ^ 0xca12u) < config_.cairnDensity) {
-                cairnTop = colSurf + 1 + static_cast<int>(hash01(wx, wz, seed ^ 0xca13u) * 3.0f);
-            }
-            const int featureTop = std::max({h, capY, cairnTop});
-
-            // Per-column water surface from the generator: sea level for oceans /
-            // coasts / rivers, or a perched lake's own (higher) level. Air at/below
-            // it over the terrain floods with water; uplands stay dry.
+            // Per-column water surface from the generator: sea level. Air at/below it
+            // over the terrain floods with ocean water; uplands stay dry.
             const int waterLevel = ci.waterLevel;
-            const bool submerged = h < waterLevel; // don't breach caves under water
 
             // Fill the whole vertical column in one pass, routing each block into
             // whichever chunk owns its Y (skipping chunks loaded from disk). This is
@@ -556,12 +406,10 @@ void World::generateColumnInto(int cx, int cz, Chunk* const* stack,
             // gradient + a 3D weighted-noise perturbation is positive (overhangs /
             // cliffs / ledges), plus sparse floating islands above (gen_.isSolid). The
             // fill extends past the heightmap surface to catch overhang/float tops.
-            const int top = std::min(std::max({featureTop, waterLevel, h + gen_.overhangReach()}),
+            const int top = std::min(std::max({h, waterLevel, h + gen_.overhangReach()}),
                                      worldTop - 1);
             // Precompute solidity so the surface layering can cheaply see the cells
-            // above (an overhang's TOP grasses over; its interior is filler/stone). The
-            // deep column is always solid, so caves there stay in the solid+carve path
-            // below and never flood — only near-surface air reaches the water fill.
+            // above (an overhang's TOP grasses over; its interior is filler/stone).
             std::vector<uint8_t> solidCol(static_cast<size_t>(top) + 2, 0);
             for (int wy = 0; wy <= top; ++wy) {
                 if (needNoise[static_cast<size_t>(wy / N)]) {
@@ -575,10 +423,16 @@ void World::generateColumnInto(int cx, int cz, Chunk* const* stack,
                         (m || gen_.floatSolid(h, wx, wy, wz)) ? 1 : 0;
                 }
             }
-            uint16_t belowId = 0; // for the cave-pool floor test (0xFFFF = unknown)
+            // Open-water floor: ocean water fills DOWN from waterLevel only to the first
+            // solid cell below it (the seabed / terrain top). Genuinely-air cells below
+            // that solid are sealed under a rock roof and stay DRY rather than flooding.
+            int waterFloor = -1; // highest solid Y at/below waterLevel; -1 = open to floor
+            for (int wy = std::min(waterLevel, top); wy >= 0; --wy) {
+                if (solidCol[static_cast<size_t>(wy)]) { waterFloor = wy; break; }
+            }
             for (int wy = 0; wy <= top; ++wy) {
                 const int cy = wy / N;
-                if (!needNoise[static_cast<size_t>(cy)]) { belowId = 0xFFFF; continue; }
+                if (!needNoise[static_cast<size_t>(cy)]) { continue; }
                 uint16_t id = 0; // air
                 if (solidCol[static_cast<size_t>(wy)]) {
                     // Depth below the LOCAL surface: solid cells above this one before
@@ -591,265 +445,61 @@ void World::generateColumnInto(int cx, int cz, Chunk* const* stack,
                     }
                     uint16_t mat;
                     bool isStone = false;
-                    if (wy == geodeY)            mat = glowId_;
-                    else if (wy >= 1 && wy <= 2) mat = lavaId_;  // deep lava floor (bedrock)
+                    if (wy >= 1 && wy <= 2)      mat = lavaId_;  // deep lava floor (bedrock)
                     else if (cliff)             { mat = stoneId_; isStone = true; } // cliff face -> bare rock
                     else if (sd == 0)            mat = topId;     // surface block
                     else if (sd <= dirtDepth)    mat = subId;     // filler under the surface
                     else { mat = stoneId_; isStone = true; }
 
-                    bool carve = false;
-                    if (mat != lavaId_ && wy != geodeY) {
-                        const int depth = colSurf - wy; // depth below the real surface
-                        float taper = 1.0f;
-                        if (depth < 5) {
-                            taper = submerged
-                                        ? 0.0f
-                                        : (0.3f + 0.14f * static_cast<float>(std::max(0, depth)));
-                        }
-                        if (taper > 0.0f) carve = caveAt(wx, wy, wz, taper);
-                    }
-                    if (carve) {
-                        if (wy <= config_.lavaPoolMaxY) {
-                            id = lavaId_;
-                        } else if (wy <= config_.caveWaterMaxY && belowId != 0 &&
-                                   belowId != 0xFFFF && belowId != waterId_ &&
-                                   belowId != lavaId_ &&
-                                   hash01(wx, wy, wz, seed ^ 0x7a7eu) < config_.caveWaterChance) {
-                            id = waterId_;
-                        } else {
-                            id = 0;
-                        }
-                    } else if (isStone) {
+                    if (isStone) {
                         const uint16_t ore = oreAt(wx, wy, wz);
                         id = ore != 0 ? ore : stoneId_;
                     } else {
                         id = mat;
                     }
-                    // Geometric cliff erosion: round off / undercut exposed cliff faces by
-                    // carving the rock away with a smooth 3D noise — MORE toward the base
-                    // (erode grows with depth down the face), so the foot recedes and the
-                    // wall rounds instead of standing as a dead-flat plane. Only carves
-                    // cells actually exposed toward the drop, so the interior stays solid.
+                    // Geometric cliff erosion: carve exposed cliff faces back into a CURVED,
+                    // progressively-undercut profile instead of a dead-flat "|" wall. Two
+                    // ingredients: (1) a LOW-frequency smooth noise so carved regions are
+                    // large contiguous patches (the face curves organically, no pockmarks);
+                    // (2) a carve strength that grows on a CURVE with depth (down^1.4), so the
+                    // sharp top edge is barely touched while the face recedes more and more
+                    // toward the base — a concave, weathered "/"-leaning undercut. Only carves
+                    // cells exposed toward the drop, so the interior stays solid.
                     if (cliff && id != 0 && id != waterId_ && id != lavaId_) {
                         const int down = colSurf - wy; // 0 at the top edge, grows downward
-                        if (down >= 1 && down < 30) {
+                        if (down >= 1) {
                             const bool exposed =
                                 !gen_.isSolid(nhPX, wx + 1, wy, wz) ||
                                 !gen_.isSolid(nhNX, wx - 1, wy, wz) ||
                                 !gen_.isSolid(nhPZ, wx, wy, wz + 1) ||
                                 !gen_.isSolid(nhNZ, wx, wy, wz - 1);
                             if (exposed) {
-                                const float erode = std::min(1.0f, static_cast<float>(down) / 20.0f);
-                                const float n = featureNoise_.fbm(wx * 0.12f, wy * 0.12f,
-                                                                  wz * 0.12f, 3);
-                                if (n > 0.60f - erode * 0.45f) id = 0; // carve -> rounded, eroded
+                                // Capped at 1.0 so the base RECEDES into a curved undercut
+                                // but stays a coherent face (not fully eaten away).
+                                const float depthCurve =
+                                    std::min(1.0f, std::pow(static_cast<float>(down) / 26.0f, 1.3f));
+                                const float n = featureNoise_.fbm(wx * 0.045f, wy * 0.055f,
+                                                                  wz * 0.045f, 3); // smooth, ~[-1,1]
+                                if (n * 0.6f + depthCurve > 0.95f) id = 0; // carve -> receded face
                             }
                         }
                     }
-                } else { // air: features (above the surface), else sea/lake water fill
-                    if (stalkTop >= 0 && wy > colSurf && wy <= capY) {
-                        id = (wy <= stalkTop) ? logId_ : glowId_; // lantern-tree
-                    } else if (cairnTop >= 0 && wy > colSurf && wy <= cairnTop) {
-                        id = cobbleId_;                            // cairn
-                    } else if (wy <= waterLevel) {
-                        id = waterId_;                             // ocean / lake
+                } else { // air: sea water fill
+                    if (wy > waterFloor && wy <= waterLevel) {
+                        id = waterId_;                             // ocean (open from above)
                     }
                 }
                 if (id != 0) {
                     stack[static_cast<size_t>(cy)]->set(lx, wy % N, lz, Block{id, 0});
                 }
-                belowId = id;
             }
 
-            // --- Trees & bushes (sit on top of the terrain) -------------------
-            // place() writes `id` into world cell (wx,wy,wz) iff it is currently
-            // air and its chunk is being generated, routing it into whichever
-            // vertical chunk owns wy. Only ever touches this column (lx,lz).
-            auto place = [&](int wy, uint16_t pid) {
-                if (wy < 0 || wy >= worldTop) return;
-                const int pcy = wy / N;
-                if (!needNoise[static_cast<size_t>(pcy)]) return;
-                Chunk& pc = *stack[static_cast<size_t>(pcy)];
-                if (pc.get(lx, wy % N, lz).id != 0) return; // never overwrite terrain
-                pc.set(lx, wy % N, lz, Block{pid, 0});
-            };
-
-            // Trees FIRST (before ground plants), so a trunk cell is never pre-filled
-            // by a plant. A tree rooted at column (ox,oz) spreads its canopy over the
-            // neighbouring columns, so this column gathers contributions from every
-            // nearby root within the canopy radius — keeping generation a pure
-            // function of world coords (seam-safe, approach-independent). The root's
-            // BIOME sets how likely a tree is (dense forests, none in desert/ocean)
-            // AND which SPECIES roots (oc.treeKind -> trunk/leaf blocks + crown shape).
-            constexpr int kTreeR = 4; // max canopy half-width gathered (broad maples/willows)
-            // world.yaml features.tree_density is the MASTER switch for the built-in
-            // trees: 0 turns them off (e.g. when trees are authored as features in
-            // assets/features/ instead). maxTreeD == 0 makes the cheap-reject below
-            // skip every column, so no built-in tree roots.
-            const float maxTreeD = config_.treeDensity > 0.0f ? gen_.maxTreeDensity() : 0.0f;
-            for (int oz = wz - kTreeR; oz <= wz + kTreeR; ++oz) {
-                for (int ox = wx - kTreeR; ox <= wx + kTreeR; ++ox) {
-                    // CHEAP reject first: most columns can't root a tree, and the
-                    // biome lookup (columnInfo) is expensive, so gate on the hash vs
-                    // the densest possible biome before paying for it. The same hash
-                    // is then re-checked against the root biome's actual density.
-                    const float th = hash01(ox, oz, seed ^ 0x7233u);
-                    if (th >= maxTreeD) continue;
-                    const ColumnInfo oc = colInfoAt(ox, oz);
-                    if (th >= oc.treeDensity) continue;
-                    const int oh = surfaceYAt(ox, oz); // the root's REAL 3D surface,
-                    // so trees stand on the actual ground even where the density
-                    // raised it well above the heightmap (the "no trees up high" fix).
-
-                    const int   dx = wx - ox, dz = wz - oz;
-                    const int   d2 = dx * dx + dz * dz;
-                    const float csz = hash01(ox, oz, seed ^ 0x7241u); // canopy-size roll
-                    const float hh  = hash01(ox, oz, seed ^ 0x7234u); // trunk-height roll
-
-                    // Resolve the SPECIES (from the root biome) to its blocks, trunk
-                    // height, crown radii (rH wide, rV tall) and silhouette shape.
-                    enum Shape { Rounded, Conical, Drooping };
-                    uint16_t trunkBlk = trunkId_, leafBlk = leavesId_;
-                    int trunkH, rH, rV, droop = 0;
-                    Shape shape = Rounded;
-                    switch (oc.treeKind) {
-                        case TreeKind::Birch:
-                            trunkBlk = birchTrunkId_; leafBlk = birchLeavesId_;
-                            trunkH = 7 + static_cast<int>(hh * 5.99f);  // 7..12, slim
-                            rH = 2; rV = 3; break;
-                        case TreeKind::Pine:
-                            trunkBlk = pineTrunkId_; leafBlk = pineLeavesId_;
-                            trunkH = 8 + static_cast<int>(hh * 6.99f);  // 8..14, spire
-                            rH = 2 + static_cast<int>(csz * 1.99f); rV = trunkH;
-                            shape = Conical; break;
-                        case TreeKind::Maple:
-                            trunkBlk = mapleTrunkId_; leafBlk = mapleLeavesId_;
-                            trunkH = 5 + static_cast<int>(hh * 4.99f);  // 5..9
-                            rH = 3 + static_cast<int>(csz * 1.99f); rV = rH; break; // broad, round
-                        case TreeKind::Willow:
-                            trunkBlk = willowTrunkId_; leafBlk = willowLeavesId_;
-                            trunkH = 6 + static_cast<int>(hh * 4.99f);  // 6..10
-                            rH = 3 + static_cast<int>(csz * 1.99f); rV = rH;
-                            droop = 3 + static_cast<int>(csz * 2.99f);  // strand length
-                            shape = Drooping; break;
-                        case TreeKind::Oak:
-                        default:
-                            trunkBlk = trunkId_; leafBlk = leavesId_;
-                            trunkH = 5 + static_cast<int>(hh * 6.99f);  // 5..11
-                            rH = 2 + static_cast<int>(csz * 1.99f); rV = rH + 1; break;
-                    }
-                    const int topY = oh + trunkH; // topmost trunk block
-
-                    // Trunk occupies only the root column.
-                    if (dx == 0 && dz == 0) {
-                        for (int wy = oh + 1; wy <= topY; ++wy) place(wy, trunkBlk);
-                    }
-
-                    if (shape == Conical) {
-                        // Pine: a stack of shrinking rings — radius grows downward from
-                        // a one-block spire above the trunk top, in tiered layers.
-                        if (d2 > rH * rH + 1) continue;
-                        const int tipY  = topY + 1;
-                        const int baseY = topY - (trunkH - 2);
-                        for (int wy = baseY; wy <= tipY; ++wy) {
-                            int r = (tipY - wy) / 2;             // two rows per radius step
-                            if (r > rH) r = rH;
-                            if (d2 > r * r) continue;
-                            if (dx == 0 && dz == 0 && wy <= topY) continue; // keep trunk visible
-                            if (((tipY - wy) & 1) && d2 == r * r &&         // thin alt. tiers
-                                hash01(wx * 73 + wy, wz * 19, seed ^ 0x7240u) < 0.5f) continue;
-                            place(wy, leafBlk);
-                        }
-                        continue;
-                    }
-
-                    // Rounded / Drooping: an ellipsoid crown centred above the trunk
-                    // top, ragged at the outer shell so it isn't a perfect ball.
-                    const int cyc = topY - 1 + rV / 2; // canopy centre Y
-                    if (d2 <= rH * rH + 1) {
-                        for (int wy = cyc - rV; wy <= cyc + rV; ++wy) {
-                            const int   ddy = wy - cyc;
-                            const float e =
-                                static_cast<float>(d2) / static_cast<float>(rH * rH) +
-                                static_cast<float>(ddy * ddy) / static_cast<float>(rV * rV);
-                            if (e > 1.0f) continue;
-                            if (dx == 0 && dz == 0 && wy <= topY) continue; // leave the trunk core
-                            if (e > 0.72f &&
-                                hash01(wx * 73 + wy, wz * 19 + (wy & 7), seed ^ 0x7240u) < 0.28f) {
-                                continue;
-                            }
-                            place(wy, leafBlk);
-                        }
-                    }
-
-                    // Willow: hang leaf strands down from the crown's outer rim, so the
-                    // canopy droops. Only some rim columns get a strand (hashed).
-                    if (shape == Drooping && d2 >= (rH - 1) * (rH - 1) && d2 <= rH * rH + 1 &&
-                        hash01(wx, wz, seed ^ 0x7242u) < 0.6f) {
-                        const int rim = cyc - rV / 2; // just below the crown's middle
-                        const int len = droop + static_cast<int>(hash01(wx, wz, seed ^ 0x7243u) * 2.99f);
-                        for (int k = 0; k < len; ++k) place(rim - k, leafBlk);
-                    }
-                }
-            }
-
-            // Ground plants AFTER the trees, so they fill the floor AROUND trunks
-            // instead of blocking them (place() never overwrites a tree cell). The
-            // biome's `plant:` theme picks the family; a variety hash picks the plant.
-            // world.yaml features.bush_density is the MASTER switch for built-in
-            // ground plants (0 = off, e.g. when authored as features instead).
-            if (config_.bushDensity > 0.0f && ci.plantKind != FloraKind::None &&
-                hash01(wx, wz, seed ^ 0xb05fu) < ci.bushDensity) {
-                const float v = hash01(wx, wz, seed ^ 0x91a3u); // variety roll [0,1)
-                switch (ci.plantKind) {
-                    case FloraKind::Desert: {
-                        const int ch = 1 + static_cast<int>(hash01(wx, wz, seed ^ 0xcac7u) * 2.99f);
-                        for (int k = 1; k <= ch; ++k) place(colSurf + k, cactusId_);
-                        break;
-                    }
-                    case FloraKind::GrassFlower:
-                        place(colSurf + 1, v < 0.72f ? tallGrassId_
-                                   : v < 0.87f ? flowerRedId_ : flowerYellowId_);
-                        break;
-                    case FloraKind::Forest:
-                        place(colSurf + 1, v < 0.40f ? fernId_
-                                   : v < 0.62f ? bushId_
-                                   : v < 0.82f ? redMushroomId_ : flowerRedId_);
-                        break;
-                    case FloraKind::Bush:
-                    default:
-                        place(colSurf + 1, bushId_);
-                        break;
-                }
-            }
-
-            // --- Flora leftovers (#13F): lilypads on still water + hanging vines ---
-            // Read a cell in this column (after the fill + trees), routing y -> chunk.
-            auto cellId = [&](int wy) -> uint16_t {
-                if (wy < 0 || wy >= worldTop) return 0;
-                const int rcy = wy / N;
-                if (!needNoise[static_cast<size_t>(rcy)]) return 0xFFFFu; // disk-loaded: unknown
-                return stack[static_cast<size_t>(rcy)]->get(lx, wy % N, lz).id;
-            };
-            // Lilypads float on SHALLOW still water (pond / swamp / lake edge — not the
-            // deep open ocean), sparsely scattered. place() only writes into air.
-            if (submerged && waterLevel - h <= 2 && waterLevel + 1 < worldTop &&
-                hash01(wx, wz, seed ^ 0x11abu) < 0.06f) {
-                place(waterLevel + 1, lilypadId_);
-            }
-            // Hanging vines: where a leaf cell sits directly over air, hang a short
-            // cross-sprite strand (1-2 cells). Bounded scan of the canopy band.
-            auto isLeaf = [&](uint16_t id) {
-                return id == leavesId_ || id == birchLeavesId_ || id == pineLeavesId_ ||
-                       id == mapleLeavesId_ || id == willowLeavesId_;
-            };
-            for (int wy = h + 3; wy < h + 26 && wy < worldTop - 1; ++wy) {
-                if (!isLeaf(cellId(wy)) || cellId(wy - 1) != 0) continue; // leaf over air
-                if (hash01(wx, wy, wz, seed ^ 0x71f3u) >= 0.035f) continue; // sparse strands
-                place(wy - 1, vineId_);
-                if (hash01(wx, wy, wz, seed ^ 0x71f4u) < 0.4f) place(wy - 2, vineId_);
-            }
+            // NOTE: near-surface trees and ground plants used to be stamped here from
+            // the biome's tree/bush densities. That built-in path is gone — trees,
+            // bushes and ground cover are now authored as procedural features
+            // (assets/features/*.yaml, see the feature stamp below). The biome
+            // `trees:`/`tree:` data still drives the far-terrain LOD tree impostors
+            // (FarTerrainRenderer), but no longer places real near-chunk geometry.
 
             // --- Structures: seam-safe stamp from nearby candidate origins -----
             // Candidate origins live on a coarse grid; this column gathers every
@@ -894,81 +544,19 @@ void World::generateColumnInto(int cx, int cz, Chunk* const* stack,
             // + noise) by Feature::at — still a pure function of the origin cell +
             // seed, so it comes out identical regardless of chunk load order.
             if (!features_.empty()) {
-                auto fput = [&](int wy, uint16_t pid, bool force) {
-                    if (wy < 0 || wy >= worldTop) return;
-                    const int pcy = wy / N;
-                    if (!needNoise[static_cast<size_t>(pcy)]) return;
-                    Chunk& pc = *stack[static_cast<size_t>(pcy)];
-                    if (!force && pc.get(lx, wy % N, lz).id != 0) return; // air-only
-                    pc.set(lx, wy % N, lz, Block{pid, 0});
-                };
-                const auto& feats = features_.all();
-                for (size_t fi = 0; fi < feats.size(); ++fi) {
-                    const Feature& ft = feats[fi];
-                    if (ft.scatter.density <= 0.0f) continue;
-                    const int S = std::max(4, ft.scatter.spacing);
-                    const int reach = std::max({ft.anchor.x, ft.size.x - 1 - ft.anchor.x,
-                                                ft.anchor.z, ft.size.z - 1 - ft.anchor.z});
-                    const int cellR = reach / S + 1;
-                    const uint32_t fsalt = seed ^ (0xF0000000u + static_cast<uint32_t>(fi) * 0x9e3779b9u);
-                    const int gx = floordiv(wx, S), gz = floordiv(wz, S);
-                    for (int cgz = gz - cellR; cgz <= gz + cellR; ++cgz) {
-                        for (int cgx = gx - cellR; cgx <= gx + cellR; ++cgx) {
-                            if (hash01(cgx, cgz, fsalt ^ 0x1u) >= ft.scatter.density) continue;
-                            const int ox = cgx * S + static_cast<int>(hash01(cgx, cgz, fsalt ^ 0x2u) * (S - 1));
-                            const int oz = cgz * S + static_cast<int>(hash01(cgx, cgz, fsalt ^ 0x3u) * (S - 1));
-                            // Noise distribution: only root inside the clumps of a low-freq
-                            // field, so the feature comes in organic patches not an even grid.
-                            if (ft.scatter.dist == FeatureScatter::Dist::Noise &&
-                                featureNoise_.perlin(static_cast<float>(ox) * ft.scatter.noiseFreq,
-                                                     static_cast<float>(oz) * ft.scatter.noiseFreq)
-                                    <= ft.scatter.noiseThresh) continue;
-                            const int slx = (wx - ox) + ft.anchor.x;
-                            const int slz = (wz - oz) + ft.anchor.z;
-                            if (slx < 0 || slz < 0 || slx >= ft.size.x || slz >= ft.size.z) continue;
-                            const ColumnInfo oc = colInfoAt(ox, oz);
-                            const bool submerged = oc.height < oc.waterLevel;
-                            if (ft.scatter.onWater) { if (!submerged) continue; }   // need water below
-                            else if (ft.scatter.surface && submerged) continue;     // dry-land only
-                            const int relEl = oc.height - oc.waterLevel; // elevation vs sea/lake
-                            if (relEl < ft.scatter.minElevation || relEl > ft.scatter.maxElevation) continue;
-                            if (!ft.scatter.biomeIds.empty() &&
-                                std::find(ft.scatter.biomeIds.begin(), ft.scatter.biomeIds.end(),
-                                          oc.biome) == ft.scatter.biomeIds.end()) continue;
-                            if (ft.scatter.nearWater > 0) {  // only near a shoreline / lake edge
-                                const int nw = ft.scatter.nearWater;
-                                const int dxs[4] = {nw, -nw, 0, 0}, dzs[4] = {0, 0, nw, -nw};
-                                bool found = false;
-                                for (int k = 0; k < 4 && !found; ++k) {
-                                    const ColumnInfo nc = colInfoAt(ox + dxs[k], oz + dzs[k]);
-                                    if (nc.height < nc.waterLevel) found = true;
-                                }
-                                if (!found) continue;
-                            }
-                            // Root on the water surface (lilypads) or the real 3D ground.
-                            const int oh = ft.scatter.onWater ? oc.waterLevel : surfaceYAt(ox, oz);
-                            if (ft.scatter.minSlope > 0 || ft.scatter.maxSlope < 100000) {
-                                int lo = oh, hi = oh;  // steepness = surface delta nearby
-                                const int dxs[4] = {3, -3, 0, 0}, dzs[4] = {0, 0, 3, -3};
-                                for (int k = 0; k < 4; ++k) {
-                                    const int s = surfaceYAt(ox + dxs[k], oz + dzs[k]);
-                                    lo = std::min(lo, s); hi = std::max(hi, s);
-                                }
-                                const int slope = hi - lo;
-                                if (slope < ft.scatter.minSlope || slope > ft.scatter.maxSlope) continue;
-                            }
-                            const uint32_t oseed = static_cast<uint32_t>(cgx) * 73856093u ^
-                                                   static_cast<uint32_t>(cgz) * 19349663u ^
-                                                   (fsalt * 2654435761u);
-                            for (int ly = 0; ly < ft.size.y; ++ly) {
-                                const int wy = oh + (ly - ft.anchor.y);
-                                const Feature::Cell c =
-                                    ft.at(oseed, slx, ly, slz, featureNoise_, wx, wy, wz);
-                                if (c.id != Feature::kSkip) fput(wy, c.id, c.force);
-                            }
-                        }
-                    }
-                }
+                // One shared scatter pass (Feature.h) — identical logic to the headless
+                // preview, so they can't drift. emit writes into the chunk stack (air-only
+                // unless the cell is forced), the gates/placement live in the function.
+                scatterFeaturesColumn(
+                    features_, wx, wz, seed, featureNoise_, colInfoAt, surfaceYAt,
+                    [&](int wy, uint16_t pid, bool force) {
+                        if (wy < 0 || wy >= worldTop) return;
+                        const int pcy = wy / N;
+                        if (!needNoise[static_cast<size_t>(pcy)]) return;
+                        Chunk& pc = *stack[static_cast<size_t>(pcy)];
+                        if (!force && pc.get(lx, wy % N, lz).id != 0) return; // air-only
+                        pc.set(lx, wy % N, lz, Block{pid, 0});
+                    });
             }
         }
     }
@@ -1315,10 +903,11 @@ void World::computeBlockLight() {
 }
 
 void World::relightField(std::vector<uint8_t>& field, bool emitterSeed, int x0, int x1,
-                         int z0, int z1) {
+                         int y0, int y1, int z0, int z1) {
     const glm::ivec3 s = sizeInBlocks();
     const glm::ivec3 o = originBlock();
     const int sy = s.y;
+    const int yTop = o.y + sy - 1; // topmost loaded cell (window has no vertical streaming)
     constexpr int N = Chunk::kSize;
 
     // Field access is ring-mapped (lightIndex), and opacity/emission are read from
@@ -1351,35 +940,42 @@ void World::relightField(std::vector<uint8_t>& field, bool emitterSeed, int x0, 
             chunkAtBlock(x, y, z).get(floormod(x, N), floormod(y, N), floormod(z, N)).id));
     };
 
-    // Clear the box (full height).
+    // Clear the box.
     for (int z = z0; z <= z1; ++z)
         for (int x = x0; x <= x1; ++x)
-            for (int y = o.y; y < o.y + sy; ++y) {
+            for (int y = y0; y <= y1; ++y) {
                 fieldAt(x, y, z) = 0;
                 if (emitterSeed) colorAt(x, y, z) = 0;
             }
 
     std::vector<glm::ivec3> frontier;
     if (!emitterSeed) {
-        // Sky: each column starts at 15 and is dimmed by every block's opacity as
-        // it descends (foliage shadow), ending at a fully-blocking block — exactly
-        // the model in computeSkyLight, so an edit relights the box the same way.
+        // Sky: each column descends from the top, dimmed by every block's opacity
+        // (foliage shadow), ending at a fully-blocking block — exactly the model in
+        // computeSkyLight. When the box top is below the world top, the sky value
+        // arriving at y1 is the unchanged value just above (vertical sky is lossless
+        // through air, costing only opacity), so inherit it instead of assuming open
+        // sky. Edits never brighten cells ABOVE them, so that above-box value is
+        // still correct.
         for (int z = z0; z <= z1; ++z)
             for (int x = x0; x <= x1; ++x) {
-                int sky = 15;
-                for (int y = o.y + sy - 1; y >= o.y; --y) {
+                int sky = (y1 >= yTop)
+                    ? 15
+                    : std::max(0, static_cast<int>(fieldAt(x, y1 + 1, z)) -
+                                      skyOpacityAt(x, y1 + 1, z));
+                for (int y = y1; y >= y0; --y) {
                     const int op = skyOpacityAt(x, y, z);
                     if (op >= 15) break;
+                    if (sky <= 0) break;
                     fieldAt(x, y, z) = static_cast<uint8_t>(sky);
                     frontier.push_back({x, y, z});
                     sky -= op;
-                    if (sky <= 0) break;
                 }
             }
     } else {
         // Block light: seed every emissive block (emitters may be opaque).
         for (int z = z0; z <= z1; ++z)
-            for (int y = o.y; y < o.y + sy; ++y)
+            for (int y = y0; y <= y1; ++y)
                 for (int x = x0; x <= x1; ++x) {
                     const uint16_t id =
                         chunkAtBlock(x, y, z).get(floormod(x, N), floormod(y, N), floormod(z, N)).id;
@@ -1418,11 +1014,22 @@ void World::relightField(std::vector<uint8_t>& field, bool emitterSeed, int x0, 
             frontier.push_back({ix, iy, iz});
         }
     };
-    for (int y = o.y; y < o.y + sy; ++y) {
+    for (int y = y0; y <= y1; ++y) {
         if (x0 > o.x)           for (int z = z0; z <= z1; ++z) borderSeed(x0, y, z, x0 - 1, y, z);
         if (x1 < o.x + s.x - 1) for (int z = z0; z <= z1; ++z) borderSeed(x1, y, z, x1 + 1, y, z);
         if (z0 > o.z)           for (int x = x0; x <= x1; ++x) borderSeed(x, y, z0, x, y, z0 - 1);
         if (z1 < o.z + s.z - 1) for (int x = x0; x <= x1; ++x) borderSeed(x, y, z1, x, y, z1 + 1);
+    }
+    // Top/bottom Y faces — only for block light, which is isotropic and can enter
+    // the clamped box vertically from outside. The sky pass already seeds its top
+    // face via the column inherit above (and never receives sky from below), so it
+    // skips this.
+    if (emitterSeed) {
+        for (int z = z0; z <= z1; ++z)
+            for (int x = x0; x <= x1; ++x) {
+                if (y0 > o.y)  borderSeed(x, y0, z, x, y0 - 1, z);
+                if (y1 < yTop) borderSeed(x, y1, z, x, y1 + 1, z);
+            }
     }
 
     // Flood fill, clamped to the box (X/Z) and the world height (Y).
@@ -1433,7 +1040,7 @@ void World::relightField(std::vector<uint8_t>& field, bool emitterSeed, int x0, 
         if (level <= falloff) continue;
         for (const auto& d : dirs) {
             const int nx = p.x + d[0], ny = p.y + d[1], nz = p.z + d[2];
-            if (nx < x0 || nx > x1 || nz < z0 || nz > z1 || ny < o.y || ny >= o.y + sy) continue;
+            if (nx < x0 || nx > x1 || nz < z0 || nz > z1 || ny < y0 || ny > y1) continue;
             // Entering a cell costs falloff plus (sky pass only) its opacity; a full
             // blocker stops the spread. Mirrors computeSkyLight's flood so foliage
             // shade is identical whether baked at gen time or after an edit.
@@ -1481,44 +1088,20 @@ std::vector<glm::ivec3> World::setBlock(int wx, int wy, int wz, Block b) {
     chunkDirty_[static_cast<size_t>(chunkIndex(cx, cy, cz))] = 1; // diverged from disk/noise
 
     // Blocks gate sky light and may add/remove an emitter, so the edit changes
-    // both lighting fields — but only within 15 blocks. Relight just that box (a
-    // full recompute here is what made editing stutter on bigger worlds).
+    // both lighting fields — but only within light's 15-block reach. Relight just
+    // that neighbourhood (a full recompute here is what made editing stutter on
+    // bigger worlds).
     constexpr int N = Chunk::kSize;
     constexpr int kLightRadius = 16; // one past light's 15-block reach
     const int x0 = std::max(o.x, wx - kLightRadius), x1 = std::min(o.x + size.x - 1, wx + kLightRadius);
     const int z0 = std::max(o.z, wz - kLightRadius), z1 = std::min(o.z + size.z - 1, wz + kLightRadius);
-    const int sy = size.y;
 
     // Lighting is baked into chunk vertices, so any chunk whose light changed must
-    // be remeshed. Remeshing EVERY chunk overlapping the box (3x3 columns over the
-    // full height — up to 3*3*chunksY chunks) is what made editing lag: a typical
-    // edit only perturbs light in a small neighbourhood, leaving most of those
-    // chunks identical. So snapshot the box, relight, then diff and remesh only the
-    // chunks that actually changed (plus the edited chunk and any face-adjacent
-    // chunk across a shared boundary, whose geometry/culling changed regardless).
-    const int bw = x1 - x0 + 1, bd = z1 - z0 + 1;
-    std::vector<uint8_t> oldSky(static_cast<size_t>(bw) * sy * bd);
-    std::vector<uint8_t> oldBlk(static_cast<size_t>(bw) * sy * bd);
-    auto boxIdx = [&](int x, int y, int z) {
-        return static_cast<size_t>((x - x0) + bw * (y + sy * (z - z0)));
-    };
-    for (int z = z0; z <= z1; ++z) {
-        for (int y = 0; y < sy; ++y) {
-            for (int x = x0; x <= x1; ++x) {
-                const size_t li = static_cast<size_t>(lightIndex(x, y, z));
-                const size_t bi = boxIdx(x, y, z);
-                oldSky[bi] = skyLight_[li];
-                oldBlk[bi] = blockLight_[li];
-            }
-        }
-    }
-
-    relightField(skyLight_, false, x0, x1, z0, z1);
-    relightField(blockLight_, true, x0, x1, z0, z1);
-
-    // A small dirty-grid over the chunk columns the box spans (at most 3x3 wide,
-    // full height). Light can travel at most 15 blocks, so nothing outside the
-    // radius-16 box changes — the grid covers every affected chunk.
+    // be remeshed. Remeshing EVERY chunk overlapping the box wastes most of the
+    // work — a typical edit only perturbs light in a small neighbourhood. So
+    // snapshot each field's box, relight, then mark only the chunks that actually
+    // changed (plus the edited chunk and any face-adjacent chunk across a shared
+    // boundary, whose geometry/culling changed regardless).
     const int cx0 = floordiv(x0, N), cx1 = floordiv(x1, N);
     const int cz0 = floordiv(z0, N), cz1 = floordiv(z1, N);
     const int ncx = cx1 - cx0 + 1, ncz = cz1 - cz0 + 1;
@@ -1530,17 +1113,44 @@ std::vector<glm::ivec3> World::setBlock(int wx, int wy, int wz, Block b) {
         dirtyGrid[static_cast<size_t>((ccx - cx0) + ncx * (ccy + counts_.y * (ccz - cz0)))] = 1;
     };
 
-    for (int z = z0; z <= z1; ++z) {
-        for (int y = 0; y < sy; ++y) {
-            for (int x = x0; x <= x1; ++x) {
-                const size_t li = static_cast<size_t>(lightIndex(x, y, z));
-                const size_t bi = boxIdx(x, y, z);
-                if (skyLight_[li] != oldSky[bi] || blockLight_[li] != oldBlk[bi]) {
-                    mark(floordiv(x, N), floordiv(y, N), floordiv(z, N));
-                }
-            }
-        }
+    // Relight one field over its own Y-box, then mark every chunk whose baked light
+    // changed. The Y extent differs per field: block light is isotropic (≤15 in
+    // every axis incl. Y), so it clamps to wy±16; sky descends a column, so its box
+    // spans the full height for now (step 2 clamps it to the affected band).
+    auto relightAndMark = [&](std::vector<uint8_t>& field, bool emitter, int y0, int y1) {
+        const int bw = x1 - x0 + 1, bh = y1 - y0 + 1, bd = z1 - z0 + 1;
+        std::vector<uint8_t> old(static_cast<size_t>(bw) * bh * bd);
+        auto bIdx = [&](int x, int y, int z) {
+            return static_cast<size_t>((x - x0) + bw * ((y - y0) + bh * (z - z0)));
+        };
+        for (int z = z0; z <= z1; ++z)
+            for (int y = y0; y <= y1; ++y)
+                for (int x = x0; x <= x1; ++x)
+                    old[bIdx(x, y, z)] = field[static_cast<size_t>(lightIndex(x, y, z))];
+        relightField(field, emitter, x0, x1, y0, y1, z0, z1);
+        for (int z = z0; z <= z1; ++z)
+            for (int y = y0; y <= y1; ++y)
+                for (int x = x0; x <= x1; ++x)
+                    if (field[static_cast<size_t>(lightIndex(x, y, z))] != old[bIdx(x, y, z)])
+                        mark(floordiv(x, N), floordiv(y, N), floordiv(z, N));
+    };
+
+    // Sky descends a column, so an edit only changes sky from wy down to the first
+    // sky-blocker STRICTLY below it: breaking lights that band, placing darkens it
+    // (the darkened span reaches the OLD floor, which is exactly that same blocker —
+    // opacity below the edit is unchanged). Above wy the column is untouched, so the
+    // box needs only a flood margin (kLightRadius) on each open Y face. This keeps a
+    // surface edit's sky box a few chunks tall instead of the full world height.
+    int floorY = o.y;
+    for (int y = wy - 1; y >= o.y; --y) {
+        if (registry_.lightOpacity(blockAt(wx, y, wz).id) >= 15) { floorY = y; break; }
     }
+    const int skyY0 = std::max(o.y, floorY - kLightRadius);
+    const int skyY1 = std::min(o.y + size.y - 1, wy + kLightRadius);
+    const int blkY0 = std::max(o.y, wy - kLightRadius);
+    const int blkY1 = std::min(o.y + size.y - 1, wy + kLightRadius);
+    relightAndMark(skyLight_, false, skyY0, skyY1); // sky: edit down to first blocker below
+    relightAndMark(blockLight_, true, blkY0, blkY1); // block: ±16 around the edit
 
     // The edited block always re-meshes its own chunk; a face-adjacent chunk only
     // when the block sits on the shared boundary (its cross-chunk faces flip).
@@ -1621,8 +1231,8 @@ std::vector<glm::ivec3> World::setBlocksBatch(
             }
         }
     }
-    relightField(skyLight_, false, x0, x1, z0, z1);
-    relightField(blockLight_, true, x0, x1, z0, z1);
+    relightField(skyLight_, false, x0, x1, 0, sy - 1, z0, z1);
+    relightField(blockLight_, true, x0, x1, 0, sy - 1, z0, z1);
 
     const int cx0 = floordiv(x0, N), cx1 = floordiv(x1, N);
     const int cz0 = floordiv(z0, N), cz1 = floordiv(z1, N);
@@ -1698,23 +1308,58 @@ void World::saveDirtyWindow() {
 
 void World::relightBox(int x0, int x1, int z0, int z1, std::vector<glm::ivec3>& dirty) {
     constexpr int N = Chunk::kSize;
+    constexpr int margin = N; // one past light's 15-block reach
     const glm::ivec3 s = sizeInBlocks();
     const int sy = s.y; // originChunk_.y is always 0 (no vertical streaming)
     const int bw = x1 - x0 + 1, bd = z1 - z0 + 1;
 
-    // Snapshot the box, relight, then diff old-vs-new to remesh only the chunks
-    // whose baked light changed (same approach as setBlock).
-    std::vector<uint8_t> oldSky(static_cast<size_t>(bw) * sy * bd);
+    // Height-bound the SKY relight to the band that can actually change, instead of
+    // the full world column. Above the highest cell that is either (a) a sky-blocker
+    // in the freshly generated terrain, or (b) still carrying stale sub-15 sky from
+    // the column that last occupied this ring slot, every cell is already open-sky 15
+    // in BOTH the old and the new contents — so relighting it is a guaranteed no-op.
+    // A cheap top-down per-column scan finds that ceiling (it early-outs at the
+    // surface, reading only the empty sky above), letting the clear/descent/flood skip
+    // the air that dominates a 256-tall column. This is the recenter analogue of
+    // setBlock's clamped sky box; UNLIKE setBlock, the entering column's light is
+    // stale (belongs to the departing column), hence the extra "stale sub-15" term —
+    // dropping it is exactly the box-too-small bug that broke floating-island relight.
+    // Block light stays full height: its flood is already empty when there are no
+    // emitters, so the win there is not worth a second, non-early-out scan.
+    int skyTop = 0;
+    for (int z = z0; z <= z1; ++z) {
+        for (int x = x0; x <= x1; ++x) {
+            for (int y = sy - 1; y > skyTop; --y) {
+                const size_t li = static_cast<size_t>(lightIndex(x, y, z));
+                if (skyLight_[li] < 15 ||
+                    registry_.lightOpacity(blockAt(x, y, z).id) > 0) {
+                    skyTop = y;
+                    break;
+                }
+            }
+        }
+    }
+    // skyRelightFullHeight_ is a test/verify hook (default off): forcing the full
+    // column lets a logictest prove the bounded box is byte-identical to full height.
+    const int skyY1 = skyRelightFullHeight_ ? (sy - 1) : std::min(sy - 1, skyTop + margin);
+
+    // Snapshot each field over its own Y-box, relight, then diff old-vs-new to remesh
+    // only the chunks whose baked light changed (same approach as setBlock). The two
+    // fields use different Y extents, so each keeps its own snapshot buffer.
+    std::vector<uint8_t> oldSky(static_cast<size_t>(bw) * (skyY1 + 1) * bd);
     std::vector<uint8_t> oldBlk(static_cast<size_t>(bw) * sy * bd);
-    auto bi = [&](int x, int y, int z) {
+    auto skyI = [&](int x, int y, int z) {
+        return static_cast<size_t>((x - x0) + bw * (y + (skyY1 + 1) * (z - z0)));
+    };
+    auto blkI = [&](int x, int y, int z) {
         return static_cast<size_t>((x - x0) + bw * (y + sy * (z - z0)));
     };
     for (int z = z0; z <= z1; ++z) {
         for (int y = 0; y < sy; ++y) {
             for (int x = x0; x <= x1; ++x) {
                 const size_t li = static_cast<size_t>(lightIndex(x, y, z));
-                oldSky[bi(x, y, z)] = skyLight_[li];
-                oldBlk[bi(x, y, z)] = blockLight_[li];
+                if (y <= skyY1) oldSky[skyI(x, y, z)] = skyLight_[li];
+                oldBlk[blkI(x, y, z)] = blockLight_[li];
             }
         }
     }
@@ -1723,26 +1368,30 @@ void World::relightBox(int x0, int x1, int z0, int z1, std::vector<glm::ivec3>& 
     // the chunks), so relight them concurrently when threading is enabled.
     if (config_.streamWorkers > 0) {
         std::future<void> sky = std::async(std::launch::async, [&] {
-            relightField(skyLight_, false, x0, x1, z0, z1);
+            relightField(skyLight_, false, x0, x1, 0, skyY1, z0, z1);
         });
-        relightField(blockLight_, true, x0, x1, z0, z1);
+        relightField(blockLight_, true, x0, x1, 0, sy - 1, z0, z1);
         sky.get();
     } else {
-        relightField(skyLight_, false, x0, x1, z0, z1);
-        relightField(blockLight_, true, x0, x1, z0, z1);
+        relightField(skyLight_, false, x0, x1, 0, skyY1, z0, z1);
+        relightField(blockLight_, true, x0, x1, 0, sy - 1, z0, z1);
     }
 
     const int cx0 = floordiv(x0, N), cx1 = floordiv(x1, N);
     const int cz0 = floordiv(z0, N), cz1 = floordiv(z1, N);
     const int ncx = cx1 - cx0 + 1, ncz = cz1 - cz0 + 1;
     std::vector<char> grid(static_cast<size_t>(ncx) * counts_.y * ncz, 0);
+    auto markChanged = [&](int x, int y, int z) {
+        const int gcx = floordiv(x, N) - cx0, gcy = floordiv(y, N), gcz = floordiv(z, N) - cz0;
+        grid[static_cast<size_t>(gcx + ncx * (gcy + counts_.y * gcz))] = 1;
+    };
     for (int z = z0; z <= z1; ++z) {
         for (int y = 0; y < sy; ++y) {
             for (int x = x0; x <= x1; ++x) {
                 const size_t li = static_cast<size_t>(lightIndex(x, y, z));
-                if (skyLight_[li] != oldSky[bi(x, y, z)] || blockLight_[li] != oldBlk[bi(x, y, z)]) {
-                    const int gcx = floordiv(x, N) - cx0, gcy = floordiv(y, N), gcz = floordiv(z, N) - cz0;
-                    grid[static_cast<size_t>(gcx + ncx * (gcy + counts_.y * gcz))] = 1;
+                if ((y <= skyY1 && skyLight_[li] != oldSky[skyI(x, y, z)]) ||
+                    blockLight_[li] != oldBlk[blkI(x, y, z)]) {
+                    markChanged(x, y, z);
                 }
             }
         }
@@ -1905,29 +1554,34 @@ std::vector<glm::ivec3> World::recenter(int centerChunkX, int centerChunkZ,
     return dirty;
 }
 
-World::PregenStrip World::pregenStrip(int dir, bool alongX) const {
+World::PregenStrip World::pregenStrip(int dir, bool alongX, int fromX, int fromZ) const {
     PregenStrip s;
     s.dir    = dir;
     s.alongX = alongX;
-    s.origin = {originChunk_.x, originChunk_.z};
+    // The strip steps from the VIRTUAL origin (fromX,fromZ): the window origin this
+    // strip will be applied at. For the next column step that is the current origin;
+    // for a strip staged 2+ columns ahead it is the origin after the earlier queued
+    // strips apply (App stages a small queue so the window can advance several columns
+    // per second without the per-column pregen landing on the critical path).
+    s.origin = {fromX, fromZ};
 
     // The entering edge column AFTER the one-column step this strip is for —
     // mirrors shiftColumn's edge computation (which runs post-move, so +dir here).
     int edge;
     if (alongX) {
-        edge = (dir > 0) ? originChunk_.x + dir + counts_.x - 1 : originChunk_.x + dir;
+        edge = (dir > 0) ? fromX + dir + counts_.x - 1 : fromX + dir;
     } else {
-        edge = (dir > 0) ? originChunk_.z + dir + counts_.z - 1 : originChunk_.z + dir;
+        edge = (dir > 0) ? fromZ + dir + counts_.z - 1 : fromZ + dir;
     }
     // Same column order shiftColumn gathers, so the apply is a straight move.
     std::vector<glm::ivec2> columns;
     columns.reserve(static_cast<size_t>(alongX ? counts_.z : counts_.x));
     if (alongX) {
-        for (int cz = originChunk_.z; cz < originChunk_.z + counts_.z; ++cz) {
+        for (int cz = fromZ; cz < fromZ + counts_.z; ++cz) {
             columns.push_back({edge, cz});
         }
     } else {
-        for (int cx = originChunk_.x; cx < originChunk_.x + counts_.x; ++cx) {
+        for (int cx = fromX; cx < fromX + counts_.x; ++cx) {
             columns.push_back({cx, edge});
         }
     }

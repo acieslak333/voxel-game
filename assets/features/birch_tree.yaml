@@ -1,6 +1,6 @@
-# Birch — slimmer, taller, with a smaller crown. Plains.
+# Birch — slimmer, taller, with a smaller crown. The cooler patches of the forest ring.
 name: birch_tree
-scatter: {density: 0.7, spacing: 7, surface: true, biomes: [plains]}
+scatter: {density: 0.3, spacing: 5, surface: true, biomes: [birch_forest]}
 size: [5, 10, 5]
 anchor: [2, 0, 2]
 ops:

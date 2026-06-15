@@ -1,5 +1,7 @@
 #include "world/WorldConfig.h"
 
+#include "world/NoiseLoad.h"
+
 #include <yaml-cpp/yaml.h>
 
 #include <algorithm>
@@ -73,67 +75,21 @@ WorldConfig WorldConfig::load(const std::string& path) {
     c.liquidMaxFills = std::max(1, c.liquidMaxFills);
     c.liquidScan     = std::max(1, c.liquidScan);
     c.liquidMaxLevel = std::max(1, c.liquidMaxLevel);
-    if (const YAML::Node t = root["terrain"]) {
-        get(t["height_frequency"], c.heightFrequency);
-        get(t["octaves"], c.octaves);
-        get(t["base_height"], c.baseHeight);
-        get(t["height_amplitude"], c.heightAmplitude);
-        get(t["material_frequency"], c.materialFrequency);
-        get(t["material_octaves"], c.materialOctaves);
-        get(t["dirt_depth_min"], c.dirtDepthMin);
-        get(t["dirt_depth_max"], c.dirtDepthMax);
-        get(t["rocky_height_margin"], c.rockyHeightMargin);
-        get(t["rocky_material_threshold"], c.rockyMaterialThreshold);
-        get(t["beach_height_margin"], c.beachHeightMargin);
-        get(t["terrain_warp"], c.terrainWarp);
-    }
-    if (const YAML::Node is = root["island"]) {
-        get(is["falloff_start"], c.islandFalloffStart);
-        get(is["falloff_end"], c.islandFalloffEnd);
-        get(is["coast_warp"], c.coastWarp);
-    }
-    if (const YAML::Node ft = root["features"]) {
-        get(ft["lantern_density"], c.lanternDensity);
-        get(ft["cairn_density"], c.cairnDensity);
-        get(ft["geode_density"], c.geodeDensity);
-        get(ft["tree_density"], c.treeDensity);
-        get(ft["bush_density"], c.bushDensity);
-    }
+    // (The legacy `terrain:` and `island:` blocks are no longer read — terrain shape
+    //  + surface materials moved to assets/biomes.yaml / vg::TerrainGenerator.)
+    // (The legacy `features:` block — lantern/cairn/geode/tree/bush densities — is
+    //  no longer read: that built-in scatter was replaced by procedural features
+    //  in assets/features/*.yaml.)
     if (const YAML::Node st = root["structures"]) {
         get(st["spacing"], c.structureSpacing);
         get(st["density"], c.structureDensity);
     }
-    if (const YAML::Node cv = root["caves"]) {
-        get(cv["frequency"], c.caveFrequency);
-        get(cv["threshold"], c.caveThreshold);
-        get(cv["floor"], c.caveFloor);
-        get(cv["cavern_threshold"], c.cavernThreshold);
-        get(cv["cavern_max_y"], c.cavernMaxY);
-        if (const YAML::Node rv = cv["ravines"]) {
-            get(rv["frequency"], c.ravineFrequency);
-            get(rv["width"], c.ravineWidth);
-            get(rv["max_y"], c.ravineMaxY);
-            get(rv["floor"], c.ravineFloor);
-        }
-        if (const YAML::Node pl = cv["pools"]) {
-            get(pl["lava_max_y"], c.lavaPoolMaxY);
-            get(pl["water_max_y"], c.caveWaterMaxY);
-            get(pl["water_chance"], c.caveWaterChance);
-        }
-    }
     if (const YAML::Node ore = root["ores"]) {
-        auto getOre = [&](const char* key, float& density, int& maxY) {
-            if (const YAML::Node n = ore[key]) {
-                get(n["density"], density);
-                get(n["max_y"], maxY);
-            }
-        };
-        getOre("coal", c.coalDensity, c.coalMaxY);
-        getOre("iron", c.ironDensity, c.ironMaxY);
-        getOre("gold", c.goldDensity, c.goldMaxY);
-        getOre("ruby", c.rubyDensity, c.rubyMaxY);
-        getOre("emerald", c.emeraldDensity, c.emeraldMaxY);
-        getOre("mythril", c.mythrilDensity, c.mythrilMaxY);
+        if (const YAML::Node n = ore["iron"]) {
+            get(n["density"], c.ironDensity);
+            get(n["max_y"], c.ironMaxY);
+            if (n["mask"]) c.oreMask = loadMask(n["mask"], c.seed ^ 0x012E5u);
+        }
     }
     return c;
 }

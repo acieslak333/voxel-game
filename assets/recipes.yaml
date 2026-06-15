@@ -41,9 +41,8 @@ recipes:
     inputs:
       - { item: cobblestone, count: 4 }
 
-  # Pickaxe tier ladder (ISSUES #13I). Each tier mines (and DROPS) higher ores:
-  # wood -> stone -> iron -> mythril. No furnace yet, so ore stands in for the
-  # smelted ingot. Planks are the handle (no sticks item yet).
+  # Pickaxe tier ladder (ISSUES #13I): wood -> stone -> iron. No furnace yet, so the
+  # ore stands in for the smelted ingot. Planks are the handle (no sticks item yet).
   - output: wood_pickaxe
     count: 1
     inputs:
@@ -57,9 +56,4 @@ recipes:
     count: 1
     inputs:
       - { item: iron_ore, count: 3 }
-      - { item: planks, count: 2 }
-  - output: mythril_pickaxe
-    count: 1
-    inputs:
-      - { item: mythril_ore, count: 3 }
       - { item: planks, count: 2 }

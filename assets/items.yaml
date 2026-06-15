@@ -14,7 +14,7 @@
 #    tool           pickaxe|sword. Marks a tool; mines a block whose preferred_tool
 #                   matches `tool_speed`x faster (BlockRegistry::breakSeconds).
 #    tool_speed     mining-speed multiplier this tool gives its preferred blocks.
-#    tier           harvest tier this tool provides (1 wood .. 4 mythril). A block
+#    tier           harvest tier this tool provides (1 wood .. 3 iron). A block
 #                   drops only when mined with a matching tool of tier >= its
 #                   harvest_level (see canHarvest()).
 #    attack_damage  damage dealt in combat (swords; future mobs).
@@ -34,7 +34,7 @@
 - name: pickaxe
   tool: pickaxe
   tool_speed: 5.0
-  tier: 3            # iron-tier; wood/stone/mythril tiers below
+  tier: 3            # iron-tier; wood/stone tiers below
   textures:
     all: pickaxe.block.png
 - name: sword
@@ -45,9 +45,9 @@
     all: sword.block.png
 
 # Pickaxe tiers gate which ores yield a drop (a block drops only when mined with a
-# matching tool of tier >= its harvest_level). The plain `pickaxe` above is the
-# iron tier (3). These three fill out the wood->stone->iron->mythril ladder. They
-# reuse pickaxe.block.png for now (per-tier icons are a later art pass).
+# matching tool of tier >= its harvest_level). The plain `pickaxe` above is the iron
+# tier (3); these two fill out the wood->stone->iron ladder. They reuse
+# pickaxe.block.png for now (per-tier icons are a later art pass).
 - name: wood_pickaxe
   tool: pickaxe
   tool_speed: 2.0
@@ -58,12 +58,6 @@
   tool: pickaxe
   tool_speed: 3.5
   tier: 2
-  textures:
-    all: pickaxe.block.png
-- name: mythril_pickaxe
-  tool: pickaxe
-  tool_speed: 8.0
-  tier: 4
   textures:
     all: pickaxe.block.png
 

@@ -1,11 +1,14 @@
 #include "core/App.h"
 
+#include "core/ColorPalette.h"
 #include "core/ShapePicker.h"
 #include "core/Ui.h"
 #include "world/BlockRegistry.h"
 #include "world/Raycast.h"
 
 #include <glm/gtc/matrix_transform.hpp>
+
+#include <stb_image.h> // declarations only; the implementation lives in TextureArray.cpp
 
 #include <algorithm>
 #include <cmath>
@@ -64,12 +67,17 @@ void App::buildUi(const InputState& in) {
 
     if (paused_) {
         ui.panel(0.0f, 0.0f, W, H, kUiDim); // dim the world behind the menu
-        // Two columns centred as a pair: the options menu + the atmosphere tuner.
-        const float pw = 460.0f, tw = 460.0f, gap = 24.0f, ph = 712.0f;
-        const float startX = std::round((W - (pw + gap + tw)) * 0.5f);
-        const float py = std::round((H - ph) * 0.5f);
-        buildMenu(ui, startX, py, pw, ph);
-        buildTuning(ui, startX + pw + gap, py, tw, ph);
+        if (palettePickerOpen_) {
+            // Modal: take over input so menu buttons under it don't also react.
+            buildPalettePicker(ui, W, H, in);
+        } else {
+            // Two columns centred as a pair: the options menu + the atmosphere tuner.
+            const float pw = 460.0f, tw = 460.0f, gap = 24.0f, ph = 712.0f;
+            const float startX = std::round((W - (pw + gap + tw)) * 0.5f);
+            const float py = std::round((H - ph) * 0.5f);
+            buildMenu(ui, startX, py, pw, ph);
+            buildTuning(ui, startX + pw + gap, py, tw, ph);
+        }
     } else if (chestOpen_) {
         buildChest(ui, W, H, in);
     } else if (inventoryOpen_) {
@@ -693,17 +701,216 @@ void App::cycleFont(int dir) {
     ui_.setFont(std::string(VG_ASSET_DIR) + "/fonts/ari/" + settings_.font);
 }
 
-// One escape menu with every option directly on it, then Resume / Exit.
+void App::loadPreviewThumb() {
+    if (!previewThumb_.empty() || previewW_ < 0) return; // already loaded or failed before
+    constexpr int TW = 32, TH = 18; // thumbnail resolution (16:9-ish mosaic)
+    const std::string path = std::string(VG_ASSET_DIR) + "/palette_preview.png";
+    int w = 0, h = 0, ch = 0;
+    unsigned char* px = stbi_load(path.c_str(), &w, &h, &ch, 3);
+    if (!px || w <= 0 || h <= 0) {
+        if (px) stbi_image_free(px);
+        previewW_ = -1; // sentinel: don't retry; picker falls back to swatch strips
+        return;
+    }
+    previewThumb_.assign(static_cast<size_t>(TW * TH), glm::vec3(0.0f));
+    for (int ty = 0; ty < TH; ++ty) { // box-average each source region into one cell
+        const int y0 = ty * h / TH, y1 = std::max(y0 + 1, (ty + 1) * h / TH);
+        for (int tx = 0; tx < TW; ++tx) {
+            const int x0 = tx * w / TW, x1 = std::max(x0 + 1, (tx + 1) * w / TW);
+            glm::vec3 sum(0.0f);
+            int cnt = 0;
+            for (int y = y0; y < y1; ++y) {
+                for (int x = x0; x < x1; ++x) {
+                    const unsigned char* p = px + (static_cast<size_t>(y) * w + x) * 3;
+                    sum += glm::vec3(p[0], p[1], p[2]);
+                    ++cnt;
+                }
+            }
+            previewThumb_[ty * TW + tx] =
+                (cnt > 0 ? sum / static_cast<float>(cnt) : sum) / 255.0f;
+        }
+    }
+    stbi_image_free(px);
+    previewW_ = TW;
+    previewH_ = TH;
+}
+
+void App::refreshPaletteCache() {
+    loadPreviewThumb();
+    paletteList_.clear();
+    palettePreview_.clear();
+    paletteList_.emplace_back(std::string{}, std::vector<glm::vec3>{}); // index 0 = Off
+    const std::string dir = std::string(VG_ASSET_DIR) + "/colorpalettes";
+    for (const std::string& name : listColorPalettes(dir)) {
+        paletteList_.emplace_back(name, loadColorPalette(dir + "/" + name + ".hex"));
+    }
+    // Remap the reference thumbnail through each palette once, so the picker just
+    // blits cached pixels each frame (no per-frame nearest-colour search).
+    if (!previewThumb_.empty()) {
+        auto nearest = [](const glm::vec3& c, const std::vector<glm::vec3>& pal) {
+            glm::vec3 best = c;
+            float bd = 1e30f;
+            for (const glm::vec3& p : pal) {
+                const glm::vec3 d = c - p;
+                const float dd = glm::dot(d, d);
+                if (dd < bd) { bd = dd; best = p; }
+            }
+            return best;
+        };
+        palettePreview_.resize(paletteList_.size());
+        for (size_t i = 0; i < paletteList_.size(); ++i) {
+            const std::vector<glm::vec3>& cols = paletteList_[i].second;
+            if (cols.empty()) { palettePreview_[i] = previewThumb_; continue; } // Off
+            std::vector<glm::vec3> out(previewThumb_.size());
+            for (size_t p = 0; p < previewThumb_.size(); ++p) {
+                out[p] = nearest(previewThumb_[p], cols);
+            }
+            palettePreview_[i] = std::move(out);
+        }
+    }
+}
+
+// Modal palette picker: a grid of cells, each a small game render remapped through
+// that palette (so you SEE the look) with the palette name beneath. Drawn on top
+// of the Esc menu; click a cell to apply, or Close / click outside to dismiss.
+void App::buildPalettePicker(Ui& ui, float w, float h, const InputState& in) {
+    if (paletteList_.empty()) refreshPaletteCache();
+    ui.panel(0.0f, 0.0f, w, h, kUiDim); // dim everything (incl. the menu) behind it
+
+    const int  n         = static_cast<int>(paletteList_.size());
+    const bool haveThumb = previewW_ > 0 && previewH_ > 0 && !previewThumb_.empty();
+
+    const float nameH = 16.0f, capPad = 5.0f, cellGap = 12.0f;
+    const float pad = 22.0f, titleH = 34.0f, closeH = 34.0f, closeGap = 14.0f;
+    const float chromeTop = pad + titleH;
+    const float chromeBot = closeGap + closeH + pad;
+    const float aspect = haveThumb ? static_cast<float>(previewW_) /
+                                         static_cast<float>(previewH_)
+                                   : 16.0f / 9.0f; // preview image width / height
+
+    // Reserve a centred area and pick the column count that yields the LARGEST
+    // preview cell while still fitting both the reserved width and height — so the
+    // grid adapts to any palette count and any window size (Close always visible).
+    const float gridAreaW = w * 0.90f - 2.0f * pad;
+    const float gridAreaH = h * 0.92f - chromeTop - chromeBot;
+    int   cols = 1;
+    float imgW = 0.0f;
+    for (int cc = 1; cc <= n; ++cc) {
+        const int   rr = (n + cc - 1) / cc;
+        float cw = (gridAreaW - (cc - 1) * cellGap) / static_cast<float>(cc);
+        // If that many rows is too tall, shrink the cell to satisfy the height.
+        const float perCellH = (gridAreaH - (rr - 1) * cellGap) / static_cast<float>(rr);
+        const float byHeight = (perCellH - capPad - nameH) * aspect;
+        cw = std::min(cw, byHeight);
+        if (cw > imgW) { imgW = cw; cols = cc; }
+    }
+    imgW = std::clamp(imgW, 32.0f, 200.0f); // don't blow up a 2-3 palette grid
+    const float imgH  = imgW / aspect;
+    const float cellW = imgW;
+    const float cellH = imgH + capPad + nameH;
+    const int   rows  = (n + cols - 1) / cols;
+
+    const float gridW  = cols * cellW + (cols - 1) * cellGap;
+    const float gridH  = rows * cellH + (rows - 1) * cellGap;
+    const float panelW = gridW + 2.0f * pad;
+    const float panelH = chromeTop + gridH + chromeBot;
+    const float px = std::round((w - panelW) * 0.5f);
+    const float py = std::round((h - panelH) * 0.5f);
+
+    // Click outside the panel closes the popup (without changing the selection).
+    if (in.pointerPressed && !ui.hovered(px, py, panelW, panelH)) {
+        palettePickerOpen_ = false;
+        return;
+    }
+
+    ui.frame(px, py, panelW, panelH, kPanelFill, kCream, kFrameThick, kFrameRadius);
+    ui.labelCentered(px + panelW * 0.5f, py + 14.0f, "Colour Palette", 0.7f, kLilac);
+
+    const float gx = px + pad, gy = py + chromeTop;
+    for (int i = 0; i < n; ++i) {
+        const int   c  = i % cols, r = i / cols;
+        const float cx = gx + c * (cellW + cellGap);
+        const float cy = gy + r * (cellH + cellGap);
+        const std::string& name = paletteList_[i].first;
+        const bool selected = (name == settings_.retroPalette);
+        const bool hov      = ui.hovered(cx, cy, cellW, cellH);
+
+        // Preview render: the reference frame remapped through this palette, drawn
+        // as a mosaic of the cached thumbnail. Falls back to a swatch strip if the
+        // reference image is missing.
+        if (haveThumb && i < static_cast<int>(palettePreview_.size()) &&
+            !palettePreview_[i].empty()) {
+            const std::vector<glm::vec3>& thumb = palettePreview_[i];
+            const float pw = imgW / static_cast<float>(previewW_);
+            const float ph = imgH / static_cast<float>(previewH_);
+            for (int ty = 0; ty < previewH_; ++ty) {
+                for (int tx = 0; tx < previewW_; ++tx) {
+                    const glm::vec3& cc = thumb[ty * previewW_ + tx];
+                    ui.panel(cx + tx * pw, cy + ty * ph,
+                             std::ceil(pw) + 0.5f, std::ceil(ph) + 0.5f,
+                             glm::vec4(cc, 1.0f));
+                }
+            }
+        } else {
+            ui.roundRect(cx, cy, imgW, imgH, 6.0f, kCharcoal);
+            const std::vector<glm::vec3>& cols2 = paletteList_[i].second;
+            if (!cols2.empty()) {
+                const float sw = imgW / static_cast<float>(cols2.size());
+                for (size_t s = 0; s < cols2.size(); ++s) {
+                    ui.panel(cx + static_cast<float>(s) * sw, cy,
+                             std::ceil(sw) + 0.5f, imgH, glm::vec4(cols2[s], 1.0f));
+                }
+            }
+        }
+
+        // Selection (lilac) / hover (cream) ring around the image.
+        if (selected || hov) {
+            ui.roundRectOutline(cx - 3.0f, cy - 3.0f, imgW + 6.0f, imgH + 6.0f, 6.0f,
+                                3.0f, selected ? kLilac : kCream);
+        }
+
+        std::string label = name.empty() ? "Off" : name;
+        if (label.size() > 16) label = label.substr(0, 14) + ".."; // keep on one line
+        ui.labelCentered(cx + imgW * 0.5f, cy + imgH + capPad, label, 0.4f,
+                         selected ? kLilac : kUiText);
+
+        if (hov && in.pointerPressed) {
+            settings_.retroPalette = name;
+            applyRetroPalette();
+            palettePickerOpen_ = false;
+        }
+    }
+
+    if (ui.button(px + pad, py + panelH - pad - closeH, panelW - 2.0f * pad, closeH,
+                  "Close")) {
+        palettePickerOpen_ = false;
+    }
+}
+
+// Escape menu, tabbed so each screen shows only a handful of rows (Display /
+// Effects / Game / World). Resume + Exit stay pinned at the bottom on every tab.
 void App::buildMenu(Ui& ui, float px, float py, float pw, float ph) {
     // Charcoal panel with a thick cream pixel-art border; lilac title accent.
     ui.frame(px, py, pw, ph, kPanelFill, kCream, kFrameThick, 12.0f);
     ui.labelCentered(px + pw * 0.5f, py + 14.0f, "Menu", 0.85f, kLilac);
 
     const float lx = px + 24.0f, cw = pw - 48.0f;
-    float y = py + 46.0f;
+    float y = py + 40.0f;
 
-    // A labelled slider; returns its (possibly dragged) value. `decimals` < 0 means
-    // show as an integer. Rows are compact so all options fit one panel.
+    // Tab row: Display / FX / Game / World / Retro (short labels so 5 fit one row).
+    const char* tabs[5] = {"View", "FX", "Game", "World", "Retro"};
+    const float tabGap = 5.0f, tabW = (cw - 4.0f * tabGap) / 5.0f;
+    for (int i = 0; i < 5; ++i) {
+        if (ui.button(lx + i * (tabW + tabGap), y, tabW, 30.0f, tabs[i])) {
+            menuTab_ = i;
+        }
+    }
+    y += 38.0f;
+    ui.labelCentered(px + pw * 0.5f, y, tabs[menuTab_], 0.5f, kLilac);
+    y += 24.0f;
+
+    // A labelled slider; returns its (possibly dragged) value. `decimals` < 0 shows
+    // as an integer. Rows are compact so a tab's worth of options fits comfortably.
     auto sliderRow = [&](const std::string& name, float value, float lo, float hi,
                          int steps, int decimals) -> float {
         char buf[48];
@@ -715,8 +922,6 @@ void App::buildMenu(Ui& ui, float px, float py, float pw, float ph) {
         }
         ui.label(lx, y, buf, 0.46f, kUiText);
         y += 20.0f;
-        // Track is tall enough that the 2-block (6 px) border still leaves a
-        // visible lilac fill bar inside; it still fits inside the row's advance.
         const float nv = ui.slider(lx, y, cw, 22.0f, value, lo, hi, steps);
         y += 30.0f;
         return nv;
@@ -726,129 +931,178 @@ void App::buildMenu(Ui& ui, float px, float py, float pw, float ph) {
         y += 42.0f;
         return clicked;
     };
+    auto toggle = [&](const char* name, bool on) {
+        const bool clicked = ui.button(lx, y, cw, 34.0f, std::string(name) + (on ? "On" : "Off"));
+        y += 42.0f;
+        return clicked;
+    };
 
-    // Game mode (G key) + fullscreen (F11), side by side on one row.
-    {
-        const float bw = (cw - 8.0f) * 0.5f;
-        if (ui.button(lx, y, bw, 34.0f,
-                      std::string("Mode: ") + (creativeMode_ ? "Creative" : "Survival"))) {
-            toggleGameMode();
+    if (menuTab_ == 0) { // --- Display: resolution / view / cosmetic --------------
+        // Pixelate 0..16 (integer).
+        const int pv = static_cast<int>(std::lround(
+            sliderRow("Pixelate", static_cast<float>(settings_.pixelate), 0.0f, 16.0f, 16, -1)));
+        if (pv != settings_.pixelate) {
+            settings_.pixelate = pv;
+            renderer_.setPixelScale(static_cast<uint32_t>(std::max(1, pv)));
         }
-        if (ui.button(lx + bw + 8.0f, y, bw, 34.0f,
-                      std::string("Fullscreen: ") + (window_.isFullscreen() ? "On" : "Off"))) {
+        // Render distance (chunks). The voxel window is allocated once at startup, so
+        // a change only persists here and takes effect on the next launch.
+        const int rd = static_cast<int>(std::lround(
+            sliderRow("Render dist (restart)", static_cast<float>(settings_.renderDistance),
+                      4.0f, 16.0f, 12, -1)));
+        if (rd != settings_.renderDistance) {
+            settings_.renderDistance = rd;
+        }
+        // Field of view.
+        const float fov = sliderRow("FOV", settings_.fov, 50.0f, 110.0f, 60, -1);
+        if (std::abs(fov - settings_.fov) > 0.01f) {
+            settings_.fov = fov;
+            player_.camera().fovDegrees = fov;
+        }
+        if (toggle("Fullscreen: ", window_.isFullscreen())) {
             window_.setFullscreen(!window_.isFullscreen());
             settings_.fullscreen = window_.isFullscreen();
         }
-        y += 42.0f;
-    }
-
-    // Pixelate 0..16 (integer).
-    const int pv = static_cast<int>(std::lround(
-        sliderRow("Pixelate", static_cast<float>(settings_.pixelate), 0.0f, 16.0f, 16, -1)));
-    if (pv != settings_.pixelate) {
-        settings_.pixelate = pv;
-        renderer_.setPixelScale(static_cast<uint32_t>(std::max(1, pv)));
-    }
-    // Render distance (chunks). The voxel window is allocated once at startup, so a
-    // change only persists here and takes effect on the next launch — hence the
-    // "(restart)" hint in the label.
-    const int rd = static_cast<int>(std::lround(
-        sliderRow("Render dist (restart)", static_cast<float>(settings_.renderDistance),
-                  4.0f, 16.0f, 12, -1)));
-    if (rd != settings_.renderDistance) {
-        settings_.renderDistance = rd;
-    }
-    // Light falloff (levels lost per block of spread; higher = darker caves /
-    // tighter glow). Applying a change relights the world and rebuilds every
-    // chunk, so only act when the slider actually lands on a new integer.
-    const int skyF = static_cast<int>(std::lround(
-        sliderRow("Cave darkness", static_cast<float>(settings_.skyFalloff), 1.0f, 5.0f, 4, -1)));
-    const int blkF = static_cast<int>(std::lround(
-        sliderRow("Glow falloff", static_cast<float>(settings_.blockFalloff), 1.0f, 5.0f, 4, -1)));
-    if (skyF != settings_.skyFalloff || blkF != settings_.blockFalloff) {
-        settings_.skyFalloff   = skyF;
-        settings_.blockFalloff = blkF;
-        // setLightFalloff recomputes BOTH light fields — a full world mutation. The
-        // menu can be open while a background relight is in flight and mesh workers
-        // hold jobs, so drain them first or the threads race the light vectors
-        // (REVIEW R1).
-        drainBeforeWorldMutation();
-        if (world_.setLightFalloff(skyF, blkF)) {
-            worldRenderer_.remeshAll();
+        // LOD terrain: the distant low-poly shell + tree impostors past the loaded
+        // window (FarTerrainRenderer). Off = the world fades to haze at the edge.
+        if (toggle("LOD terrain: ", settings_.lod)) {
+            settings_.lod = !settings_.lod;
+            farTerrain_.setEnabled(settings_.lod);
         }
-    }
-    // Dark-area sensor grain (0 = off .. 0.5 = strong static in near-black).
-    const float dn = sliderRow("Dark noise", settings_.darkNoise, 0.0f, 0.5f, 0, 2);
-    if (std::abs(dn - settings_.darkNoise) > 1e-4f) {
-        settings_.darkNoise = dn;
-    }
-    // Field of view.
-    const float fov = sliderRow("FOV", settings_.fov, 50.0f, 110.0f, 60, -1);
-    if (std::abs(fov - settings_.fov) > 0.01f) {
-        settings_.fov = fov;
-        player_.camera().fovDegrees = fov;
-    }
-    // Mouse sensitivity.
-    const float sens = sliderRow("Sensitivity", settings_.sensitivity, 0.02f, 0.30f, 0, 3);
-    if (std::abs(sens - settings_.sensitivity) > 1e-4f) {
-        settings_.sensitivity = sens;
-        player_.setMouseSensitivity(sens);
-    }
-    // Flight speed.
-    const float fly = sliderRow("Flight speed", settings_.flySpeed, 4.0f, 40.0f, 0, 1);
-    if (std::abs(fly - settings_.flySpeed) > 0.01f) {
-        settings_.flySpeed = fly;
-        player_.setFlySpeed(fly);
-    }
-    // Time of day (live; the sun/moon and lighting follow immediately).
-    const float th = sliderRow("Time (h)", dayNight_.hour(), 0.0f, 24.0f, 48, 1);
-    if (std::abs(th - dayNight_.hour()) > 0.01f) {
-        dayNight_.setHour(th);
-    }
-    // Day length: real minutes for a full in-game day.
-    const float dl = sliderRow("Day length (min)", settings_.dayLengthMinutes, 1.0f, 60.0f, 59, -1);
-    if (std::abs(dl - settings_.dayLengthMinutes) > 0.01f) {
-        settings_.dayLengthMinutes = dl;
-        dayNight_.setDayLengthMinutes(dl);
-    }
-    // Freeze / resume the day-night cycle.
-    if (button(std::string("Time: ") + (settings_.timeRunning ? "Running" : "Paused"))) {
-        settings_.timeRunning = !settings_.timeRunning;
-        dayNight_.setRunning(settings_.timeRunning);
-    }
-    // View bob: subtle head-bob while walking (off for a locked camera).
-    if (button(std::string("View bob: ") + (settings_.viewBob ? "On" : "Off"))) {
-        settings_.viewBob = !settings_.viewBob;
-        player_.setViewBob(settings_.viewBob);
-    }
-    // LOD terrain: the distant low-poly shell + tree impostors past the loaded
-    // window (FarTerrainRenderer). Off = the world fades to haze at the window edge
-    // (cheaper; no far ground). Re-enabling rebuilds the shell within a few frames.
-    if (button(std::string("LOD terrain: ") + (settings_.lod ? "On" : "Off"))) {
-        settings_.lod = !settings_.lod;
-        farTerrain_.setEnabled(settings_.lod);
-    }
-    // Day-sky colour (cycles the palette; tints the daytime zenith).
-    if (button("Sky: " + settings_.skyColor)) {
-        const std::vector<std::string>& names = palette_.names();
-        if (!names.empty()) {
-            int idx = 0;
-            for (size_t i = 0; i < names.size(); ++i) {
-                if (names[i] == settings_.skyColor) { idx = static_cast<int>(i); break; }
+        // Font (cycles the ari family).
+        if (button("Font: " + fontLabel(settings_.font))) {
+            cycleFont(+1);
+        }
+    } else if (menuTab_ == 1) { // --- Effects: post-processing -------------------
+        // Bloom: glow off the frame's bright areas. Toggle, then its sliders.
+        if (toggle("Bloom: ", settings_.bloom)) {
+            settings_.bloom = !settings_.bloom;
+        }
+        if (settings_.bloom) {
+            const float bi = sliderRow("Bloom strength", settings_.bloomIntensity, 0.0f, 2.0f, 0, 2);
+            if (std::abs(bi - settings_.bloomIntensity) > 1e-4f) settings_.bloomIntensity = bi;
+            const float bt = sliderRow("Bloom threshold", settings_.bloomThreshold, 0.0f, 1.0f, 0, 2);
+            if (std::abs(bt - settings_.bloomThreshold) > 1e-4f) settings_.bloomThreshold = bt;
+            const float br = sliderRow("Bloom spread", settings_.bloomRadius, 1.0f, 8.0f, 0, 1);
+            if (std::abs(br - settings_.bloomRadius) > 1e-4f) settings_.bloomRadius = br;
+        }
+        // God rays: sun shafts through terrain/trees/clouds.
+        if (toggle("God rays: ", settings_.godrays)) {
+            settings_.godrays = !settings_.godrays;
+        }
+        if (settings_.godrays) {
+            const float gs = sliderRow("Ray strength", settings_.godrayStrength, 0.0f, 1.0f, 0, 2);
+            if (std::abs(gs - settings_.godrayStrength) > 1e-4f) settings_.godrayStrength = gs;
+            const float gl = sliderRow("Ray reach", settings_.godrayLength, 0.3f, 1.5f, 0, 2);
+            if (std::abs(gl - settings_.godrayLength) > 1e-4f) settings_.godrayLength = gl;
+            const float gd = sliderRow("Ray decay", settings_.godrayDecay, 0.85f, 0.99f, 0, 3);
+            if (std::abs(gd - settings_.godrayDecay) > 1e-4f) settings_.godrayDecay = gd;
+        }
+        // Dark-area sensor grain (0 = off .. 0.5 = strong static in near-black).
+        const float dn = sliderRow("Dark noise", settings_.darkNoise, 0.0f, 0.5f, 0, 2);
+        if (std::abs(dn - settings_.darkNoise) > 1e-4f) {
+            settings_.darkNoise = dn;
+        }
+    } else if (menuTab_ == 2) { // --- Game: mode + controls --------------------
+        // Creative / Survival (custom label, so not the On/Off toggle helper).
+        if (button("Mode: " + std::string(creativeMode_ ? "Creative" : "Survival"))) {
+            toggleGameMode();
+        }
+        // Mouse sensitivity.
+        const float sens = sliderRow("Sensitivity", settings_.sensitivity, 0.02f, 0.30f, 0, 3);
+        if (std::abs(sens - settings_.sensitivity) > 1e-4f) {
+            settings_.sensitivity = sens;
+            player_.setMouseSensitivity(sens);
+        }
+        // Flight speed.
+        const float fly = sliderRow("Flight speed", settings_.flySpeed, 4.0f, 40.0f, 0, 1);
+        if (std::abs(fly - settings_.flySpeed) > 0.01f) {
+            settings_.flySpeed = fly;
+            player_.setFlySpeed(fly);
+        }
+        // View bob: subtle head-bob while walking (off for a locked camera).
+        if (toggle("View bob: ", settings_.viewBob)) {
+            settings_.viewBob = !settings_.viewBob;
+            player_.setViewBob(settings_.viewBob);
+        }
+    } else if (menuTab_ == 3) { // --- World: lighting, time, sky -----------------
+        // Light falloff (levels lost per block; higher = darker caves / tighter glow).
+        // Applying relights the world + rebuilds every chunk, so only act on a new int.
+        const int skyF = static_cast<int>(std::lround(
+            sliderRow("Cave darkness", static_cast<float>(settings_.skyFalloff), 1.0f, 5.0f, 4, -1)));
+        const int blkF = static_cast<int>(std::lround(
+            sliderRow("Glow falloff", static_cast<float>(settings_.blockFalloff), 1.0f, 5.0f, 4, -1)));
+        if (skyF != settings_.skyFalloff || blkF != settings_.blockFalloff) {
+            settings_.skyFalloff   = skyF;
+            settings_.blockFalloff = blkF;
+            // A full world mutation — drain workers/relight first (REVIEW R1).
+            drainBeforeWorldMutation();
+            if (world_.setLightFalloff(skyF, blkF)) {
+                worldRenderer_.remeshAll();
             }
-            settings_.skyColor = names[(idx + 1) % names.size()];
-            dayNight_.setDayZenithOverride(palette_.linear(settings_.skyColor));
+        }
+        // Time of day (live; the sun/moon and lighting follow immediately).
+        const float th = sliderRow("Time (h)", dayNight_.hour(), 0.0f, 24.0f, 48, 1);
+        if (std::abs(th - dayNight_.hour()) > 0.01f) {
+            dayNight_.setHour(th);
+        }
+        // Day length: real minutes for a full in-game day.
+        const float dl = sliderRow("Day length (min)", settings_.dayLengthMinutes, 1.0f, 60.0f, 59, -1);
+        if (std::abs(dl - settings_.dayLengthMinutes) > 0.01f) {
+            settings_.dayLengthMinutes = dl;
+            dayNight_.setDayLengthMinutes(dl);
+        }
+        if (button(std::string("Time: ") + (settings_.timeRunning ? "Running" : "Paused"))) {
+            settings_.timeRunning = !settings_.timeRunning;
+            dayNight_.setRunning(settings_.timeRunning);
+        }
+        // Day-sky colour (cycles the palette; tints the daytime zenith).
+        if (button("Sky: " + settings_.skyColor)) {
+            const std::vector<std::string>& names = palette_.names();
+            if (!names.empty()) {
+                int idx = 0;
+                for (size_t i = 0; i < names.size(); ++i) {
+                    if (names[i] == settings_.skyColor) { idx = static_cast<int>(i); break; }
+                }
+                settings_.skyColor = names[(idx + 1) % names.size()];
+                dayNight_.setDayZenithOverride(palette_.linear(settings_.skyColor));
+            }
+        }
+    } else { // --- Retro: independent PS1/PS2 FX (mix freely) -------------------
+        // Every effect is its own control — slide one up to taste, or stack them.
+        // PS1 ~= wobble + affine + bits 5; PS2 ~= soft + interlace + bits 6.
+        const float j = sliderRow("Vertex wobble", settings_.retroJitter, 0.0f, 1.0f, 0, 2);
+        if (std::abs(j - settings_.retroJitter) > 1e-4f) settings_.retroJitter = j;
+        if (toggle("Affine warp: ", settings_.retroAffine)) {
+            settings_.retroAffine = !settings_.retroAffine;
+        }
+        // Colour bits: 8 = off (full colour), lower = harsher quantisation (5 = PS1).
+        const int cb = static_cast<int>(std::lround(
+            sliderRow("Colour bits", static_cast<float>(settings_.retroColorBits), 3.0f, 8.0f, 5, -1)));
+        if (cb != settings_.retroColorBits) settings_.retroColorBits = cb;
+        const float dt = sliderRow("Dither", settings_.retroDither, 0.0f, 1.0f, 0, 2);
+        if (std::abs(dt - settings_.retroDither) > 1e-4f) settings_.retroDither = dt;
+        const float il = sliderRow("Interlace", settings_.retroInterlace, 0.0f, 1.0f, 0, 2);
+        if (std::abs(il - settings_.retroInterlace) > 1e-4f) settings_.retroInterlace = il;
+        const float sf = sliderRow("Soft blur", settings_.retroSoft, 0.0f, 1.0f, 0, 2);
+        if (std::abs(sf - settings_.retroSoft) > 1e-4f) settings_.retroSoft = sf;
+        // Selectable colour palette: remaps the whole frame to the nearest swatch
+        // (overrides "Colour bits"). Opens a popup that previews every
+        // assets/colorpalettes/*.hex as a swatch strip so you can see each look.
+        if (button("Palette: " + (settings_.retroPalette.empty() ? std::string("Off")
+                                                                 : settings_.retroPalette))) {
+            refreshPaletteCache();
+            palettePickerOpen_ = true;
         }
     }
-    // Font (cycles the ari family).
-    if (button("Font: " + fontLabel(settings_.font))) {
-        cycleFont(+1);
-    }
 
-    if (button("Resume")) {
+    // Resume / Exit pinned to the bottom of the panel, side by side, on every tab.
+    const float bw = (cw - 8.0f) * 0.5f;
+    const float by = py + ph - 34.0f - 16.0f;
+    if (ui.button(lx, by, bw, 34.0f, "Resume")) {
         togglePause();
     }
-    if (button("Exit")) {
+    if (ui.button(lx + bw + 8.0f, by, bw, 34.0f, "Exit")) {
         window_.requestClose();
     }
 }

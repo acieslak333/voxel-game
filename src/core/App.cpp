@@ -1,5 +1,6 @@
 #include "core/App.h"
 
+#include "core/ColorPalette.h"
 #include "core/ShapePicker.h"
 #include "core/Ui.h"
 #include "player/PlayerSave.h"
@@ -291,12 +292,58 @@ App::App()
       input_(window_),
       player_(glm::vec3(0.0f)),
       crafting_(std::string(VG_ASSET_DIR) + "/recipes.yaml", world_.registry()) {
-    // Spawn standing on the surface at the centre of the world.
-    const int cx = world_.sizeInBlocks().x / 2;
-    const int cz = world_.sizeInBlocks().z / 2;
+    // Spawn on the EAST beach of the island. The island is centred at world (0,0)
+    // and its coastline is thousands of blocks out — far beyond the streamed window,
+    // which starts at the world origin. surfaceHeight() is a PURE function of world
+    // coords (valid anywhere, not just loaded chunks), so we march EAST (+X) from the
+    // centre to the shoreline, then recentre the streamed window onto that spawn so
+    // the coast is actually loaded before the player needs ground under them.
+    int cx = 0, cz = 0;
+    {
+        const int seaLevel    = world_.generator().seaLevel();
+        constexpr int kMaxMarch = 6000; // past any island radius + archipelago reach
+        // The eastern shore at latitude z: the last land column before open ocean,
+        // backed off to a gentle beach (within a few blocks of the water line).
+        auto eastShore = [&](int z, int& outX, int& outH) -> bool {
+            int lastLand = -1;
+            for (int x = 0; x < kMaxMarch; ++x) {
+                const int h = world_.surfaceHeight(x, z);
+                if (h > seaLevel) lastLand = x;
+                else if (lastLand >= 0 && x > lastLand + 8) break; // cleared the coast
+            }
+            if (lastLand < 0) return false;
+            for (int x = lastLand; x >= std::max(0, lastLand - 96); --x) {
+                const int h = world_.surfaceHeight(x, z);
+                if (h > seaLevel && h <= seaLevel + 3) { outX = x; outH = h; return true; }
+            }
+            outX = lastLand; outH = world_.surfaceHeight(lastLand, z);
+            return true;
+        };
+        // Sample a fan of latitudes around the centre and keep the LOWEST shore, so we
+        // land on flat sand rather than a sea-cliff if z=0 happens to hit a headland.
+        int bestH = 1 << 30;
+        for (int z = -160; z <= 160; z += 16) {
+            int sx, sh;
+            if (!eastShore(z, sx, sh) || sh <= seaLevel) continue;
+            if (sh < bestH) { bestH = sh; cx = sx; cz = z; }
+        }
+    }
     spawnFeet_ = glm::vec3(static_cast<float>(cx),
                            static_cast<float>(world_.surfaceHeight(cx, cz)) + 2.0f,
                            static_cast<float>(cz));
+    // Recentre the streamed window onto the spawn so the eastern coast is loaded from
+    // frame 0. A jump this large takes recenter()'s synchronous full-regen path (it
+    // also recomputes sky/block light); we then rebuild the window's meshes (melt-in).
+    // streamBarrier first so no mesh worker reads the world mid-regen (invariant #1).
+    if (world_.streaming()) {
+        constexpr int N = Chunk::kSize;
+        const int scx = (cx >= 0 ? cx : cx - (N - 1)) / N;
+        const int scz = (cz >= 0 ? cz : cz - (N - 1)) / N;
+        worldRenderer_.streamBarrier();
+        std::vector<glm::ivec4> boxes;
+        world_.recenter(scx, scz, boxes);
+        worldRenderer_.remeshAll();
+    }
     player_.teleport(spawnFeet_);
 
     // Test biped (ISSUES #13E): stand it a few blocks in front of the spawn camera
@@ -418,6 +465,19 @@ void App::applySettings() {
     dayNight_.setDayZenithOverride(palette_.linear(sky));
     // The font is applied at construction (ui_ is built with it); changing it
     // later goes through cycleFont().
+    applyRetroPalette();
+}
+
+void App::applyRetroPalette() {
+    // Empty name = palette off (the per-channel "Colour bits" quantiser runs
+    // instead). Otherwise load assets/colorpalettes/<name>.hex and bind it; a
+    // missing/garbage file loads as no colours, which the composite reads as off.
+    std::vector<glm::vec3> colors;
+    if (!settings_.retroPalette.empty()) {
+        colors = loadColorPalette(std::string(VG_ASSET_DIR) + "/colorpalettes/" +
+                                  settings_.retroPalette + ".hex");
+    }
+    renderer_.setRetroPalette(colors);
 }
 
 void App::togglePause() {
@@ -427,6 +487,7 @@ void App::togglePause() {
     window_.setCursorDisabled(!paused_);
     input_.resetMouseDelta();
     if (!paused_) {
+        palettePickerOpen_ = false;      // don't reopen the popup on next pause
         settings_.save(settingsPath()); // persist any changes made in the menu
     }
 }
@@ -675,7 +736,12 @@ void App::breakBlockAt(const glm::ivec3& b) {
                                 ItemStack{broken, static_cast<uint16_t>(leftover)});
         }
     }
-    worldRenderer_.remeshChunks(dirty);
+    // Remesh the dirtied chunks on the async streaming path (workers, or the
+    // budgeted no-worker queue) rather than meshing them inline — the synchronous
+    // greedyMesh + buffer build was the remaining main-thread cost of an edit. The
+    // result installs via the per-frame streamPump (same path liquid flow uses); the
+    // next mutation's streamBarrier orders worker reads before it. ~1 frame later.
+    worldRenderer_.streamRemesh(dirty);
     seedLiquid(b.x, b.y, b.z); // liquid may flow into the new gap
     // Break feedback: pop a burst of chips out of the gap. The effect can name its
     // own texture; an empty texture uses the broken block's top face.
@@ -697,7 +763,7 @@ void App::placeBlockAt(const glm::ivec3& t, uint16_t id, uint8_t metadata) {
     if (!creativeMode_) {
         player_.inventory().takeFromSelected(); // placing uses one up (creative is infinite)
     }
-    worldRenderer_.remeshChunks(dirty);
+    worldRenderer_.streamRemesh(dirty); // async remesh, like breakBlockAt
     seedLiquid(t.x, t.y, t.z);
     // Place poof: a soft dust puff in the placed block's own colour (ISSUES #13M).
     const uint32_t layer = placeEffect_.texture.empty()
@@ -713,7 +779,7 @@ void App::reshapeBlockAt(const glm::ivec3& b, uint16_t id, uint8_t metadata) {
     }
     // Keep the block id, only change its shape metadata; relight + remesh as usual.
     const std::vector<glm::ivec3> dirty = world_.setBlock(b.x, b.y, b.z, Block{id, metadata});
-    worldRenderer_.remeshChunks(dirty);
+    worldRenderer_.streamRemesh(dirty); // async remesh, like breakBlockAt
 }
 
 void App::updateSurvival(float dt) {
@@ -1055,11 +1121,73 @@ void App::streamWindow() {
             }
             worldRenderer_.streamBarrier();
         };
-        if (pregenFuture_.valid()) {
-            // A strip is generating in the background; apply it once it is ready and
-            // the window may be mutated. A stale strip (player turned around) applies
-            // as a no-op and is simply dropped.
-            if (pregenFuture_.wait_for(std::chrono::milliseconds(0)) ==
+        // Reap finished stale strips (a turn abandoned their axis/dir). Destroying a
+        // ready/moved-from future never blocks; not-ready ones stay to drain next frame.
+        pregenRetired_.erase(
+            std::remove_if(pregenRetired_.begin(), pregenRetired_.end(),
+                           [](std::future<World::PregenStrip>& f) {
+                               return !f.valid() ||
+                                      f.wait_for(std::chrono::milliseconds(0)) ==
+                                          std::future_status::ready;
+                           }),
+            pregenRetired_.end());
+        // Abandon the staged strips WITHOUT joining on the main thread (a join would be
+        // the per-turn hitch): move them to the drain. Proven safe to keep running
+        // through the coming window move — see pregenRetired_'s declaration.
+        auto retireQueue = [this] {
+            for (auto& f : pregenQueue_) {
+                if (f.valid()) pregenRetired_.push_back(std::move(f));
+            }
+            pregenQueue_.clear();
+        };
+        const bool need = world_.needsRecenter(pcx, pcz);
+
+        // The first column step recenter() would take toward the player (X before Z,
+        // matching recenter()/recenterWithStrip()).
+        int  stepDir    = 0;
+        bool stepAlongX = true;
+        if (need) {
+            if (targetX != org.x) { stepAlongX = true;  stepDir = targetX > org.x ? 1 : -1; }
+            else                  { stepAlongX = false; stepDir = targetZ > org.z ? 1 : -1; }
+        }
+
+        const bool teleport = need && (std::abs(targetX - org.x) >= cnt.x ||
+                                       std::abs(targetZ - org.z) >= cnt.z);
+
+        if (teleport) {
+            // Nothing in the window is reusable — take the synchronous full-regen path
+            // (rare, inherently a load). recenter() regenerates EVERY column (touching
+            // every save file), so unlike a one-column step it cannot overlap a pregen:
+            // join all in-flight strips before it (blocking is fine on this rare path).
+            for (auto& f : pregenQueue_)   { if (f.valid()) f.get(); }
+            for (auto& f : pregenRetired_) { if (f.valid()) f.get(); }
+            pregenQueue_.clear();
+            pregenRetired_.clear();
+            pregenDir_ = 0;
+            const bool gateOpen =
+                !relightFuture_.valid() && worldRenderer_.streamWorkersIdle();
+            if (gateOpen ||
+                ++windowStepStarveFrames_ >= kMaxWindowStepStarveFrames) {
+                windowStepStarveFrames_ = 0;
+                forceDrainForStep();
+                std::vector<glm::ivec4> boxes;
+                std::vector<glm::ivec3> dirty = world_.recenter(pcx, pcz, boxes);
+                launchRelight(std::move(boxes), std::move(dirty));
+            }
+        } else {
+            // A turn invalidates the staged strips (they step along the old axis/dir):
+            // drop them and rebuild for the new direction.
+            if (need && (stepDir != pregenDir_ || stepAlongX != pregenAlongX_)) {
+                retireQueue();
+                pregenDir_    = stepDir;
+                pregenAlongX_ = stepAlongX;
+            }
+
+            // Apply the front strip — one column per frame, as before. The queue keeps
+            // the NEXT column already generating, so a fast crossing finds it ready
+            // instead of waiting on per-column pregen.
+            if (need && !pregenQueue_.empty() &&
+                pregenQueue_.front().wait_for(std::chrono::milliseconds(0)) ==
                     std::future_status::ready) {
                 const bool gateOpen =
                     !relightFuture_.valid() && worldRenderer_.streamWorkersIdle();
@@ -1073,14 +1201,21 @@ void App::streamWindow() {
                     static const bool kStreamTime = std::getenv("VG_STREAM_TIME") != nullptr;
                     const auto t0 = kStreamTime ? std::chrono::steady_clock::now()
                                                 : std::chrono::steady_clock::time_point{};
-                    World::PregenStrip strip = pregenFuture_.get();
+                    World::PregenStrip strip = pregenQueue_.front().get();
+                    pregenQueue_.pop_front();
                     forceDrainForStep(); // idle path: returns immediately
                     const auto t1 = kStreamTime ? std::chrono::steady_clock::now()
                                                 : std::chrono::steady_clock::time_point{};
                     std::vector<glm::ivec4> boxes;
                     std::vector<glm::ivec3> dirty =
                         world_.recenterWithStrip(pcx, pcz, std::move(strip), boxes);
-                    if (!boxes.empty()) {
+                    // A strip that no longer matches the needed step (a turn between
+                    // queueing and applying) moves nothing and returns empty — drop the
+                    // rest of the now-stale queue so it rebuilds for the real direction.
+                    if (dirty.empty() && world_.needsRecenter(pcx, pcz)) {
+                        retireQueue();
+                        pregenDir_ = 0;
+                    } else if (!boxes.empty()) {
                         launchRelight(std::move(boxes), std::move(dirty));
                     }
                     if (kStreamTime) {
@@ -1094,41 +1229,28 @@ void App::streamWindow() {
                     }
                 }
             }
-        } else if (world_.needsRecenter(pcx, pcz)) {
-            if (std::abs(targetX - org.x) >= cnt.x ||
-                std::abs(targetZ - org.z) >= cnt.z) {
-                // Teleport: nothing in the window is reusable — take the synchronous
-                // full-regen path (rare, inherently a load).
-                const bool gateOpen =
-                    !relightFuture_.valid() && worldRenderer_.streamWorkersIdle();
-                if (gateOpen ||
-                    ++windowStepStarveFrames_ >= kMaxWindowStepStarveFrames) {
-                    windowStepStarveFrames_ = 0;
-                    forceDrainForStep();
-                    std::vector<glm::ivec4> boxes;
-                    std::vector<glm::ivec3> dirty = world_.recenter(pcx, pcz, boxes);
-                    launchRelight(std::move(boxes), std::move(dirty));
+
+            // Replenish up to kPregenAhead along the current travel axis. Re-read the
+            // origin: an apply above advanced it, so the front (k=0) steps from the new
+            // origin and the k-th staged strip steps from origin + k*step. Safe
+            // alongside a running relight — pregen reads no window state.
+            if (need && pregenDir_ != 0) {
+                const glm::ivec3 curOrg = world_.chunkOrigin();
+                while (static_cast<int>(pregenQueue_.size()) < kPregenAhead) {
+                    const int k     = static_cast<int>(pregenQueue_.size());
+                    const int fromX = pregenAlongX_ ? curOrg.x + k * pregenDir_ : curOrg.x;
+                    const int fromZ = pregenAlongX_ ? curOrg.z : curOrg.z + k * pregenDir_;
+                    pregenQueue_.push_back(std::async(
+                        std::launch::async,
+                        [this, dir = pregenDir_, ax = pregenAlongX_, fromX, fromZ] {
+                            return world_.pregenStrip(dir, ax, fromX, fromZ);
+                        }));
                 }
-            } else {
-                // Kick the next column's strip in the background (X axis first,
-                // matching recenter's step order). Safe alongside a running relight:
-                // pregen reads no window state.
-                int  dir;
-                bool alongX;
-                if (targetX != org.x) {
-                    alongX = true;
-                    dir    = targetX > org.x ? 1 : -1;
-                } else {
-                    alongX = false;
-                    dir    = targetZ > org.z ? 1 : -1;
-                }
-                pregenFuture_ = std::async(std::launch::async,
-                                           [this, dir, alongX] {
-                                               return world_.pregenStrip(dir, alongX);
-                                           });
             }
-        } else {
-            windowStepStarveFrames_ = 0; // no step pending — not starved
+
+            if (!need) {
+                windowStepStarveFrames_ = 0; // no step pending — not starved
+            }
         }
     } else if (world_.needsRecenter(pcx, pcz)) {
         // Synchronous: generate, relight, and enqueue on the main thread.
@@ -1270,7 +1392,7 @@ void App::buildModels() {
         try { heldModelByItem_[reg.idByName(item)] = mi->second; } catch (...) {}
     };
     for (const auto& kv : byName) bind(kv.first, kv.first); // model name == item name
-    for (const char* p : {"wood_pickaxe", "stone_pickaxe", "mythril_pickaxe"})
+    for (const char* p : {"wood_pickaxe", "stone_pickaxe"})
         bind(p, "pickaxe"); // tiers share the pickaxe model
 
     // The first-person arm (drawn alongside any held tool, sharing its transform).
@@ -1442,6 +1564,24 @@ void App::run(long maxFrames, const std::string& screenshotPath) {
         player_.teleport(glm::vec3(bx + W * 0.5f - 0.5f, topY + 15.0f, bz + D * 0.5f - 0.5f));
         player_.camera().yaw   = -90.0f;
         player_.camera().pitch = -82.0f;  // near-straight-down onto the water surface
+    }
+
+    // Debug hook (headless screenshots): VG_MENU opens the paused escape menu at
+    // startup (optionally on a given tab, VG_MENU_TAB=0..3) so the options layout can
+    // be captured headlessly. Inert unless set.
+    if (const char* m = std::getenv("VG_MENU")) {
+        if (const char* t = std::getenv("VG_MENU_TAB")) {
+            menuTab_ = std::max(0, std::min(4, std::atoi(t)));
+        }
+        if (std::atoi(m) != 0 && !paused_) togglePause();
+    }
+    // VG_PALETTE_DEMO opens the Esc menu straight into the retro colour-palette
+    // picker popup, so its swatch-strip preview can be captured headlessly.
+    if (std::getenv("VG_PALETTE_DEMO")) {
+        menuTab_ = 4; // Retro
+        if (!paused_) togglePause();
+        refreshPaletteCache();
+        palettePickerOpen_ = true;
     }
 
     // Debug hook (headless screenshots): VG_DROP_DEMO spawns one of each tool as a
@@ -1707,6 +1847,18 @@ void App::run(long maxFrames, const std::string& screenshotPath) {
                 proj = rev * proj;
                 proj[1][1] *= -1.0f; // flip Y for Vulkan's clip space
 
+                // Retro geometry FX (independent): vertex-jitter grid + affine-warp
+                // flag, fed to every geometry pass so terrain/entities/far shell all
+                // quiver and warp together. Both 0/off leave the geometry unchanged.
+                const float retroJitterSnap =
+                    (settings_.retroJitter > 0.001f)
+                        ? glm::mix(360.0f, 90.0f, glm::clamp(settings_.retroJitter, 0.0f, 1.0f))
+                        : 0.0f;
+                const float retroAffine = settings_.retroAffine ? 1.0f : 0.0f;
+                worldRenderer_.setRetro(retroJitterSnap, retroAffine);
+                entityRenderer_.setRetro(retroJitterSnap);
+                farTerrain_.setRetro(retroJitterSnap);
+
                 // Sky first (no depth), then the world over it, lit by the same
                 // sun/moon state so terrain shading matches the sky.
                 const DayNight::SkyState sky = dayNight_.state();
@@ -1742,9 +1894,27 @@ void App::run(long maxFrames, const std::string& screenshotPath) {
                                    glm::vec4(sky.lightDir, ambient),
                                    glm::vec4(lightCol, intensity),
                                    cam.position, haze, farReach * 0.55f, farReach);
+                // Held light: if the selected hotbar item is an emitter (a lit
+                // torch, glowstone, ...), cast a dynamic point light from the eye
+                // that travels with the player. Lit per-fragment in the chunk
+                // shader (no chunk relight). Off (radius 0) for non-emitters.
+                glm::vec4 heldLight(0.0f);
+                glm::vec4 heldLightCol(0.0f);
+                {
+                    const uint16_t heldId = player_.inventory().selectedStack().blockId;
+                    const uint8_t emission =
+                        heldId < world_.registry().blockCount()
+                            ? world_.registry().get(heldId).emission : 0;
+                    if (emission > 0) {
+                        const glm::vec3 c = world_.registry().get(heldId).emissionColor;
+                        heldLight    = glm::vec4(cam.position, static_cast<float>(emission));
+                        heldLightCol = glm::vec4(c, emission / 15.0f);
+                    }
+                }
                 worldRenderer_.record(cmd, frameIndex, extent, view, proj,
                                       glm::vec4(sky.lightDir, ambient),
-                                      glm::vec4(lightCol, intensity));
+                                      glm::vec4(lightCol, intensity),
+                                      heldLight, heldLightCol);
 
                 // Entities into the same scene pass (shared depth + composite/fog,
                 // lit like the terrain): the test biped, dropped items as little
@@ -1953,6 +2123,40 @@ void App::run(long maxFrames, const std::string& screenshotPath) {
                 const float darkness  = 1.0f - glm::smoothstep(0.12f, 0.5f, eyeBright);
                 fog.noiseAmount = settings_.darkNoise * darkness;
                 fog.noiseTime   = static_cast<float>(glfwGetTime());
+                // Bloom: glow bled from the frame's bright areas (composite post pass).
+                fog.bloomIntensity = settings_.bloom ? settings_.bloomIntensity : 0.0f;
+                fog.bloomThreshold = settings_.bloomThreshold;
+                fog.bloomRadius    = settings_.bloomRadius;
+                // God rays: project the sun to screen space and gauge its visibility,
+                // so the composite can march light shafts from it. Faded out when the
+                // sun is behind the camera or below the horizon (night).
+                const glm::vec4 sunClip =
+                    proj * view * glm::vec4(cam.position + sky.sunDir * 1000.0f, 1.0f);
+                const bool sunFront = sunClip.w > 0.0f;
+                glm::vec2 sunUV(0.5f);
+                if (sunFront) {
+                    sunUV = glm::vec2(sunClip.x, sunClip.y) / sunClip.w * 0.5f + 0.5f;
+                }
+                const float sunVis =
+                    glm::clamp(sky.sunDir.y * 4.0f, 0.0f, 1.0f) * sky.skyIntensity;
+                fog.godrayIntensity = settings_.godrays ? settings_.godrayStrength : 0.0f;
+                fog.godrayDensity   = settings_.godrayLength;
+                fog.godrayDecay     = settings_.godrayDecay;
+                fog.sunScreen       = sunUV;
+                fog.sunInFront      = sunFront ? 1.0f : 0.0f;
+                fog.sunVisibility   = sunVis;
+                // Retro post FX (each independent): colour quantisation (bits < 8),
+                // ordered dither, interlace flicker, and soft/bilinear blur. Every
+                // term 0/neutral leaves the composite output unchanged.
+                retroParity_ ^= 1;
+                const int colBits = glm::clamp(settings_.retroColorBits, 3, 8);
+                fog.retroLevels    = (colBits < 8) ? static_cast<float>(1 << colBits) : 0.0f;
+                fog.retroDither    = settings_.retroDither;
+                fog.retroInterlace = settings_.retroInterlace;
+                fog.retroSoft      = settings_.retroSoft;
+                fog.retroBilinear  = (settings_.retroSoft > 0.001f) ? 1.0f : 0.0f;
+                fog.retroParity    = static_cast<float>(retroParity_);
+                fog.retroSoftRadius = 1.0f;
                 renderer_.setFog(fog);
             },
             [this](VkCommandBuffer cmd, uint32_t frameIndex, VkExtent2D extent) {
@@ -2000,9 +2204,14 @@ void App::run(long maxFrames, const std::string& screenshotPath) {
     if (relightFuture_.valid()) {
         relightFuture_.get();
     }
-    if (pregenFuture_.valid()) {
-        pregenFuture_.get();
+    for (auto& f : pregenQueue_) {
+        if (f.valid()) f.get();
     }
+    for (auto& f : pregenRetired_) {
+        if (f.valid()) f.get();
+    }
+    pregenQueue_.clear();
+    pregenRetired_.clear();
     renderer_.waitIdle();
 
     settings_.save(settingsPath()); // persist on exit (e.g. via the Exit button)

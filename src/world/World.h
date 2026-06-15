@@ -81,7 +81,7 @@ public:
     // --- Biome vegetation tinting --------------------------------------------
     // True if this block's albedo should be multiplied by the biome tint (the
     // green foliage: grass, leaves of any species, tall grass, fern, bush). Other
-    // blocks — incl. flowers/mushrooms/cactus — keep their authored colour.
+    // blocks — incl. flowers/mushrooms — keep their authored colour.
     [[nodiscard]] bool isVegTintable(uint16_t id) const;
     // The biome vegetation tint at a column (white if uninteresting). Used by the
     // mesher (via WorldRenderer's tint sampler) to colour tintable faces.
@@ -163,7 +163,9 @@ public:
         glm::ivec2 origin{0};      // window origin (x,z) the strip was computed for
         std::vector<Chunk> chunks; // entering columns x chunksY, edge order
     };
-    [[nodiscard]] PregenStrip pregenStrip(int dir, bool alongX) const;
+    // `fromX,fromZ` is the VIRTUAL window origin this strip steps from — the current
+    // origin for the next column, or origin+k for a strip staged k columns ahead.
+    [[nodiscard]] PregenStrip pregenStrip(int dir, bool alongX, int fromX, int fromZ) const;
     std::vector<glm::ivec3> recenterWithStrip(int centerChunkX, int centerChunkZ,
                                               PregenStrip&& strip,
                                               std::vector<glm::ivec4>& relightBoxesOut);
@@ -188,6 +190,11 @@ public:
     // thread sanitizer WILL flag it; if that ever matters, gate the margin behind a
     // "relight-pending" flag the main-thread light paths treat as off-limits.
     void relightBoxes(const std::vector<glm::ivec4>& boxes, std::vector<glm::ivec3>& dirty);
+
+    // Test/verify hook: force the recenter sky relight (relightBox) to flood the full
+    // world column instead of the height-bounded band, so a logictest can prove the
+    // bounded box is byte-identical to full height. Off in production (bounded).
+    void setSkyRelightFullHeight(bool on) { skyRelightFullHeight_ = on; }
 
     // Streaming knobs the renderer/app need (read from the world config).
     [[nodiscard]] bool streaming()    const { return config_.streaming; }
@@ -230,12 +237,14 @@ private:
     // parallel emitter seed in computeBlockLight() can read it race-free.
     void buildLightColorPalette();
 
-    // Recompute one light field inside the column-box [x0,x1] x [z0,z1] (full
-    // height). emitterSeed picks the source: false = sky (open columns), true =
-    // block emission. Light entering across the box's open faces is seeded from
-    // the current field outside, so the result is correct, not just local.
+    // Recompute one light field inside the box [x0,x1] x [y0,y1] x [z0,z1].
+    // emitterSeed picks the source: false = sky (open columns), true = block
+    // emission. Light entering across ALL six open faces is seeded from the
+    // current field outside, so a clamped box is correct, not just local. The sky
+    // pass seeds its top face by inheriting the (lossless) column value from just
+    // above the box; pass y0/y1 spanning the world height for the legacy behaviour.
     void relightField(std::vector<uint8_t>& field, bool emitterSeed, int x0, int x1,
-                      int z0, int z1);
+                      int y0, int y1, int z0, int z1);
 
     // Advance the window one chunk along X (alongX=true) or Z by `dir` (+1/-1):
     // regenerate the entering edge column and relight the seam, appending dirtied
@@ -262,17 +271,10 @@ private:
     // Topmost solid block's Y at a world column (island-shaped, domain-warped).
     [[nodiscard]] int columnHeight(int wx, int wz) const;
 
-    // Volumetric cave test: true where (wx,wy,wz) should be hollowed — winding
-    // spaghetti tunnels plus deep large caverns. `surfaceTaper` (0..1) shrinks the
-    // carve near the surface so only strong tunnels breach as cave mouths.
-    [[nodiscard]] bool caveAt(int wx, int wy, int wz, float surfaceTaper = 1.0f) const;
     // Ore that replaces stone at world (wx,wy,wz), or 0 to leave it stone. The
     // rarest qualifying ore wins; each rolls a hash shared across a 2x2x2 cell
     // (little veins) and is gated by its max depth. See assets/world.yaml `ores`.
     [[nodiscard]] uint16_t oreAt(int wx, int wy, int wz) const;
-    // Radial island mask at a world column: 1 in the highlands, fading to 0 at
-    // the (warped) coastline. Multiplies the terrain's height above sea level.
-    [[nodiscard]] float islandFalloff(int wx, int wz) const;
 
     [[nodiscard]] int  chunkIndex(int cx, int cy, int cz) const;
     [[nodiscard]] bool inChunkBounds(int cx, int cy, int cz) const;
@@ -291,9 +293,6 @@ private:
     // are reworked into a windowed relight in that stage.
     glm::ivec3    originChunk_{0, 0, 0};
     BlockRegistry registry_;
-    Noise         heightNoise_;
-    Noise         materialNoise_;
-    Noise         caveNoise_;     // 3D noise for carving cave tunnels
     TerrainGenerator gen_;        // data-driven shape + biome pipeline (assets/biomes.yaml)
     StructureSet     structures_; // hand-authored templates stamped on land (assets/structures/)
     Noise            featureNoise_; // 3D noise for procedural-feature noise/shell fills
@@ -301,6 +300,7 @@ private:
     std::vector<Chunk>   chunks_;     // flat ring buffer, indexed by chunkIndex()
     std::vector<uint8_t> skyLight_;   // per-block sky light, indexed by lightIndex()
     std::vector<uint8_t> blockLight_; // per-block emitted light, same indexing
+    bool skyRelightFullHeight_ = false; // test hook: see setSkyRelightFullHeight()
     // Per-block emitter hue, stored as a 1-byte palette index (same indexing as
     // blockLight_). Emitter colours come from a handful of blocks.yaml entries, so
     // a palette index costs 1 byte/cell instead of a packed RGBA8 uint32 — ~200 MB
@@ -325,23 +325,14 @@ private:
     uint16_t glowId_;   // lantern caps + buried geodes
     uint16_t trunkId_;  // oak tree trunk (thin model block)
     uint16_t leavesId_; // oak tree canopy (cross block)
-    // Flora expansion: other tree species (trunk + leafcube canopy each).
-    uint16_t birchTrunkId_, birchLeavesId_, pineTrunkId_, pineLeavesId_,
-             mapleTrunkId_, mapleLeavesId_, willowTrunkId_, willowLeavesId_;
+    // Other tree species (trunk + leafcube canopy each).
+    uint16_t birchTrunkId_, birchLeavesId_, pineTrunkId_, pineLeavesId_;
     uint16_t bushId_;   // ground shrub (cross block)
-    // Flora expansion: extra ground plants, scattered by biome `plant:` theme.
-    uint16_t tallGrassId_, fernId_, flowerRedId_, flowerYellowId_,
-             redMushroomId_, cactusId_;
-    uint16_t vineId_, lilypadId_; // hanging vines (cross) + lilypads (flat) — #13F
+    // Extra ground plants, scattered by biome `plant:` theme.
+    uint16_t tallGrassId_, fernId_, flowerRedId_, flowerYellowId_, redMushroomId_;
     uint16_t waterId_;  // sea-level liquid fill
     uint16_t lavaId_;   // deep lava
-    // Ores (replace stone in veins; see assets/world.yaml `ores`).
-    uint16_t coalId_;
-    uint16_t ironId_;
-    uint16_t goldId_;
-    uint16_t rubyId_;
-    uint16_t emeraldId_;
-    uint16_t mythrilId_;
+    uint16_t ironId_;   // the only ore (replaces stone in veins; world.yaml `ores`)
 };
 
 } // namespace vg

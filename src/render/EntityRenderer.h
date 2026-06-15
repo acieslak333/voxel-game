@@ -55,13 +55,18 @@ public:
                 const glm::vec4& sunDirAmbient, const glm::vec4& sunColIntensity,
                 const std::vector<Draw>& draws);
 
+    // PS1 vertex-jitter grid resolution for entities (0 = off).
+    void setRetro(float jitter) { retroJitter_ = jitter; }
+
 private:
     struct CameraUBO {
         glm::mat4 view;
         glm::mat4 proj;
         glm::vec4 sunDir;
         glm::vec4 sunCol;
+        glm::vec4 retro; // x: PS1 vertex-jitter grid resolution (0 = off)
     };
+    float retroJitter_ = 0.0f; // PS1 vertex-jitter grid resolution (0 = off)
 
     void createPipeline(VkRenderPass renderPass, const std::string& shaderDir);
     void createUniformBuffers(uint32_t n);

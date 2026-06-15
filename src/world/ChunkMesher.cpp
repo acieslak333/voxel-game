@@ -555,7 +555,7 @@ MeshData ChunkMesher::greedyMesh(const Chunk& chunk, const BlockRegistry& reg,
                                                          worldOrigin.z + z);
                 auto fl = [&](Face f) { return reg.faceLayer(id, f, cellVariant); };
                 // Biome vegetation tint for this cell's foliage (white for non-foliage,
-                // e.g. trunks/cactus/flowers, so only leaves & leafy plants tint).
+                // e.g. trunks/flowers, so only leaves & leafy plants tint).
                 const uint32_t cellTint = packColorRGBA8(tint(x, z, id));
                 // Sway marker in the tint alpha: cross fronds / ground plants bend in
                 // the wind (the shader sways verts where tint.a < 1). 0xBF ~ a gentle

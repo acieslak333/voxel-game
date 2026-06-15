@@ -2,6 +2,7 @@
 
 #include "world/BlockRegistry.h"
 #include "world/Noise.h"
+#include "world/NoiseLoad.h"
 
 #include <yaml-cpp/yaml.h>
 
@@ -160,7 +161,7 @@ std::vector<Feature::Op> parseOps(const YAML::Node& ops, const BlockRegistry& re
 }
 
 Feature loadOne(const std::string& path, const BlockRegistry& reg,
-                const std::vector<std::string>& biomeNames) {
+                const std::vector<std::string>& biomeNames, uint32_t seed) {
     const YAML::Node root = YAML::LoadFile(path);
     Feature f;
     f.name = root["name"] ? root["name"].as<std::string>()
@@ -180,6 +181,13 @@ Feature loadOne(const std::string& path, const BlockRegistry& reg,
         if (sc["max_slope"])  f.scatter.maxSlope  = sc["max_slope"].as<int>();
         if (sc["on_water"])   f.scatter.onWater   = sc["on_water"].as<bool>();
         if (sc["near_water"]) f.scatter.nearWater = sc["near_water"].as<int>();
+        if (sc["mask"]) {
+            // Salt the mask noise by the world seed + feature name so each feature's
+            // mask pattern is distinct and seed-dependent (like the legacy noise dist).
+            uint32_t h = seed;
+            for (char c : f.name) h = h * 131u + static_cast<unsigned char>(c);
+            f.scatter.mask = loadMask(sc["mask"], h ^ 0x4d51e9u);
+        }
         if (sc["biomes"] && sc["biomes"].IsSequence()) {
             for (const auto& b : sc["biomes"]) {
                 const std::string bn = b.as<std::string>();
@@ -354,7 +362,7 @@ Feature::Cell Feature::at(uint32_t originSeed, int lx, int ly, int lz,
 }
 
 FeatureSet::FeatureSet(const std::string& dir, const BlockRegistry& registry,
-                       const std::vector<std::string>& biomeNames) {
+                       const std::vector<std::string>& biomeNames, uint32_t seed) {
     namespace fs = std::filesystem;
     std::error_code ec;
     if (!fs::is_directory(dir, ec)) return; // no dir -> features off
@@ -369,7 +377,7 @@ FeatureSet::FeatureSet(const std::string& dir, const BlockRegistry& registry,
     std::sort(files.begin(), files.end()); // deterministic order
     for (const auto& f : files) {
         try {
-            features_.push_back(loadOne(f.string(), registry, biomeNames));
+            features_.push_back(loadOne(f.string(), registry, biomeNames, seed));
         } catch (const std::exception& e) {
             throw std::runtime_error("Feature '" + f.filename().string() + "': " + e.what());
         }

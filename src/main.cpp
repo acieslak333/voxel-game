@@ -10,6 +10,11 @@
 #include "player/PlayerSave.h"
 
 #include "world/BlockRegistry.h"
+#include "world/FeatureScatter.h"
+#include "world/Hash.h"
+#include "world/Landforms.h"
+#include "world/Sdf.h"
+#include "world/SurfaceNets.h"
 #include "world/TerrainGenerator.h"
 #include "world/World.h"
 #include "world/WorldConfig.h"
@@ -17,14 +22,18 @@
 #include <stb_image_write.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <set>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #ifndef VG_ASSET_DIR
@@ -115,15 +124,31 @@ int runWorldGenSelfTest(const std::string& assetDir) {
 // live generation tool drives (it edits assets/biomes.yaml, re-runs this, shows the
 // PNG) â€” so the tool always matches the game's real generation. Uses a FIXED seed
 // so a parameter change is comparable run-to-run.
-int runGenMap(const std::string& assetDir, int pixels, int step, const std::string& outPath) {
+// Shared --genmap setup: every mode needs exactly this — load the world config + block
+// registry and build the deterministic terrain generator. Members init in declaration
+// order (worldHeight needs cfg; gen needs reg + worldHeight), so the ordering is load-
+// bearing. Centralising it means a constructor/height change is one edit, not six.
+struct GenCtx {
+    vg::WorldConfig cfg;
+    int worldHeight;
+    vg::BlockRegistry reg;
+    vg::TerrainGenerator gen;
+    GenCtx(const std::string& assetDir, std::uint32_t seed)
+        : cfg(vg::WorldConfig::load(assetDir + "/world.yaml")),
+          worldHeight(cfg.chunksY * 16),
+          reg(assetDir + "/blocks.yaml"),
+          gen(seed, reg, assetDir, worldHeight) {}
+};
+
+int runGenMap(const std::string& assetDir, int pixels, int step, const std::string& outPath,
+              std::uint32_t seed, int cx, int cz) {
     pixels = std::clamp(pixels, 64, 4096);
     step   = std::max(1, step);
-    const vg::WorldConfig cfg = vg::WorldConfig::load(assetDir + "/world.yaml");
-    const std::uint32_t seed = 1337u; // stable across runs for comparable tuning
-    const int worldHeight = cfg.chunksY * 16;
-
-    vg::BlockRegistry reg(assetDir + "/blocks.yaml");
-    vg::TerrainGenerator gen(seed, reg, assetDir, worldHeight);
+    GenCtx ctx(assetDir, seed);
+    const vg::WorldConfig& cfg = ctx.cfg;
+    const int worldHeight = ctx.worldHeight;
+    vg::BlockRegistry& reg = ctx.reg;
+    vg::TerrainGenerator& gen = ctx.gen;
     auto bid = [&](const char* n) -> int {
         try { return static_cast<int>(reg.idByName(n)); } catch (...) { return -1; }
     };
@@ -134,7 +159,7 @@ int runGenMap(const std::string& assetDir, int pixels, int step, const std::stri
     auto H = [&](int wx, int wz) { return gen.height(wx, wz); };
     for (int py = 0; py < pixels; ++py) {
         for (int px = 0; px < pixels; ++px) {
-            const int wx = (px - half) * step, wz = (py - half) * step;
+            const int wx = cx + (px - half) * step, wz = cz + (py - half) * step;
             const vg::ColumnInfo ci = gen.columnInfo(wx, wz);
             float r, g, b;
             if (ci.height < ci.waterLevel) {
@@ -145,10 +170,15 @@ int runGenMap(const std::string& assetDir, int pixels, int step, const std::stri
                 else if (ci.topId == sandId)  { r = 224; g = 205; b = 150; }
                 else if (ci.topId == stoneId) { r = 132; g = 129; b = 124; }
                 else                          { r = 86;  g = 140; b = 70;  } // grass / default
-                // Hillshade: light from the NW, so slopes read as relief.
+                // Shaded relief (light from the NW) — stronger than a hint so slopes
+                // read clearly in the tool. Plus topographic CONTOUR lines: a faint
+                // band every 8 blocks of elevation and a bolder one every 32, so flat
+                // vs steep ground is obvious at a glance.
                 const float dx = static_cast<float>(H(wx + step, wz) - H(wx - step, wz));
                 const float dz = static_cast<float>(H(wx, wz + step) - H(wx, wz - step));
-                const float shade = std::clamp(1.0f + (-dx - dz) * 0.05f, 0.55f, 1.35f);
+                float shade = std::clamp(1.0f + (-dx - dz) * 0.12f, 0.45f, 1.55f);
+                if (ci.height % 32 == 0)     shade *= 0.62f; // index contour
+                else if (ci.height % 8 == 0) shade *= 0.82f; // minor contour
                 r *= shade; g *= shade; b *= shade;
             }
             const size_t o = (static_cast<size_t>(py) * pixels + px) * 3;
@@ -166,21 +196,82 @@ int runGenMap(const std::string& assetDir, int pixels, int step, const std::stri
     return EXIT_SUCCESS;
 }
 
-// Headless heightfield export for the live 3D terrain view (tools/genmap_tool.py).
+// A distinct colour per biome INDEX via the golden-angle hue sequence (so adjacent
+// biomes never collide). Kept in sync with the JS legend in tools/worldgen_tool.py
+// (same i*0.618 hue, S=0.5, V=0.92), so the on-map colours match the name legend.
+void biomeColor(int i, float& r, float& g, float& b) {
+    const float h = std::fmod(static_cast<float>(i) * 0.61803398875f, 1.0f);
+    const float s = 0.5f, v = 0.92f;
+    const int   hi = static_cast<int>(h * 6.0f);
+    const float f = h * 6.0f - hi, p = v * (1 - s), q = v * (1 - f * s), t = v * (1 - (1 - f) * s);
+    switch (hi % 6) {
+        case 0: r = v; g = t; b = p; break;  case 1: r = q; g = v; b = p; break;
+        case 2: r = p; g = v; b = t; break;  case 3: r = p; g = q; b = v; break;
+        case 4: r = t; g = p; b = v; break;  default: r = v; g = p; b = q;
+    }
+    r *= 255.0f; g *= 255.0f; b *= 255.0f;
+}
+
+// Headless BIOME map: colour each column by its biome INDEX, not its surface block —
+// so biome regions/rings are visible (the surface-block map hides them: oak vs birch
+// forest, highlands vs oak are all grass-green). Submerged columns are blue; a mild
+// hillshade keeps relief legible. Same seed/center plumbing as runGenMap.
+int runGenBiomes(const std::string& assetDir, int pixels, int step, const std::string& outPath,
+                 std::uint32_t seed, int cx, int cz) {
+    pixels = std::clamp(pixels, 64, 4096);
+    step   = std::max(1, step);
+    GenCtx ctx(assetDir, seed);
+    const int worldHeight = ctx.worldHeight;
+    vg::BlockRegistry& reg = ctx.reg;
+    vg::TerrainGenerator& gen = ctx.gen;
+
+    std::vector<unsigned char> img(static_cast<size_t>(pixels) * pixels * 3);
+    const int half = pixels / 2;
+    auto H = [&](int wx, int wz) { return gen.height(wx, wz); };
+    for (int py = 0; py < pixels; ++py) {
+        for (int px = 0; px < pixels; ++px) {
+            const int wx = cx + (px - half) * step, wz = cz + (py - half) * step;
+            const vg::ColumnInfo ci = gen.columnInfo(wx, wz);
+            float r, g, b;
+            if (ci.height < ci.waterLevel) {                 // water — blue, depth-shaded
+                const float t = std::min(1.0f, static_cast<float>(ci.waterLevel - ci.height) / 40.0f);
+                r = 50.0f - 30.0f * t; g = 92.0f - 52.0f * t; b = 150.0f - 60.0f * t;
+            } else {
+                biomeColor(ci.biome, r, g, b);
+                const float dx = static_cast<float>(H(wx + step, wz) - H(wx - step, wz));
+                const float dz = static_cast<float>(H(wx, wz + step) - H(wx, wz - step));
+                const float shade = std::clamp(1.0f + (-dx - dz) * 0.06f, 0.70f, 1.25f);
+                r *= shade; g *= shade; b *= shade;
+            }
+            const size_t o = (static_cast<size_t>(py) * pixels + px) * 3;
+            img[o + 0] = static_cast<unsigned char>(std::clamp(r, 0.0f, 255.0f));
+            img[o + 1] = static_cast<unsigned char>(std::clamp(g, 0.0f, 255.0f));
+            img[o + 2] = static_cast<unsigned char>(std::clamp(b, 0.0f, 255.0f));
+        }
+    }
+    if (!stbi_write_png(outPath.c_str(), pixels, pixels, 3, img.data(), pixels * 3)) {
+        std::cerr << "[genmap] failed to write " << outPath << '\n';
+        return EXIT_FAILURE;
+    }
+    std::cout << "[genmap] wrote " << outPath << " (biomes " << pixels << "x" << pixels
+              << ", " << step << " blocks/px, seed " << seed << ")\n";
+    return EXIT_SUCCESS;
+}
+
+// Headless heightfield export for the live 3D terrain view (tools/worldgen_tool.py).
 // Writes an RGBA PNG: RGB = the flat surface-block colour (NO hillshade â€” the browser
 // lights the 3D mesh itself), A = the surface height normalised over the world's full
 // vertical range. The web tool meshes a displaced, vertex-coloured plane from it and
 // orbits it live, re-running this on every parameter change. Same fixed seed as the
 // 2D map so the two views match. Keep `pixels` modest (a slice) â€” it's a grid mesh.
-int runGenHeight(const std::string& assetDir, int pixels, int step, const std::string& outPath) {
+int runGenHeight(const std::string& assetDir, int pixels, int step, const std::string& outPath,
+                 std::uint32_t seed, int cx, int cz) {
     pixels = std::clamp(pixels, 16, 1024); // a mesh grid; smaller than the 2D map
     step   = std::max(1, step);
-    const vg::WorldConfig cfg = vg::WorldConfig::load(assetDir + "/world.yaml");
-    const std::uint32_t seed = 1337u;
-    const int worldHeight = cfg.chunksY * 16;
-
-    vg::BlockRegistry reg(assetDir + "/blocks.yaml");
-    vg::TerrainGenerator gen(seed, reg, assetDir, worldHeight);
+    GenCtx ctx(assetDir, seed);
+    const int worldHeight = ctx.worldHeight;
+    vg::BlockRegistry& reg = ctx.reg;
+    vg::TerrainGenerator& gen = ctx.gen;
     auto bid = [&](const char* n) -> int {
         try { return static_cast<int>(reg.idByName(n)); } catch (...) { return -1; }
     };
@@ -196,7 +287,7 @@ int runGenHeight(const std::string& assetDir, int pixels, int step, const std::s
     bool first = true;
     for (int py = 0; py < pixels; ++py) {
         for (int px = 0; px < pixels; ++px) {
-            const int wx = (px - half) * step, wz = (py - half) * step;
+            const int wx = cx + (px - half) * step, wz = cz + (py - half) * step;
             const vg::ColumnInfo ci = gen.columnInfo(wx, wz);
             float r, g, b;
             if (ci.height < ci.waterLevel) {
@@ -246,15 +337,16 @@ int runGenHeight(const std::string& assetDir, int pixels, int step, const std::s
 // (little-endian, all coords in CELL units). A sidecar (.sea) carries the sea
 // level, also in cell units, so the viewer floats its water plane directly.
 int runGenVoxels(const std::string& assetDir, int footprint, int step,
-                 const std::string& outPath) {
+                 const std::string& outPath, std::uint32_t seed, int cx, int cz,
+                 int onlyBiome = -1) {
     step = std::clamp(step, 1, 16);
     const int N = std::clamp(footprint / step, 16, 255); // cells per side
-    const vg::WorldConfig cfg = vg::WorldConfig::load(assetDir + "/world.yaml");
-    const std::uint32_t seed = 1337u;
-    const int worldHeight = cfg.chunksY * 16;
+    GenCtx ctx(assetDir, seed);
+    const int worldHeight = ctx.worldHeight;
     const int H = std::clamp(worldHeight / step, 1, 255); // vertical cells
-    vg::BlockRegistry reg(assetDir + "/blocks.yaml");
-    vg::TerrainGenerator gen(seed, reg, assetDir, worldHeight);
+    vg::BlockRegistry& reg = ctx.reg;
+    vg::TerrainGenerator& gen = ctx.gen;
+    gen.setForcedBiome(onlyBiome);   // >=0: "solo biome" slice (its surface + 3D params)
     auto bid = [&](const char* n) -> int {
         try { return static_cast<int>(reg.idByName(n)); } catch (...) { return -1; }
     };
@@ -269,7 +361,7 @@ int runGenVoxels(const std::string& assetDir, int footprint, int step,
     auto vox = [&](int x, int y, int z) { return (static_cast<size_t>(z) * N + x) * H + y; };
     for (int z = 0; z < N; ++z) {
         for (int x = 0; x < N; ++x) {
-            const int wx = (x - half) * step, wz = (z - half) * step;
+            const int wx = cx + (x - half) * step, wz = cz + (z - half) * step;
             const int sh = gen.height(wx, wz);
             const vg::ColumnInfo ci = gen.columnInfo(wx, wz);
             unsigned char r, g, b;
@@ -281,6 +373,56 @@ int runGenVoxels(const std::string& assetDir, int footprint, int step,
             for (int y = 0; y < H; ++y) {
                 solid[vox(x, y, z)] = gen.isSolid(sh, wx, y * step, wz) ? 1 : 0;
             }
+        }
+    }
+
+    // --- Procedural features (trees / plants): replicate World's seam-safe scatter into
+    // the voxel grid so the preview shows a biome's FLORA, not just bare terrain. Uses the
+    // same gates + hashes as World::generateColumn, so placement matches the real game
+    // (and --only-biome forces the biome). Sampled at cell resolution → crisp at step 1.
+    vg::FeatureSet feats(assetDir + "/features", reg, gen.biomeNames(), seed);
+    vg::Noise featNoise(seed * 2246822519u + 0xFEA7u);
+    std::unordered_map<size_t, std::array<unsigned char, 3>> featVox; // sparse feature colours
+    auto featColor = [&](uint16_t id) -> std::array<unsigned char, 3> {
+        const std::string& nm = reg.get(id).name;
+        auto has = [&](const char* s) { return nm.find(s) != std::string::npos; };
+        if (has("leaf") || has("leaves"))                       return {{60, 130, 55}};
+        if (has("log") || has("trunk") || has("wood") || has("bark")) return {{110, 78, 48}};
+        if (has("flower") || has("rose") || has("tulip") || has("dandelion")) return {{210, 90, 120}};
+        if (has("mushroom"))                                    return {{200, 80, 70}};
+        if (has("cactus"))                                      return {{70, 130, 70}};
+        if (has("water"))                                       return {{46, 110, 170}};
+        if (has("grass") || has("fern") || has("vine") || has("bush") || has("reed"))
+                                                                return {{86, 150, 70}};
+        return {{120, 150, 90}};
+    };
+    std::unordered_map<long long, vg::ColumnInfo> ciMemo;
+    std::unordered_map<long long, int>            syMemo;
+    auto mkey = [](int x, int z) {
+        return (static_cast<long long>(x) << 32) ^ static_cast<long long>(static_cast<unsigned>(z)); };
+    auto colAt  = [&](int x, int z) -> const vg::ColumnInfo& {
+        auto it = ciMemo.find(mkey(x, z));
+        if (it == ciMemo.end()) it = ciMemo.emplace(mkey(x, z), gen.columnInfo(x, z)).first;
+        return it->second; };
+    auto surfAt = [&](int x, int z) -> int {
+        auto it = syMemo.find(mkey(x, z));
+        if (it == syMemo.end()) it = syMemo.emplace(mkey(x, z), gen.surfaceY(x, z)).first;
+        return it->second; };
+    for (int z = 0; z < N; ++z) {
+        for (int x = 0; x < N; ++x) {
+            const int wx = cx + (x - half) * step, wz = cz + (z - half) * step;
+            // The ONE shared scatter pass (Feature.h) — same logic as World, so the
+            // preview can't drift. emit paints feature voxels into the grid + colours them.
+            vg::scatterFeaturesColumn(
+                feats, wx, wz, seed, featNoise, colAt, surfAt,
+                [&](int wy, uint16_t id, bool /*force*/) {
+                    if (id == 0 || wy < 0 || wy >= worldHeight) return;
+                    const int gy = wy / step;
+                    if (gy < 0 || gy >= H) return;
+                    const size_t vi = vox(x, gy, z);
+                    solid[vi] = 1;
+                    featVox[vi] = featColor(id);
+                });
         }
     }
 
@@ -296,7 +438,9 @@ int runGenVoxels(const std::string& assetDir, int footprint, int step,
                 if (sol(x + 1, y, z) && sol(x - 1, y, z) && sol(x, y + 1, z) &&
                     sol(x, y - 1, z) && sol(x, y, z + 1) && sol(x, y, z - 1)) continue; // buried
                 unsigned char r, g, b;
-                if (y * step < sea)     { r = 46;  g = 110; b = 170; }   // submerged -> blue-ish
+                if (auto fvit = featVox.find(vox(x, y, z)); fvit != featVox.end()) {
+                    r = fvit->second[0]; g = fvit->second[1]; b = fvit->second[2]; // a feature voxel
+                } else if (y * step < sea) { r = 46;  g = 110; b = 170; } // submerged -> blue-ish
                 else if (!sol(x, y + 1, z)) {                            // a TOP face -> biome colour
                     r = surf[col(x, z) * 3]; g = surf[col(x, z) * 3 + 1]; b = surf[col(x, z) * 3 + 2];
                 } else                  { r = 120; g = 116; b = 110; }   // side/underside -> stone
@@ -337,14 +481,14 @@ void divergingRamp(float t, float& r, float& g, float& b) {
 // tuned in isolation (not just the final surface). The relief field also draws the
 // sea-level (value 0) coastline in black. Same fixed seed + centring as --genmap.
 int runGenNoise(const std::string& assetDir, int pixels, int step,
-                const std::string& outPath, const std::string& layer) {
+                const std::string& outPath, const std::string& layer,
+                std::uint32_t seed, int cx, int cz) {
     pixels = std::clamp(pixels, 64, 4096);
     step   = std::max(1, step);
-    const vg::WorldConfig cfg = vg::WorldConfig::load(assetDir + "/world.yaml");
-    const std::uint32_t seed = 1337u;
-    const int worldHeight = cfg.chunksY * 16;
-    vg::BlockRegistry reg(assetDir + "/blocks.yaml");
-    vg::TerrainGenerator gen(seed, reg, assetDir, worldHeight);
+    GenCtx ctx(assetDir, seed);
+    const int worldHeight = ctx.worldHeight;
+    vg::BlockRegistry& reg = ctx.reg;
+    vg::TerrainGenerator& gen = ctx.gen;
 
     using F = vg::TerrainGenerator::Field;
     F field; bool isRelief = false;
@@ -353,11 +497,10 @@ int runGenNoise(const std::string& assetDir, int pixels, int step,
     else if (layer == "peak" || layer == "peaks")           field = F::Peaks;
     else if (layer == "temp" || layer == "temperature")     field = F::Temperature;
     else if (layer == "hum"  || layer == "humidity")        field = F::Humidity;
-    else if (layer == "river" || layer == "rivers")         field = F::River;
     else if (layer == "relief" || layer == "height") { field = F::Relief; isRelief = true; }
     else {
         std::cerr << "[genmap] unknown --layer '" << layer << "' (use cont|ero|peak|"
-                     "temp|hum|river|relief)\n";
+                     "temp|hum|relief)\n";
         return EXIT_FAILURE;
     }
     // Relief is in blocks; normalise by a representative span so the ramp uses its
@@ -368,7 +511,7 @@ int runGenNoise(const std::string& assetDir, int pixels, int step,
     const int half = pixels / 2;
     for (int py = 0; py < pixels; ++py) {
         for (int px = 0; px < pixels; ++px) {
-            const int wx = (px - half) * step, wz = (py - half) * step;
+            const int wx = cx + (px - half) * step, wz = cz + (py - half) * step;
             float v = gen.fieldValue(field, wx, wz);
             float r, g, b;
             if (isRelief) {
@@ -400,14 +543,13 @@ int runGenNoise(const std::string& assetDir, int pixels, int step,
 // here (this uses only the streaming-safe TerrainGenerator surface model). The image
 // is `pixels` wide (world X) by a vertical band sized to the world height.
 int runGenCross(const std::string& assetDir, int pixels, int step,
-                const std::string& outPath) {
+                const std::string& outPath, std::uint32_t seed, int cx, int cz) {
     pixels = std::clamp(pixels, 64, 4096);
     step   = std::max(1, step);
-    const vg::WorldConfig cfg = vg::WorldConfig::load(assetDir + "/world.yaml");
-    const std::uint32_t seed = 1337u;
-    const int worldHeight = cfg.chunksY * 16;
-    vg::BlockRegistry reg(assetDir + "/blocks.yaml");
-    vg::TerrainGenerator gen(seed, reg, assetDir, worldHeight);
+    GenCtx ctx(assetDir, seed);
+    const int worldHeight = ctx.worldHeight;
+    vg::BlockRegistry& reg = ctx.reg;
+    vg::TerrainGenerator& gen = ctx.gen;
     auto bid = [&](const char* n) -> int {
         try { return static_cast<int>(reg.idByName(n)); } catch (...) { return -1; }
     };
@@ -423,14 +565,25 @@ int runGenCross(const std::string& assetDir, int pixels, int step,
         img[o + 2] = static_cast<unsigned char>(std::clamp(b, 0.0f, 255.0f));
     };
     for (int px = 0; px < pixels; ++px) {
-        const int wx = (px - half) * step;
-        const vg::ColumnInfo ci = gen.columnInfo(wx, 0);
+        const int wx = cx + (px - half) * step;
+        const vg::ColumnInfo ci = gen.columnInfo(wx, cz);
         const int h = ci.height, water = ci.waterLevel;
+        // Probe the real 3D solidity per cell (reveals caves/overhangs) instead of
+        // trusting the heightmap, so the side-on profile shows what the world
+        // actually fills. The top scan goes a little above h for
+        // overhangs that poke above the heightmap surface.
+        const int scanTop = std::min(H - 1, gen.surfaceScanTop(h));
+        // Match World's open-water fill: water reaches down only to the first solid
+        // below sea/lake level — sealed caves below that stay DRY (dark), not flooded.
+        int waterFloor = -1;
+        for (int y = std::min(water, scanTop); y >= 0; --y)
+            if (gen.mainTerrainSolid(h, wx, y, cz)) { waterFloor = y; break; }
         for (int y = 0; y < H; ++y) {
             const int row = H - 1 - y; // flip so the sky is at the top
             float r, g, b;
-            if (y <= h) {
-                if (y == h) {                                   // surface block
+            const bool solid = (y <= scanTop) && gen.mainTerrainSolid(h, wx, y, cz);
+            if (solid) {
+                if (y >= h) {                                   // surface / overhang top
                     if      (ci.topId == snowId)  { r = 236; g = 241; b = 248; }
                     else if (ci.topId == sandId)  { r = 224; g = 205; b = 150; }
                     else if (ci.topId == stoneId) { r = 130; g = 127; b = 122; }
@@ -442,6 +595,9 @@ int runGenCross(const std::string& assetDir, int pixels, int step,
                     const float shade = 0.78f + 0.22f * static_cast<float>(y) / static_cast<float>(std::max(1, h));
                     r = 122 * shade; g = 119 * shade; b = 114 * shade;
                 }
+            } else if (y <= h) {                                  // air below surface = CAVE
+                if (y > waterFloor && y <= water) { r = 40; g = 70; b = 120; } // flooded (open to water)
+                else                             { r = 20; g = 18; b = 24; }  // DRY cavity (sealed)
             } else if (y <= water) {                              // water column
                 const float t = std::min(1.0f, static_cast<float>(water - y) / 32.0f);
                 r = 56.0f - 36.0f * t; g = 122.0f - 70.0f * t; b = 196.0f - 80.0f * t;
@@ -474,6 +630,290 @@ int runLogicTest(const std::string& assetDir) {
     auto near = [](float a, float b) { return std::fabs(a - b) < 1e-4f; };
 
     try {
+        // ---- NoiseStack Layer 0 extensions (docs/WORLDGEN.md) ------------------
+        // Worley/cellular, ridged-multifractal, domain warp and the transfer stage.
+        // The hard requirements: every new primitive is (a) a pure function of
+        // (seed, coords) — same input → bit-identical output, including across two
+        // separately-built stacks (the property that makes streaming seam-safe) —
+        // and (b) bounded to ~[-1,1] like fbm so it drops into a weighted blend.
+        {
+            using NS = vg::NoiseStack;
+            // Sample points spanning several lattice cells, incl. negatives and the
+            // origin (Perlin's lattice-zero, a classic flatness trap).
+            const float pts[][3] = {
+                {0.0f, 0.0f, 0.0f}, {13.5f, 0.0f, -7.25f}, {-128.0f, 40.0f, 256.0f},
+                {1000.3f, 12.0f, -333.7f}, {-4096.0f, 70.0f, 4096.0f}, {17.0f, 5.0f, 17.0f},
+            };
+            auto inRange = [](float v) { return v >= -1.0001f && v <= 1.0001f; };
+
+            // Build a stack twice from the same seed; assert the two are identical
+            // and in-range at every point (2D and 3D). `build` parameterises the one
+            // layer under test so each primitive gets the same treatment.
+            auto deterministicAndBounded = [&](const char* label, const NS::Layer& layer) {
+                NS a, b;
+                a.addLayer(layer, 0xC0FFEEu);
+                b.addLayer(layer, 0xC0FFEEu);
+                bool det = true, bounded = true;
+                for (const auto& p : pts) {
+                    const float a2 = a.value(p[0], p[2]), b2 = b.value(p[0], p[2]);
+                    const float a3 = a.value(p[0], p[1], p[2]);
+                    const float b3 = b.value(p[0], p[1], p[2]);
+                    if (a2 != b2 || a3 != b3) det = false;             // exact, not approx
+                    if (a.value(p[0], p[2]) != a2) det = false;        // stable on re-sample
+                    if (!inRange(a2) || !inRange(a3)) bounded = false;
+                }
+                check(det, std::string(label) + ": pure (bit-identical across builds)");
+                check(bounded, std::string(label) + ": output bounded to ~[-1,1]");
+            };
+
+            NS::Layer worley; worley.type = NS::Type::Worley; worley.frequency = 0.02f;
+            worley.cell = vg::Noise::Cell::F2mF1; worley.metric = vg::Noise::Metric::Manhattan;
+            deterministicAndBounded("worley F2-F1/manhattan", worley);
+
+            NS::Layer rmf; rmf.type = NS::Type::Ridged; rmf.multifractal = true;
+            rmf.octaves = 5; rmf.frequency = 0.01f; rmf.mfOffset = 1.0f; rmf.mfGain = 2.0f;
+            deterministicAndBounded("ridged multifractal", rmf);
+
+            NS::Layer hmf; hmf.type = NS::Type::Perlin; hmf.multifractal = true;
+            hmf.octaves = 5; hmf.frequency = 0.01f; hmf.mfOffset = 0.7f;
+            deterministicAndBounded("hybrid multifractal", hmf);
+
+            NS::Layer warped; warped.type = NS::Type::Perlin; warped.frequency = 0.01f;
+            warped.warpAmp = 60.0f; warped.warpFreq = 0.004f;
+            deterministicAndBounded("domain-warped perlin", warped);
+
+            // Domain warp must actually displace the field (not silently no-op): a
+            // warped layer differs from the same layer unwarped at most sample points.
+            {
+                NS plain, warp;
+                NS::Layer base; base.type = NS::Type::Perlin; base.frequency = 0.01f;
+                plain.addLayer(base, 7u);
+                NS::Layer w = base; w.warpAmp = 80.0f; w.warpFreq = 0.003f;
+                warp.addLayer(w, 7u);
+                int differ = 0;
+                for (const auto& p : pts)
+                    if (plain.value(p[0], p[2]) != warp.value(p[0], p[2])) ++differ;
+                check(differ >= 4, "domain warp changes the field (not a no-op)");
+            }
+
+            // Identity transfer (redistribution 1, no terrace) is a true no-op, so a
+            // stack that sets it matches one that does not — the byte-identical guard.
+            {
+                NS plain, ident;
+                NS::Layer base; base.type = NS::Type::Ridged; base.frequency = 0.013f;
+                base.octaves = 4;
+                plain.addLayer(base, 99u);
+                ident.addLayer(base, 99u);
+                ident.setRedistribution(1.0f);
+                ident.setTerrace(0, 1.0f);
+                bool same = true;
+                for (const auto& p : pts)
+                    if (plain.value(p[0], p[2]) != ident.value(p[0], p[2])) same = false;
+                check(same, "identity transfer is byte-identical (no regression)");
+            }
+
+            // Terracing quantises the field: a strongly terraced stack collapses a
+            // dense sweep into a small number of distinct output levels.
+            {
+                NS terr;
+                NS::Layer base; base.type = NS::Type::Perlin; base.frequency = 0.005f;
+                terr.addLayer(base, 314u);
+                terr.setTerrace(4, 1000.0f); // 4 crisp steps (near-vertical risers)
+                std::vector<float> seen;
+                bool bounded = true;
+                int onPlateau = 0;
+                const int N = 400;
+                for (int i = 0; i < N; ++i) {
+                    const float v = terr.value(static_cast<float>(i) * 3.0f, 0.0f);
+                    if (v < -1.0001f || v > 1.0001f) bounded = false;
+                    // Plateaus sit at 2*(k/4)-1 for integer k in [0,4]: {-1,-.5,0,.5,1}.
+                    for (int k = 0; k <= 4; ++k)
+                        if (std::fabs(v - (2.0f * (k / 4.0f) - 1.0f)) < 1e-3f) { ++onPlateau; break; }
+                    bool found = false;
+                    for (float s : seen) if (std::fabs(s - v) < 1e-4f) { found = true; break; }
+                    if (!found) seen.push_back(v);
+                }
+                check(bounded, "terraced stack stays bounded");
+                check(onPlateau >= N - 10,
+                      "crisp terracing snaps the field onto discrete plateaus");
+            }
+
+            // Eroded layer (derivative-attenuated fbm) is pure + bounded.
+            NS::Layer eroded; eroded.type = NS::Type::Perlin; eroded.erodeDetail = true;
+            eroded.octaves = 6; eroded.frequency = 0.02f;
+            deterministicAndBounded("derivative-attenuated fbm", eroded);
+        }
+
+        // ---- Analytic-gradient Perlin (docs/WORLDGEN.md Layer 0 / §4) ----------
+        // The derivative-returning perlin() must (a) return the SAME value as the
+        // scalar perlin() and (b) return a gradient that matches central finite
+        // differences — the property the fake-erosion / slope code relies on.
+        {
+            vg::Noise n(0xBADCAB1Eu);
+            const float h = 0.001f;
+            bool valueMatch = true, gradMatch = true;
+            const float pts[][2] = {
+                {0.37f, 1.91f}, {12.4f, -8.13f}, {-3.27f, 5.55f}, {101.1f, 202.2f},
+                {0.5f, 0.5f}, {-44.44f, 0.123f},
+            };
+            for (const auto& p : pts) {
+                float dx = 0.0f, dy = 0.0f;
+                const float v = n.perlin(p[0], p[1], dx, dy);
+                if (v != n.perlin(p[0], p[1])) valueMatch = false; // bit-identical value
+                const float cdx = (n.perlin(p[0] + h, p[1]) - n.perlin(p[0] - h, p[1])) / (2 * h);
+                const float cdy = (n.perlin(p[0], p[1] + h) - n.perlin(p[0], p[1] - h)) / (2 * h);
+                if (std::fabs(dx - cdx) > 5e-3f || std::fabs(dy - cdy) > 5e-3f) gradMatch = false;
+            }
+            check(valueMatch, "derivative perlin() value == scalar perlin()");
+            check(gradMatch, "analytic gradient matches central differences");
+        }
+
+        // ---- SDF primitives + CSG operators (docs/WORLDGEN.md Layer 1.1) -------
+        // Sign convention (negative inside, 0 on surface), known distances, and the
+        // CSG/smooth-min algebra the region masks + arch are composed from.
+        {
+            namespace sdf = vg::sdf;
+            check(near(sdf::sphere({0, 0, 0}, 5.0f), -5.0f), "sphere centre is -radius (inside)");
+            check(near(sdf::sphere({10, 0, 0}, 5.0f), 5.0f), "sphere exterior distance");
+            check(sdf::box(glm::vec3(0), {2, 2, 2}) < 0.0f, "box centre is inside (<0)");
+            check(near(sdf::box(glm::vec3(5, 0, 0), {2, 2, 2}), 3.0f), "box exterior distance on an axis");
+            // A point on the torus' centre ring sits at the tube centre → -minorR.
+            check(near(sdf::torus(glm::vec3(8, 0, 0), {8.0f, 2.0f}), -2.0f), "torus tube interior is -minorR");
+            check(near(sdf::ring(glm::vec2(7, 0), 7.0f, 1.5f), -1.5f), "2D ring on-radius is -thickness");
+            // Capsule: a point on the segment axis is exactly -radius.
+            check(near(sdf::segment({0, 5, 0}, {0, 0, 0}, {0, 10, 0}, 1.0f), -1.0f),
+                  "capsule on-axis is -radius");
+
+            check(near(sdf::opUnion(3.0f, -2.0f), -2.0f), "opUnion takes the nearer (min)");
+            check(near(sdf::opIntersection(3.0f, -2.0f), 3.0f), "opIntersection takes the farther (max)");
+            // Subtract a sphere from a box: a point inside both is carved out (>0).
+            const float carved = sdf::opSubtraction(sdf::sphere({0, 0, 0}, 3.0f),
+                                                    sdf::box(glm::vec3(0), {5, 5, 5}));
+            check(carved > 0.0f, "opSubtraction removes the cutter from the body");
+
+            // Smooth-min: k=0 is exactly min; positive k rounds strictly below min.
+            check(near(sdf::smin(3.0f, 5.0f, 0.0f), 3.0f), "smin(k=0) == min");
+            check(sdf::smin(2.0f, 2.0f, 2.0f) < 2.0f, "smin rounds the seam below min");
+        }
+
+        // ---- Surface Nets meshing (docs/WORLDGEN.md Layer 2.3) ----------------
+        // Mesh a sphere SDF and assert: a wholly-inside/outside field makes nothing;
+        // the sphere makes a non-empty, index-valid mesh with outward normals; the
+        // mesh is deterministic; and a sub-window sampling the SAME world field
+        // produces bit-identical boundary vertices (the seam-safety property).
+        {
+            const float cs = 1.0f;
+            const glm::vec3 C(16.0f, 16.0f, 16.0f); // sphere centre in world space
+            const float R = 10.0f;
+            // World-space sphere field; `off` shifts the local grid to sample the
+            // same world corners from a different window (the seam test).
+            auto sphereField = [&](glm::ivec3 off) {
+                return [&, off](int x, int y, int z) {
+                    const glm::vec3 w = glm::vec3(x + off.x, y + off.y, z + off.z) * cs;
+                    return glm::length(w - C) - R;
+                };
+            };
+
+            // Degenerate fields → no surface.
+            const vg::SurfaceMesh allOut =
+                vg::surfaceNets([](int, int, int) { return 1.0f; }, {8, 8, 8}, cs, glm::vec3(0));
+            const vg::SurfaceMesh allIn =
+                vg::surfaceNets([](int, int, int) { return -1.0f; }, {8, 8, 8}, cs, glm::vec3(0));
+            check(allOut.empty() && allIn.empty(), "uniform field meshes to nothing");
+
+            const glm::ivec3 dim(32, 32, 32);
+            const vg::SurfaceMesh m =
+                vg::surfaceNets(sphereField({0, 0, 0}), dim, cs, glm::vec3(0));
+            bool idxValid = !m.indices.empty() && (m.indices.size() % 3 == 0);
+            for (uint32_t i : m.indices)
+                if (i >= m.positions.size()) idxValid = false;
+            check(idxValid, "sphere meshes to a valid, non-empty index buffer");
+
+            // Outward normals: the smooth normal should agree with the radial
+            // direction at (almost) every vertex.
+            int outward = 0;
+            for (size_t i = 0; i < m.positions.size(); ++i)
+                if (glm::dot(m.normals[i], m.positions[i] - C) > 0.0f) ++outward;
+            check(static_cast<float>(outward) >= 0.98f * m.positions.size(),
+                  "Surface Nets normals point outward from the sphere [" +
+                  std::to_string(outward) + "/" + std::to_string(m.positions.size()) + "]");
+
+            // Determinism: same field → bit-identical positions and indices.
+            const vg::SurfaceMesh m2 =
+                vg::surfaceNets(sphereField({0, 0, 0}), dim, cs, glm::vec3(0));
+            bool same = (m.positions.size() == m2.positions.size()) &&
+                        (m.indices == m2.indices);
+            for (size_t i = 0; same && i < m.positions.size(); ++i)
+                if (m.positions[i] != m2.positions[i]) same = false;
+            check(same, "Surface Nets is deterministic (bit-identical regen)");
+
+            // Seam-safety: a window offset by +8 cells (its own origin) reproduces
+            // the overlap-region vertices of the full mesh. The crossing fractions
+            // are bit-identical (same field); the final origin add differs by ≤1 ULP
+            // (float addition isn't associative: 9+f vs 8+(1+f)), so agreement is to
+            // float epsilon — sub-micron, far below any visible crack threshold.
+            const glm::ivec3 off(8, 8, 8);
+            const vg::SurfaceMesh mb = vg::surfaceNets(
+                sphereField(off), {16, 16, 16}, cs, glm::vec3(off) * cs);
+            int checked = 0, matched = 0;
+            float worstDelta = 0.0f;
+            for (const glm::vec3& p : mb.positions) {
+                if (p.x < 9 || p.y < 9 || p.z < 9 || p.x > 23 || p.y > 23 || p.z > 23) continue;
+                ++checked;
+                float best = 1e30f;
+                for (const glm::vec3& q : m.positions) best = std::min(best, glm::length(p - q));
+                if (best < 1e-4f) ++matched;
+                worstDelta = std::max(worstDelta, best);
+            }
+            check(checked > 0 && matched == checked,
+                  "Surface Nets seam-safe: overlapping windows agree to float epsilon [" +
+                  std::to_string(matched) + "/" + std::to_string(checked) +
+                  ", worst=" + std::to_string(worstDelta) + "]");
+        }
+
+        // ---- Signature landforms (docs/WORLDGEN.md Layer 1.3 validation gate) --
+        // Compose the Layer-0/1 toolkit into the two hardest shapes and assert each
+        // has its defining structure (negative = inside the solid).
+        {
+            namespace lf = vg::landform;
+            // --- Monolithic arch --------------------------------------------------
+            const glm::vec3 o(0, 0, 0);
+            const float span = 40.0f, legH = 24.0f, thick = 4.0f, tube = 4.0f;
+            auto A = [&](glm::vec3 p) { return lf::arch(p, o, span, legH, thick, tube); };
+            check(A({-20, 12, 0}) < 0.0f, "arch: left leg is solid");
+            check(A({20, 12, 0}) < 0.0f, "arch: right leg is solid");
+            check(A({0, 12, 0}) > 0.0f, "arch: the archway (between the legs) is open");
+            check(A({0, legH + span * 0.5f, 0}) < 0.0f, "arch: the apex/keystone is solid");
+            check(A({120, 12, 0}) > 0.0f, "arch: empty space far away is air");
+            check(A({-20, 12, 0}) == A({-20, 12, 0}), "arch: deterministic");
+
+            // --- Zhangjiajie pillar field ----------------------------------------
+            vg::Noise w(0x91110u);
+            const float freq = 0.05f, baseY = 8.0f, topY = 40.0f;
+            auto P = [&](float x, float y, float z) {
+                return lf::pillars(w, {x, y, z}, baseY, topY, freq);
+            };
+            // Locate a pillar core (Worley F1 high) and a gap (F1 low) by scanning.
+            int cx = -1, cz = -1, gx = -1, gz = -1;
+            for (int x = 0; x < 240 && (cx < 0 || gx < 0); ++x)
+                for (int z = 0; z < 240; ++z) {
+                    const float c = w.worley(x * freq, z * freq, vg::Noise::Metric::Euclidean,
+                                             vg::Noise::Cell::F1);
+                    if (c > 0.7f && cx < 0) { cx = x; cz = z; }
+                    if (c < -0.7f && gx < 0) { gx = x; gz = z; }
+                }
+            check(cx >= 0 && gx >= 0, "pillars: found a pillar core and a gap column");
+            // Core column: solid mid-height, capped (air) above the plateau top.
+            check(P(cx, 24, cz) < 0.0f, "pillars: core is solid between base and top");
+            check(P(cx, topY + 6, cz) > 0.0f, "pillars: nothing rises above the plateau top");
+            // Gap column: an open vertical shaft above the base plateau.
+            check(P(gx, 24, gz) > 0.0f, "pillars: the gap between pillars is an air shaft");
+            // Below the base plateau both columns are solid ground.
+            check(P(cx, 2, cz) < 0.0f && P(gx, 2, gz) < 0.0f,
+                  "pillars: solid ground below the base plateau");
+            check(P(cx, 24, cz) == P(cx, 24, cz), "pillars: deterministic");
+        }
+
         vg::BlockRegistry reg(assetDir + "/blocks.yaml");
         const uint16_t air   = reg.idByName("air");
         const uint16_t stone = reg.idByName("stone");
@@ -520,23 +960,18 @@ int runLogicTest(const std::string& assetDir) {
 
         // Tool-tier harvest gating (ISSUES #13I): a block drops only with a matching
         // tool of high enough tier; below tier it still breaks but yields nothing.
-        const uint16_t woodPick    = reg.idByName("wood_pickaxe");
-        const uint16_t stonePick   = reg.idByName("stone_pickaxe");
-        const uint16_t mythrilPick = reg.idByName("mythril_pickaxe");
-        const uint16_t coalOre = reg.idByName("coal_ore");
-        const uint16_t ironOre = reg.idByName("iron_ore");
-        const uint16_t rubyOre = reg.idByName("ruby_ore");
-        check(reg.canHarvest(dirt, air),           "dirt drops by hand (no tier gate)");
-        check(!reg.canHarvest(stone, air),         "stone needs a pickaxe (no bare-hand drop)");
-        check(reg.canHarvest(stone, woodPick),     "wood pickaxe harvests stone");
-        check(reg.canHarvest(coalOre, woodPick),   "wood pickaxe harvests coal ore");
-        check(!reg.canHarvest(ironOre, woodPick),  "wood pickaxe too low for iron ore");
-        check(reg.canHarvest(ironOre, stonePick),  "stone pickaxe harvests iron ore");
-        check(!reg.canHarvest(rubyOre, stonePick), "stone pickaxe too low for ruby ore");
-        check(reg.canHarvest(rubyOre, pick),       "iron pickaxe harvests ruby ore");
-        check(!reg.canHarvest(coalOre, sword),     "sword (wrong kind) doesn't harvest ore");
-        check(reg.toolTier(mythrilPick) == 4,      "mythril pickaxe is tier 4");
-        check(reg.toolTier(air) == 0,              "bare hand is tier 0");
+        const uint16_t woodPick  = reg.idByName("wood_pickaxe");
+        const uint16_t stonePick = reg.idByName("stone_pickaxe");
+        const uint16_t ironOre   = reg.idByName("iron_ore");
+        check(reg.canHarvest(dirt, air),          "dirt drops by hand (no tier gate)");
+        check(!reg.canHarvest(stone, air),        "stone needs a pickaxe (no bare-hand drop)");
+        check(reg.canHarvest(stone, woodPick),    "wood pickaxe harvests stone");
+        check(!reg.canHarvest(ironOre, woodPick), "wood pickaxe too low for iron ore");
+        check(reg.canHarvest(ironOre, stonePick), "stone pickaxe harvests iron ore");
+        check(reg.canHarvest(ironOre, pick),      "iron pickaxe harvests iron ore");
+        check(!reg.canHarvest(ironOre, sword),    "sword (wrong kind) doesn't harvest ore");
+        check(reg.toolTier(stonePick) == 2,       "stone pickaxe is tier 2");
+        check(reg.toolTier(air) == 0,             "bare hand is tier 0");
 
         // Fall damage: harmless under the safe-fall height, scaling above it.
         check(near(vg::PlayerController::fallDamage(0.0f), 0.0f),  "no fall = no damage");
@@ -934,8 +1369,7 @@ int runLogicTest(const std::string& assetDir) {
 
             // Any leaves species counts as a canopy to centre the edit on.
             std::vector<uint16_t> leafIds;
-            for (const char* n : {"oak_leaves", "birch_leaves", "pine_leaves",
-                                  "maple_leaves", "willow_leaves"}) {
+            for (const char* n : {"oak_leaves", "birch_leaves", "pine_leaves"}) {
                 try { leafIds.push_back(w.registry().idByName(n)); } catch (...) {}
             }
             auto isLeaf = [&](uint16_t id) {
@@ -986,6 +1420,144 @@ int runLogicTest(const std::string& assetDir) {
                         if (w.skyLightAt(x, y, z) != before[i++]) identical = false;
             check(identical,
                   "no-op edit preserves sky light (edit relight matches gen-time flood)");
+        }
+
+        // ---- Light-changing edits match a full recompute (clamped relight) -----
+        // setBlock relights only a clamped box around the edit: sky from the edit
+        // down to the first blocker below it, block light a wy±16 cube. Each must
+        // reproduce what a full recompute would — the bug this guards is a box too
+        // small, leaving stale light (a placed block whose shadow falls below the
+        // box, or an emitter whose glow is clipped). A falloff toggle forces a full
+        // computeSkyLight/computeBlockLight as ground truth; compare the whole window.
+        {
+            vg::WorldConfig wcfg;
+            wcfg.seed = 4242u;
+            wcfg.streaming = false;
+            wcfg.streamWorkers = 0;
+            wcfg.viewRadius = 3;
+            wcfg.heightChunks = 16;
+            wcfg.chunksX = wcfg.chunksZ = 2 * wcfg.viewRadius + 1;
+            wcfg.chunksY = wcfg.heightChunks;
+            vg::World w(wcfg, assetDir + "/blocks.yaml");
+            const glm::ivec3 sz = w.sizeInBlocks();
+            const uint16_t stone = w.registry().idByName("stone");
+            uint16_t emitter = 0; // first emissive block the registry happens to have
+            for (const char* n : {"glowstone", "torch", "lava", "jack_o_lantern", "lantern"}) {
+                try {
+                    const uint16_t id = w.registry().idByName(n);
+                    if (w.registry().emission(id) > 0) { emitter = id; break; }
+                } catch (...) {}
+            }
+
+            // Force a full recompute at the original falloff (toggle away and back).
+            auto fullRecompute = [&] {
+                w.setLightFalloff(wcfg.skyFalloff + 1, wcfg.blockFalloff);
+                w.setLightFalloff(wcfg.skyFalloff, wcfg.blockFalloff);
+            };
+            // Snapshot the incremental result, force a full recompute, compare both
+            // light fields over the whole window. (Each call ends on a full recompute,
+            // so the next edit starts from a known-correct field.)
+            auto matchesFull = [&](const char* label) {
+                std::vector<uint8_t> aSky, aBlk;
+                aSky.reserve(static_cast<size_t>(sz.x) * sz.y * sz.z);
+                aBlk.reserve(static_cast<size_t>(sz.x) * sz.y * sz.z);
+                for (int x = 0; x < sz.x; ++x)
+                    for (int y = 0; y < sz.y; ++y)
+                        for (int z = 0; z < sz.z; ++z) {
+                            aSky.push_back(w.skyLightAt(x, y, z));
+                            aBlk.push_back(w.blockLightAt(x, y, z));
+                        }
+                fullRecompute();
+                bool ok = true;
+                size_t i = 0;
+                for (int x = 0; x < sz.x; ++x)
+                    for (int y = 0; y < sz.y; ++y)
+                        for (int z = 0; z < sz.z; ++z) {
+                            if (w.skyLightAt(x, y, z) != aSky[i] ||
+                                w.blockLightAt(x, y, z) != aBlk[i]) ok = false;
+                            ++i;
+                        }
+                check(ok, label);
+            };
+
+            // An open-sky air cell a few blocks above the surface: placing a solid
+            // block there casts a shadow that falls below it (the clamped-sky case).
+            glm::ivec3 air{-1, -1, -1};
+            for (int x = 1; x < sz.x - 1 && air.x < 0; ++x)
+                for (int z = 1; z < sz.z - 1 && air.x < 0; ++z)
+                    for (int y = sz.y - 2; y >= 1; --y)
+                        if (w.blockAt(x, y, z).id != 0) {
+                            const int ay = y + 8;
+                            if (ay < sz.y && w.blockAt(x, ay, z).id == 0 &&
+                                w.skyLightAt(x, ay, z) == 15) {
+                                air = {x, ay, z};
+                            }
+                            break; // topmost solid in this column found
+                        }
+            check(air.x >= 0, "found an open-sky air cell to edit-test");
+
+            w.setBlock(air.x, air.y, air.z, vg::Block{stone, 0});
+            matchesFull("placing a sky-blocker relights to match a full recompute");
+
+            w.setBlock(air.x, air.y, air.z, vg::Block{});
+            matchesFull("breaking the blocker relights to match a full recompute");
+
+            if (emitter) {
+                w.setBlock(air.x, air.y, air.z, vg::Block{emitter, 0});
+                matchesFull("placing an emitter relights block light to match full");
+                w.setBlock(air.x, air.y, air.z, vg::Block{});
+                matchesFull("removing the emitter relights block light to match full");
+            }
+        }
+
+        // ---- Bounded recenter relight is byte-identical to full height ---------
+        // Moving the window relights only the entering edge's box (World::relightBox),
+        // whose sky pass is HEIGHT-BOUNDED: it skips the open sky above the highest
+        // blocker / stale sub-15 remnant, where both old and new light are already 15.
+        // This is an OPTIMISATION that must not change the baked result — the bug it
+        // could introduce is a box too small, leaving stale light at a streamed-in seam
+        // (the failure mode that disables floating islands). Recenter two identical
+        // streaming worlds the same way — one bounded (production), one forced to full
+        // height — and require their light fields to match cell-for-cell.
+        // (Incremental streaming relight is deliberately NOT compared to a from-scratch
+        //  recompute: the retained interior keeps its open-border generation light, so
+        //  they legitimately differ; the invariant that matters is bounded == full.)
+        {
+            auto runRecenter = [&](bool fullHeight,
+                                   std::vector<uint8_t>& sky,
+                                   std::vector<uint8_t>& blk) {
+                vg::WorldConfig wcfg;
+                wcfg.seed           = 4242u;
+                wcfg.streaming      = true;
+                wcfg.streamWorkers  = 0;     // serial relight: deterministic
+                wcfg.asyncStreaming = false;
+                wcfg.viewRadius     = 3;
+                wcfg.heightChunks   = 16;
+                wcfg.chunksX = wcfg.chunksZ = 2 * wcfg.viewRadius + 1;
+                wcfg.chunksY = wcfg.heightChunks;
+                vg::World w(wcfg, assetDir + "/blocks.yaml");
+                w.setSkyRelightFullHeight(fullHeight);
+                const glm::ivec3 org = w.chunkOrigin();
+                std::vector<glm::ivec4> boxes;
+                std::vector<glm::ivec3> dirty = w.recenter(
+                    org.x + wcfg.viewRadius + 2, org.z + wcfg.viewRadius + 2, boxes);
+                w.relightBoxes(boxes, dirty);
+                const glm::ivec3 sz = w.sizeInBlocks();
+                const glm::ivec3 o  = w.chunkOrigin() * vg::Chunk::kSize;
+                sky.clear();
+                blk.clear();
+                for (int x = o.x; x < o.x + sz.x; ++x)
+                    for (int y = 0; y < sz.y; ++y)
+                        for (int z = o.z; z < o.z + sz.z; ++z) {
+                            sky.push_back(w.skyLightAt(x, y, z));
+                            blk.push_back(w.blockLightAt(x, y, z));
+                        }
+            };
+            std::vector<uint8_t> bSky, bBlk, fSky, fBlk;
+            runRecenter(/*fullHeight=*/false, bSky, bBlk);
+            runRecenter(/*fullHeight=*/true,  fSky, fBlk);
+            check(bSky == fSky && bBlk == fBlk,
+                  "bounded recenter sky relight is byte-identical to full height");
         }
 
         // ---- Blockbench (.bbmodel) loader (ISSUES #13E) ------------------------
@@ -1069,6 +1641,62 @@ int runLogicTest(const std::string& assetDir) {
                   em.embeddedPNG[1] == 'P' && em.embeddedPNG[2] == 'N' && em.embeddedPNG[3] == 'G',
                   "decoded embedded texture is a real PNG (signature)");
         }
+
+        // ---- #11: the headless preview's feature scatter matches the real World ----
+        // World::generateColumn and the genmap voxel preview BOTH call the one shared
+        // scatterFeaturesColumn (world/FeatureScatter.h), so the preview can't drift from
+        // real generation. Assert the invariant end-to-end: the scatter is a pure function
+        // (two runs identical), and the feature blocks it emits ABOVE the surface (which
+        // land on air) are present in the generated World.
+        {
+            const std::string blocks = assetDir + "/blocks.yaml";
+            vg::WorldConfig cfg; cfg.seed = 7321u; cfg.streaming = false; cfg.streamWorkers = 0;
+            cfg.viewRadius = 3; cfg.heightChunks = 16;
+            cfg.chunksX = cfg.chunksZ = 2 * cfg.viewRadius + 1; cfg.chunksY = cfg.heightChunks;
+            vg::World world(cfg, blocks);
+            const vg::TerrainGenerator& gen = world.generator();
+            const std::string featDir =
+                (std::filesystem::path(blocks).parent_path() / "features").string();
+            vg::FeatureSet feats(featDir, world.registry(), gen.biomeNames(), cfg.seed);
+            vg::Noise featNoise(cfg.seed * 2246822519u + 0xFEA7u);
+            const int top = cfg.chunksY * 16;
+            std::unordered_map<int64_t, vg::ColumnInfo> ciCache;
+            std::unordered_map<int64_t, int> syCache;
+            auto kk = [](int x, int z) {
+                return (static_cast<int64_t>(x) << 32) ^ static_cast<uint32_t>(z); };
+            auto colAt = [&](int x, int z) -> const vg::ColumnInfo& {
+                auto it = ciCache.find(kk(x, z));
+                if (it == ciCache.end()) it = ciCache.emplace(kk(x, z), gen.columnInfo(x, z)).first;
+                return it->second; };
+            auto syAt = [&](int x, int z) -> int {
+                auto it = syCache.find(kk(x, z));
+                if (it == syCache.end()) it = syCache.emplace(kk(x, z), gen.surfaceY(x, z)).first;
+                return it->second; };
+            const glm::ivec3 org = world.chunkOrigin(), cnt = world.chunkCounts();
+            long emitted = 0, matched = 0;
+            uint64_t hh[2] = {1469598103934665603ull, 1469598103934665603ull};
+            for (int pass = 0; pass < 2; ++pass) {
+                for (int cz = org.z; cz < org.z + cnt.z; ++cz)
+                  for (int cx = org.x; cx < org.x + cnt.x; ++cx)
+                    for (int lz = 0; lz < 16; ++lz) for (int lx = 0; lx < 16; ++lx) {
+                        const int wx = cx * 16 + lx, wz = cz * 16 + lz;
+                        vg::scatterFeaturesColumn(feats, wx, wz, cfg.seed, featNoise, colAt, syAt,
+                          [&](int wy, uint16_t id, bool) {
+                            hh[pass] = (hh[pass] ^ (static_cast<uint64_t>(wy) * 131u + id +
+                                static_cast<uint64_t>(wx) * 7u + static_cast<uint64_t>(wz) * 13u))
+                                * 1099511628211ull;
+                            if (pass == 0 && wy > syAt(wx, wz) + 1 && wy < top) {
+                                ++emitted;
+                                if (world.blockAt(wx, wy, wz).id == id) ++matched;
+                            }
+                          });
+                    }
+            }
+            check(hh[0] == hh[1], "#11 feature scatter is a pure function (two runs identical)");
+            check(emitted > 0, "#11 preview scatter emits features over the world region");
+            check(emitted == 0 || matched * 100 >= emitted * 90,
+                  "#11 preview feature placement matches the real World (>=90% above surface)");
+        }
     } catch (const std::exception& e) {
         std::cerr << "[logic] FAIL: exception: " << e.what() << '\n';
         return EXIT_FAILURE;
@@ -1109,6 +1737,9 @@ int main(int argc, char** argv) {
     std::string mapOut = "genmap.png";
     std::string mapMode = "top";     // top | noise | cross
     std::string mapLayer = "cont";   // which noise layer for --mode noise
+    std::uint32_t mapSeed = 1337u;   // --seed: override the gen seed (tool "regenerate")
+    long mapCenterX = 0, mapCenterZ = 0; // --center CX CZ: pan the sampled window (block coords)
+    long mapOnlyBiome = -1;          // --only-biome N: force this biome across a voxels slice
 
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--frames") == 0 && i + 1 < argc) {
@@ -1136,6 +1767,13 @@ int main(int argc, char** argv) {
             mapMode = argv[++i]; // top | noise | cross (with --genmap)
         } else if (std::strcmp(argv[i], "--layer") == 0 && i + 1 < argc) {
             mapLayer = argv[++i]; // noise layer for --mode noise
+        } else if (std::strcmp(argv[i], "--seed") == 0 && i + 1 < argc) {
+            mapSeed = static_cast<std::uint32_t>(std::strtoul(argv[++i], nullptr, 10));
+        } else if (std::strcmp(argv[i], "--center") == 0 && i + 2 < argc) {
+            mapCenterX = std::strtol(argv[++i], nullptr, 10);
+            mapCenterZ = std::strtol(argv[++i], nullptr, 10);
+        } else if (std::strcmp(argv[i], "--only-biome") == 0 && i + 1 < argc) {
+            mapOnlyBiome = std::strtol(argv[++i], nullptr, 10);
         } else {
             std::cerr << "Unknown argument: " << argv[i] << '\n';
             return EXIT_FAILURE;
@@ -1144,15 +1782,18 @@ int main(int argc, char** argv) {
 
     if (genMap) {
         const int px = static_cast<int>(mapPixels), st = static_cast<int>(mapStep);
-        if (mapMode == "noise") return runGenNoise(VG_ASSET_DIR, px, st, mapOut, mapLayer);
-        if (mapMode == "cross") return runGenCross(VG_ASSET_DIR, px, st, mapOut);
-        if (mapMode == "height") return runGenHeight(VG_ASSET_DIR, px, st, mapOut);
-        if (mapMode == "voxels") return runGenVoxels(VG_ASSET_DIR, px, st, mapOut);
+        const int cx = static_cast<int>(mapCenterX), cz = static_cast<int>(mapCenterZ);
+        if (mapMode == "noise") return runGenNoise(VG_ASSET_DIR, px, st, mapOut, mapLayer, mapSeed, cx, cz);
+        if (mapMode == "cross") return runGenCross(VG_ASSET_DIR, px, st, mapOut, mapSeed, cx, cz);
+        if (mapMode == "height") return runGenHeight(VG_ASSET_DIR, px, st, mapOut, mapSeed, cx, cz);
+        if (mapMode == "voxels") return runGenVoxels(VG_ASSET_DIR, px, st, mapOut, mapSeed, cx, cz,
+                                                     static_cast<int>(mapOnlyBiome));
+        if (mapMode == "biomes") return runGenBiomes(VG_ASSET_DIR, px, st, mapOut, mapSeed, cx, cz);
         if (mapMode != "top") {
-            std::cerr << "Unknown --mode '" << mapMode << "' (use top|noise|cross|height|voxels)\n";
+            std::cerr << "Unknown --mode '" << mapMode << "' (use top|biomes|noise|cross|height|voxels)\n";
             return EXIT_FAILURE;
         }
-        return runGenMap(VG_ASSET_DIR, px, st, mapOut);
+        return runGenMap(VG_ASSET_DIR, px, st, mapOut, mapSeed, cx, cz);
     }
 
     // When capturing a screenshot without an explicit frame count, pick a

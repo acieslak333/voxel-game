@@ -10,14 +10,35 @@
 #    name     required. Unique. Used by idByName().
 #    solid    default false. Participates in collision.
 #    opaque   default false. Hides the faces of neighbours touching it (meshing).
-#    light    default 0. Light level (0..15) this block emits (e.g. glowstone).
+#    light    default 0. Block-light level this block emits — the value that seeds
+#             the block-light flood fill, which then steps down per block as it
+#             spreads. 0 = none; ~13-14 = lava/glowstone; higher values reach
+#             further/brighter (torch is 20). Lights caves & night independent of sky.
 #    light_color  default [1.00,0.66,0.32] (warm). Linear RGB hue of the emitted
-#             light: a warm torch vs orange lava. Only used when light > 0.
+#             light (a warm torch vs orange lava vs the cool violet glowstone).
+#             Only used when light > 0. Effect: tints everything the source lights.
+#    light_opacity  default: 15 if opaque, 0 if not. How many levels this block
+#             subtracts from sky/block light passing THROUGH it (0 = fully clear,
+#             15 = blocks all light). Used for thin/foliage blocks (leaves dim a
+#             few levels for dappled shade; a trunk dims more). Effect: deeper
+#             shade under denser values.
 #    hardness default 0. Seconds to break BY HAND (mining speed 1). 0 = instant
 #             (foliage), bigger = tougher; <0 = unbreakable. A held tool whose
 #             `tool:` matches this block's `preferred_tool:` mines it `tool_speed`x
 #             faster (see BlockRegistry::breakSeconds; verified by --logictest).
 #    preferred_tool  pickaxe|sword. Which tool speeds up mining THIS block.
+#    harvest_level  default 0. Minimum tool TIER needed to get a drop (1 wood, 2
+#             stone, 3 iron). Mined with a weaker/After tool the block still breaks
+#             but yields nothing (see canHarvest()). Pairs with item `tier`.
+#    render   default cube. How the mesher draws the block:
+#               cube      a full opaque/transparent voxel (default).
+#               cross     two intersecting alpha-cutout quads (sprite plants/torch).
+#               leafcube  cube faces + cross planes, all alpha-cutout (canopy).
+#               model     a centred sub-cube box (logs/trunks); see `model.width`.
+#               flat      one horizontal cutout quad near the floor (lilypad).
+#             Effect: the silhouette/volume the block occupies visually.
+#    model    only for render: model. `width` (in 1/16 px) = sampled box thickness:
+#             6 slim, 8 thin trunk, 12 chunky, 16 a full cube. Effect: trunk girth.
 #    --- item/tool keys (a tool is held & selected like a block, but not placed) ---
 #    tool       pickaxe|sword. Marks this entry as a tool item (=> not placeable).
 #    tool_speed default 1. Mining-speed multiplier this tool gives its preferred blocks.
@@ -117,7 +138,7 @@
   solid: true
   opaque: true
   light: 14
-  light_color: [0.75, 0.35, 1.0]   # warm yellow-white glow
+  light_color: [0.75, 0.35, 1.0]   # cool violet glow (R<G<B); raise R / drop B for warm
   textures:
     all: glowstone.block.png
 
@@ -185,16 +206,8 @@
     all: lava.block.png
 
 # --- Ores --------------------------------------------------------------------
-# Stone shot through with coloured mineral flecks. Plain opaque cubes; the
-# generator scatters them in veins through the stone (assets/world.yaml `ores`).
-- name: coal_ore
-  hardness: 3.0
-  preferred_tool: pickaxe
-  harvest_level: 1
-  solid: true
-  opaque: true
-  textures:
-    all: coal_ore.block.png
+# Iron ore: stone shot through with mineral flecks. The generator scatters it in
+# veins through the stone (assets/world.yaml `ores`). Iron is the only ore.
 - name: iron_ore
   hardness: 3.0
   preferred_tool: pickaxe
@@ -203,39 +216,6 @@
   opaque: true
   textures:
     all: iron_ore.block.png
-- name: gold_ore
-  hardness: 3.0
-  preferred_tool: pickaxe
-  harvest_level: 2
-  solid: true
-  opaque: true
-  textures:
-    all: gold_ore.block.png
-- name: ruby_ore
-  hardness: 4.0
-  preferred_tool: pickaxe
-  harvest_level: 3
-  solid: true
-  opaque: true
-  textures:
-    all: ruby_ore.block.png
-- name: emerald_ore
-  hardness: 4.0
-  preferred_tool: pickaxe
-  harvest_level: 3
-  solid: true
-  opaque: true
-  textures:
-    all: emerald_ore.block.png
-- name: mythril_ore
-  hardness: 5.0
-  preferred_tool: pickaxe
-  harvest_level: 3   # iron-minable (avoids a mythril-needs-mythril cycle); the
-                     # mythril pickaxe is the speed reward, not a new gate
-  solid: true
-  opaque: true
-  textures:
-    all: mythril_ore.block.png
 
 # --- Biome surface ------------------------------------------------------------
 # Snow: the cold-biome / above-snow-line surface coat (see assets/biomes.yaml).
@@ -306,24 +286,10 @@
   solid: false
   opaque: false
   render: cross
-# Cactus: a slim solid column (render: model), like the tree trunk. Solid (you
-# can't walk through it) but non-opaque (thinner than the cell). Stacks 1-3 tall.
-- name: cactus
-  hardness: 0.4
-  solid: true
-  opaque: false
-  render: model
-  light_opacity: 4       # trunk/column dims the sky below it (kept <15 so its own
-                         # rendered cell still receives light — a model samples its
-                         # own cell, unlike an opaque cube whose faces read neighbours)
-  model:
-    width: 12
-
-# --- Flora expansion: tree species (ISSUES #13F) ------------------------------
+# --- Tree species -------------------------------------------------------------
 # Each species = a trunk (render: model, like oak_trunk) + a leafcube canopy, the
 # same primitives oak uses. World::generateColumn picks the species from the root
-# column's biome `tree:` and shapes the canopy per species (ellipsoid / conical /
-# drooping). Appended at the end so existing block ids / saved chunks don't shift.
+# column's biome `tree:` and shapes the canopy per species (ellipsoid / conical).
 - name: birch_trunk
   hardness: 1.5
   solid: true
@@ -368,62 +334,4 @@
   light_opacity: 3       # canopy dims the sky a few levels -> dappled shade below
   textures:
     all: pine_leaves.block.png
-- name: maple_trunk
-  hardness: 1.5
-  solid: true
-  opaque: false
-  render: model
-  light_opacity: 4       # trunk/column dims the sky below it (kept <15 so its own
-                         # rendered cell still receives light — a model samples its
-                         # own cell, unlike an opaque cube whose faces read neighbours)
-  model:
-    width: 12
-  textures:
-    top: maple_log_top.block.png
-    bottom: maple_log_top.block.png
-    side: maple_log_side.block.png
-- name: maple_leaves
-  hardness: 0.1
-  solid: false
-  opaque: false
-  render: leafcube
-  light_opacity: 3       # canopy dims the sky a few levels -> dappled shade below
-  textures:
-    all: maple_leaves.block.png
-- name: willow_trunk
-  hardness: 1.5
-  solid: true
-  opaque: false
-  render: model
-  light_opacity: 4       # trunk/column dims the sky below it (kept <15 so its own
-                         # rendered cell still receives light — a model samples its
-                         # own cell, unlike an opaque cube whose faces read neighbours)
-  model:
-    width: 12
-  textures:
-    top: willow_log_top.block.png
-    bottom: willow_log_top.block.png
-    side: willow_log_side.block.png
-- name: willow_leaves
-  hardness: 0.1
-  solid: false
-  opaque: false
-  render: leafcube
-  light_opacity: 3       # canopy dims the sky a few levels -> dappled shade below
-  textures:
-    all: willow_leaves.block.png
-# Flora leftovers (#13F): hanging vines (cross sprite, scattered in air under tree
-# canopies) and lilypads (a flat pad floating on still water in swamps/wetlands).
-# Appended at the END so existing block ids / saved chunks don't shift. Both default
-# to a ${name}.block.png texture; non-solid + non-opaque so they don't cull/shadow.
-- name: vine
-  hardness: 0.0
-  solid: false
-  opaque: false
-  render: cross
-- name: lilypad
-  hardness: 0.0
-  solid: false
-  opaque: false
-  render: flat
 

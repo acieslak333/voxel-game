@@ -78,8 +78,8 @@ patterns:
     gap: 0.10          # fraction of the remaining pixels punched transparent (gaps between leaves)
     vein_shade: 0.72   # darken ~18% of opaque pixels by this factor for leaf-vein texture
 
-  # Ore flecks (coal_ore, iron_ore, ...). A stone base sprinkled with coloured
-  # mineral pixels. A texture opts in via its own `ore_color` key below.
+  # Ore flecks (iron_ore). A stone base sprinkled with coloured mineral pixels.
+  # A texture opts in via its own `ore_color` key below.
   ore:
     fleck_chance: 0.22 # fraction of pixels recoloured to the mineral colour
     fleck_jitter: 0.28 # per-fleck brightness variation (glint)
@@ -176,38 +176,18 @@ textures:
   lava.block.png:
     base: "#E2531E"
     speckle: 0.13
-  # Ores: stone base (matches stone.png) sprinkled with a mineral colour. See the
-  # `ore` pattern above; `ore_color` is the fleck tint.
-  coal_ore.block.png:
-    base: stone_gray
-    speckle: 0.11
-    ore_color: "#1A1A1A"
+  # Iron ore: stone base (matches stone.png) sprinkled with a mineral colour. See
+  # the `ore` pattern above; `ore_color` is the fleck tint.
   iron_ore.block.png:
     base: stone_gray
     speckle: 0.11
     ore_color: "#C8A883"
-  gold_ore.block.png:
-    base: stone_gray
-    speckle: 0.11
-    ore_color: "#F2C94C"
-  ruby_ore.block.png:
-    base: stone_gray
-    speckle: 0.11
-    ore_color: "#D7263D"
-  emerald_ore.block.png:
-    base: stone_gray
-    speckle: 0.11
-    ore_color: "#27C26E"
-  mythril_ore.block.png:
-    base: stone_gray
-    speckle: 0.11
-    ore_color: "#7FD7E8"
   # Snow: the cold-biome / mountain-peak surface coat.
   snow.block.png:
     base: "#EAF2FA"
     speckle: 0.05
 
-  # --- Flora expansion: ground plants (CROSS sprites + a model cactus) ---------
+  # --- Ground plants (CROSS sprites) -------------------------------------------
   # tall_grass / fern: tufts of vertical blades (see the `blades` pattern above).
   tall_grass.block.png:
     base: lime
@@ -226,14 +206,9 @@ textures:
   red_mushroom.block.png:
     base: forest
     mushroom: {cap: "#C0392B", stem: "#EDE3D0", spots: "#F4ECD8"}
-  # Cactus: a solid green column (render: model) with vertical ribs (streaks) + grain.
-  cactus.block.png:
-    base: "#3C7A4A"
-    streaks: true
-    speckle: 0.06
 
-  # --- Flora expansion: tree species (logs reuse streaks/rings; leaves reuse the
-  #     `leaves` cutout — only the base colour changes per species) --------------
+  # --- Tree species (logs reuse streaks/rings; leaves reuse the `leaves` cutout —
+  #     only the base colour changes per species) --------------------------------
   # Birch: pale papery bark with dark streaks; light, airy green canopy.
   birch_log_side.block.png:
     base: "#D8D2C0"
@@ -255,26 +230,4 @@ textures:
   pine_leaves.block.png:
     base: "#2E5A40"
     speckle: 0.15
-    leaves: true
-  # Maple: grey-brown bark; warm autumn-orange canopy.
-  maple_log_side.block.png:
-    base: "#5A4636"
-    streaks: true
-  maple_log_top.block.png:
-    base: "#6A5440"
-    rings: true
-  maple_leaves.block.png:
-    base: "#C8642A"
-    speckle: 0.18
-    leaves: true
-  # Willow: grey bark; pale yellow-green drooping canopy.
-  willow_log_side.block.png:
-    base: "#5C5142"
-    streaks: true
-  willow_log_top.block.png:
-    base: "#6A5F4E"
-    rings: true
-  willow_leaves.block.png:
-    base: "#8FAE4A"
-    speckle: 0.16
     leaves: true

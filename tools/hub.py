@@ -3,7 +3,7 @@
 
 A localhost page that launches the project's dev editors and browses game content.
 
-  * TOOLS  — one card per editor (worldgen, biome/flora, recipes, particles). Each
+  * TOOLS  — one card per editor (worldgen, recipes, features, particles…). Each
              has a single "Open" button: it starts that editor as a subprocess on
              its fixed port (if not already up) and opens it in a new tab. If a tool
              fails to start, its output is captured to tools/_hub_logs/<id>.log and
@@ -11,8 +11,8 @@ A localhost page that launches the project's dev editors and browses game conten
   * BROWSE — Blocks (from blocks.yaml), Items (items.yaml) and Recipes (recipes.yaml),
              shown by their baked 16x16 icons. Read-only; edit via the tools.
 
-Ports: worldgen 5000 · particles 5001 · biome 5002 · recipes 5003 · features 5004 ·
-       liquid 5006 · structures 5007   (hub 5005)
+Ports: worldgen 5000 (merged shape+biome) · particles 5001 · recipes 5003 ·
+       features 5004 · liquid 5006 · structures 5007   (hub 5005)
 
 Run from the repo root:
     pip install flask pyyaml        # editors also want ruamel.yaml
@@ -50,10 +50,9 @@ HUB_PORT = 5005
 
 # The editors. `port` must match each tool's hard-coded app.run() port.
 TOOLS = [
-    {"id": "genmap",   "name": "Worldgen",      "script": "genmap_tool.py",   "port": 5000,
-     "desc": "Tune terrain shape with a live top-down map.", "accent": "#6db4ff"},
-    {"id": "biome",    "name": "Biome / Flora", "script": "biome_tool.py",    "port": 5002,
-     "desc": "Tune what grows and what's underground.",      "accent": "#7fd17f"},
+    {"id": "worldgen", "name": "Worldgen",      "script": "worldgen_tool.py", "port": 5000,
+     "desc": "Terrain shape + biome flora + caves/ores, live 2D/3D, seed & pan.",
+     "accent": "#6db4ff"},
     {"id": "recipe",   "name": "Recipes",       "script": "recipe_tool.py",   "port": 5003,
      "desc": "Build crafting recipes by picking blocks.",    "accent": "#f0b35b"},
     {"id": "feature",  "name": "Features",      "script": "feature_tool.py",  "port": 5004,
@@ -266,11 +265,34 @@ PAGE = r"""<!DOCTYPE html>
        border-radius:7px;padding:3px 8px 3px 4px;font-size:12px}
   .arrow{color:var(--dim);font-size:18px;margin:0 3px}
   .out{display:flex;align-items:center;gap:6px;font-weight:600}
+  /* Embedded workspace: open tools as tabs in iframes inside the hub */
+  .row2{display:flex;gap:8px}
+  .ghost{background:var(--panel2)!important;color:var(--text)!important;padding:8px 12px!important}
+  /* Break the workspace OUT of the centered max-width .wrap so the embedded tool
+     gets the full window width (the editors need ~1000px of side panel + 3D view). */
+  #workspace{width:100vw;margin-left:calc(50% - 50vw);margin-bottom:14px;
+             border-top:1px solid var(--line);border-bottom:1px solid var(--line);
+             overflow:hidden;background:var(--panel)}
+  .wstabs{display:flex;gap:3px;background:var(--panel2);border-bottom:1px solid var(--line);padding:5px 14px 0;flex-wrap:wrap;align-items:center}
+  .wstab{background:var(--panel);border:1px solid var(--line);border-bottom:0;border-radius:8px 8px 0 0;
+         color:var(--dim);padding:7px 14px;cursor:pointer;font:inherit;font-weight:600}
+  .wstab.sel{color:var(--text);background:var(--bg)}
+  .wstab .x{margin-left:9px;opacity:.55;font-size:11px}.wstab .x:hover{opacity:1;color:#ff8a8a}
+  .wsfull{order:99;margin-left:auto;background:none;border:0;color:var(--dim);font-size:12px;cursor:pointer;padding:7px 12px}.wsfull:hover{color:var(--text)}
+  .wsframes{height:90vh}
+  .wsframe{width:100%;height:100%;min-height:600px;border:0;display:block;background:#0c1014}
+  /* Maximised: the workspace fills the whole viewport (Esc / the ⤢ button toggles). */
+  #workspace.max{position:fixed;inset:0;width:100vw;margin:0;z-index:50}
+  #workspace.max .wsframes{height:calc(100vh - 42px)}
 </style></head>
 <body>
 <header>Voxel Game — Tools</header>
 <div class="wrap">
-  <h2>Editors</h2>
+  <div id="workspace" class="hidden">
+    <div class="wstabs" id="wstabs"><button class="wsfull" onclick="toggleMax()" title="maximise / restore (Esc)">⤢ maximise</button></div>
+    <div class="wsframes" id="wsframes"></div>
+  </div>
+  <h2>Editors <span class="n" style="text-transform:none;letter-spacing:0">— "Open here" docks the tool as a tab above; "↗" opens a separate browser tab</span></h2>
   <div class="tools" id="tools"></div>
   <div class="err" id="err"></div>
 
@@ -296,20 +318,45 @@ $('#tools').innerHTML = TOOLS.map(t => `
   <div class="card" style="--c:${t.accent}">
     <div class="top"><h3>${esc(t.name)}</h3><span class="port">:${t.port}</span></div>
     <p>${esc(t.desc)}</p>
-    <button class="open" id="b-${t.id}" onclick="openTool('${t.id}',${t.port})">Open</button>
+    <div class="row2">
+      <button class="open" id="b-${t.id}" onclick="openTool('${t.id}',true)">Open here</button>
+      <button class="open ghost" onclick="openTool('${t.id}',false)" title="open in a separate browser tab">↗</button>
+    </div>
   </div>`).join('');
 
-async function openTool(id, port){
+const OPEN = {};  // id -> {frame, tab}  (tools docked in the workspace)
+async function openTool(id, embed){
   const btn = $('#b-'+id), err = $('#err'); err.style.display='none';
-  const tab = window.open('about:blank','_blank');  // open within the click (no popup block)
-  btn.disabled = true; const label = btn.textContent; btn.textContent = 'Starting…';
+  const tab = embed ? null : window.open('about:blank','_blank');  // new tab opened within the click
+  if(btn){ btn.disabled = true; var label = btn.textContent; btn.textContent = 'Starting…'; }
   try{
     const d = await (await fetch('/api/tools/'+id+'/open',{method:'POST'})).json();
-    if (d.running){ if(tab) tab.location=d.url; else location=d.url; }
+    if (d.running){ if(embed) dock(id, d.url); else { if(tab) tab.location=d.url; else location=d.url; } }
     else { if(tab) tab.close(); err.textContent = id+' failed to start:\n'+(d.log||'(no output)'); err.style.display='block'; }
   }catch(e){ if(tab) tab.close(); err.textContent = id+' error: '+e; err.style.display='block'; }
-  btn.disabled=false; btn.textContent=label;
+  if(btn){ btn.disabled=false; btn.textContent=label; }
 }
+// Dock a tool as an iframe + tab in the workspace (one window for everything).
+function dock(id, url){
+  $('#workspace').classList.remove('hidden');
+  if(!OPEN[id]){
+    const t = TOOLS.find(x=>x.id===id) || {name:id};
+    const fr = document.createElement('iframe'); fr.src = url; fr.className='wsframe'; fr.dataset.id=id;
+    $('#wsframes').appendChild(fr);
+    const tb = document.createElement('button'); tb.className='wstab'; tb.dataset.id=id;
+    tb.innerHTML = esc(t.name)+' <span class="x" title="close">✕</span>';
+    tb.onclick = ev => { if(ev.target.classList.contains('x')) closeDock(id); else showDock(id); };
+    $('#wstabs').appendChild(tb);
+    OPEN[id] = {frame:fr, tab:tb};
+  }
+  showDock(id); window.scrollTo(0,0);
+}
+function showDock(id){ for(const k in OPEN){ OPEN[k].frame.style.display=(k===id)?'':'none';
+  OPEN[k].tab.classList.toggle('sel', k===id); } }
+function closeDock(id){ if(!OPEN[id])return; OPEN[id].frame.remove(); OPEN[id].tab.remove(); delete OPEN[id];
+  const ids=Object.keys(OPEN); if(ids.length) showDock(ids[0]); else { $('#workspace').classList.remove('max'); $('#workspace').classList.add('hidden'); } }
+function toggleMax(){ $('#workspace').classList.toggle('max'); window.scrollTo(0,0); }
+document.addEventListener('keydown',e=>{ if(e.key==='Escape') $('#workspace').classList.remove('max'); });
 
 // ---- Content browser -------------------------------------------------------
 function tile(name, meta){

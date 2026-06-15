@@ -99,8 +99,8 @@ struct BlockProperties {
     // (e.g. a pickaxe with toolSpeed 5 breaks stone 5x faster than by hand).
     float toolSpeed = 1.0f;
     // Harvest TIER this tool provides (if it IS a tool): 0 = hand, 1 wood, 2 stone,
-    // 3 iron, 4 mythril. A block only drops when mined with a tool whose tier is
-    // >= the block's harvestLevel (and of the matching kind). See canHarvest().
+    // 3 iron. A block only drops when mined with a tool whose tier is >= the block's
+    // harvestLevel (and of the matching kind). See canHarvest().
     int tier = 0;
     // The minimum tool tier required to DROP this block when mined (0 = anything,
     // even bare hands). A block mined below its harvestLevel still breaks but yields

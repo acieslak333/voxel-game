@@ -1,9 +1,11 @@
 #include "render/CompositeRenderer.h"
 
+#include "core/ColorPalette.h"
 #include "render/VulkanContext.h"
 
 #include <algorithm>
 #include <array>
+#include <cstring>
 #include <fstream>
 #include <stdexcept>
 #include <vector>
@@ -50,11 +52,31 @@ struct PushConstants {
     float     submerged; // 0 = above water, 1 = camera underwater
     float     pixel;     // grain cell size in screen px (= pixelate block size)
 };
+
+// Matches composite.frag's `Post` UBO (std140: three vec4s = 48 bytes).
+struct PostUbo {
+    float bloom[4];  // x intensity (0=off), y threshold, z radius (texels), w knee
+    float godray[4]; // x intensity (0=off), y density, z decay, w per-sample weight
+    float sun[4];    // xy sun screen UV, z inFront (1/0), w visibility
+    float retro[4];  // x levels/channel (0=off), y dither, z interlace, w soft amount
+    float retro2[4]; // x frame parity (0/1), y bilinear base (0/1), z soft radius
+    // Selectable retro palette. palMeta.x = swatch count (0 = off). palette holds
+    // kMaxPaletteColors sRGB swatches as vec4 (std140 array stride = 16 bytes).
+    float palMeta[4];
+    float palette[kMaxPaletteColors][4];
+};
+constexpr float kBloomKnee   = 0.30f; // fixed: ramps highlights in instead of popping
+constexpr float kGodrayWeight = 0.5f; // fixed per-sample contribution along a shaft
 } // namespace
 
 CompositeRenderer::CompositeRenderer(VulkanContext& ctx, VkRenderPass targetRenderPass)
     : ctx_(ctx) {
     createSampler();
+    // Bloom params live in a tiny host-visible UBO (the push block is already full
+    // at 128 bytes). Persistently mapped; we just memcpy the latest values each frame.
+    bloomUbo_ = Buffer(ctx_, sizeof(PostUbo), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+                       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    bloomMapped_ = bloomUbo_.map();
     createDescriptor();
     createPipeline(targetRenderPass);
 }
@@ -65,6 +87,7 @@ CompositeRenderer::~CompositeRenderer() {
     if (pipelineLayout_) vkDestroyPipelineLayout(device, pipelineLayout_, nullptr);
     if (pool_)           vkDestroyDescriptorPool(device, pool_, nullptr);
     if (setLayout_)      vkDestroyDescriptorSetLayout(device, setLayout_, nullptr);
+    if (linearSampler_)  vkDestroySampler(device, linearSampler_, nullptr);
     if (sampler_)        vkDestroySampler(device, sampler_, nullptr);
 }
 
@@ -82,14 +105,24 @@ void CompositeRenderer::createSampler() {
     if (vkCreateSampler(ctx_.device(), &s, nullptr, &sampler_) != VK_SUCCESS) {
         throw std::runtime_error("CompositeRenderer: failed to create sampler");
     }
+
+    // A second sampler over the SAME scene image, but LINEAR — used only by the
+    // bloom taps so the blur interpolates smoothly between low-res texels (the
+    // base image keeps the NEAREST sampler above for the crisp pixelation).
+    s.magFilter = VK_FILTER_LINEAR;
+    s.minFilter = VK_FILTER_LINEAR;
+    if (vkCreateSampler(ctx_.device(), &s, nullptr, &linearSampler_) != VK_SUCCESS) {
+        throw std::runtime_error("CompositeRenderer: failed to create linear sampler");
+    }
 }
 
 void CompositeRenderer::createDescriptor() {
-    // Bindings: 0 scene colour, 1 depth.
-    std::array<VkDescriptorSetLayoutBinding, 2> bindings{};
+    // Bindings: 0 scene colour (nearest), 1 depth, 2 bloom UBO, 3 scene colour (linear).
+    std::array<VkDescriptorSetLayoutBinding, 4> bindings{};
     for (uint32_t i = 0; i < bindings.size(); ++i) {
         bindings[i].binding         = i;
-        bindings[i].descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        bindings[i].descriptorType  = (i == 2) ? VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
+                                               : VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         bindings[i].descriptorCount = 1;
         bindings[i].stageFlags      = VK_SHADER_STAGE_FRAGMENT_BIT;
     }
@@ -102,11 +135,14 @@ void CompositeRenderer::createDescriptor() {
         throw std::runtime_error("CompositeRenderer: descriptor set layout failed");
     }
 
-    VkDescriptorPoolSize size{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2};
+    std::array<VkDescriptorPoolSize, 2> sizes{{
+        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 3}, // scene-nearest, depth, scene-linear
+        {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,         1}, // bloom params
+    }};
     VkDescriptorPoolCreateInfo pi{};
     pi.sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    pi.poolSizeCount = 1;
-    pi.pPoolSizes    = &size;
+    pi.poolSizeCount = static_cast<uint32_t>(sizes.size());
+    pi.pPoolSizes    = sizes.data();
     pi.maxSets       = 1;
     if (vkCreateDescriptorPool(ctx_.device(), &pi, nullptr, &pool_) != VK_SUCCESS) {
         throw std::runtime_error("CompositeRenderer: descriptor pool failed");
@@ -122,24 +158,50 @@ void CompositeRenderer::createDescriptor() {
     }
 }
 
+void CompositeRenderer::setPalette(const std::vector<glm::vec3>& srgbColors) {
+    palette_ = srgbColors;
+    if (static_cast<int>(palette_.size()) > kMaxPaletteColors) {
+        palette_.resize(kMaxPaletteColors); // shader array is fixed-size
+    }
+}
+
 void CompositeRenderer::setSource(VkImageView sceneView, VkImageView depthView) {
-    VkDescriptorImageInfo imgs[2]{};
+    // Three image descriptors: scene (nearest, base), depth, scene (linear, bloom).
+    VkDescriptorImageInfo imgs[3]{};
     imgs[0].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     imgs[0].imageView   = sceneView;
     imgs[0].sampler     = sampler_;
     imgs[1].imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
     imgs[1].imageView   = depthView;
     imgs[1].sampler     = sampler_;
+    imgs[2].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    imgs[2].imageView   = sceneView;          // same image, sampled LINEAR for the blur
+    imgs[2].sampler     = linearSampler_;
 
-    std::array<VkWriteDescriptorSet, 2> writes{};
-    for (uint32_t i = 0; i < writes.size(); ++i) {
-        writes[i].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[i].dstSet          = set_;
-        writes[i].dstBinding      = i;
-        writes[i].descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        writes[i].descriptorCount = 1;
-        writes[i].pImageInfo      = &imgs[i];
-    }
+    VkDescriptorBufferInfo ubo{};
+    ubo.buffer = bloomUbo_.handle();
+    ubo.offset = 0;
+    ubo.range  = sizeof(PostUbo);
+
+    std::array<VkWriteDescriptorSet, 4> writes{};
+    auto imageWrite = [&](uint32_t idx, uint32_t binding, const VkDescriptorImageInfo* info) {
+        writes[idx].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[idx].dstSet          = set_;
+        writes[idx].dstBinding      = binding;
+        writes[idx].descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        writes[idx].descriptorCount = 1;
+        writes[idx].pImageInfo      = info;
+    };
+    imageWrite(0, 0, &imgs[0]); // binding 0: scene (nearest)
+    imageWrite(1, 1, &imgs[1]); // binding 1: depth
+    imageWrite(2, 3, &imgs[2]); // binding 3: scene (linear)
+    writes[3].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[3].dstSet          = set_;
+    writes[3].dstBinding      = 2;             // binding 2: bloom UBO
+    writes[3].descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    writes[3].descriptorCount = 1;
+    writes[3].pBufferInfo     = &ubo;
+
     vkUpdateDescriptorSets(ctx_.device(), static_cast<uint32_t>(writes.size()), writes.data(),
                            0, nullptr);
 }
@@ -262,6 +324,40 @@ void CompositeRenderer::record(VkCommandBuffer cmd, VkExtent2D screen, VkExtent2
     pc.pixel       = static_cast<float>(screen.width) /
                      static_cast<float>(std::max(1u, lowRes.width));
     vkCmdPushConstants(cmd, pipelineLayout_, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pc), &pc);
+
+    // Refresh the post UBO (quasi-static; a 1-frame-stale value during a slider drag
+    // is invisible, so a single coherent buffer is fine — no per-frame copies).
+    PostUbo u{};
+    u.bloom[0] = fog.bloomIntensity;
+    u.bloom[1] = fog.bloomThreshold;
+    u.bloom[2] = std::max(fog.bloomRadius, 0.0f);
+    u.bloom[3] = kBloomKnee;
+    u.godray[0] = fog.godrayIntensity;
+    u.godray[1] = fog.godrayDensity;
+    u.godray[2] = fog.godrayDecay;
+    u.godray[3] = kGodrayWeight;
+    u.sun[0] = fog.sunScreen.x;
+    u.sun[1] = fog.sunScreen.y;
+    u.sun[2] = fog.sunInFront;
+    u.sun[3] = fog.sunVisibility;
+    u.retro[0]  = fog.retroLevels;
+    u.retro[1]  = fog.retroDither;
+    u.retro[2]  = fog.retroInterlace;
+    u.retro[3]  = fog.retroSoft;
+    u.retro2[0] = fog.retroParity;
+    u.retro2[1] = fog.retroBilinear;
+    u.retro2[2] = std::max(fog.retroSoftRadius, 0.0f);
+    // Retro palette: count + swatches (sRGB). count 0 => composite.frag uses the
+    // per-channel quantiser instead. Capped at kMaxPaletteColors by setPalette.
+    const int palCount = static_cast<int>(palette_.size());
+    u.palMeta[0] = static_cast<float>(palCount);
+    for (int i = 0; i < palCount; ++i) {
+        u.palette[i][0] = palette_[i].r;
+        u.palette[i][1] = palette_[i].g;
+        u.palette[i][2] = palette_[i].b;
+        u.palette[i][3] = 1.0f;
+    }
+    std::memcpy(bloomMapped_, &u, sizeof(u));
 
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout_, 0, 1, &set_,
                             0, nullptr);
