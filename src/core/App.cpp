@@ -2181,12 +2181,16 @@ void App::run(long maxFrames, const std::string& screenshotPath) {
             if (++pN == 120) {
                 std::printf("[frame] avg %.2fms (%.0f fps) | max %.1f (update %.1f) | "
                             "update %.2f | ui %.2f | draw: wait %.2f acq %.2f rec %.2f "
-                            "sub %.2f | %zu chunks %.1fM tris drawn\n",
+                            "sub %.2f | %zu chunks %.1fM tris drawn | cull: %zu vis "
+                            "%zu culled %zu calls\n",
                             pTotal / pN, 1000.0 * pN / pTotal, pMax, pMaxUpdate,
                             pUpdate / pN, pUi / pN,
                             pWait / pN, pAcq / pN, pRec / pN, pSub / pN,
                             worldRenderer_.drawnChunkCount(),
-                            static_cast<double>(worldRenderer_.triangleCount()) / 1e6);
+                            static_cast<double>(worldRenderer_.triangleCount()) / 1e6,
+                            worldRenderer_.visibleChunkCount(),
+                            worldRenderer_.culledChunkCount(),
+                            worldRenderer_.drawCallCount());
                 pUpdate = pUi = pWait = pAcq = pRec = pSub = pTotal = 0;
                 pMax = pMaxUpdate = 0;
                 pN = 0;

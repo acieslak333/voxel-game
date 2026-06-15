@@ -118,6 +118,15 @@ public:
 
     [[nodiscard]] std::size_t drawnChunkCount() const { return drawnChunks_; }
     [[nodiscard]] std::size_t triangleCount()   const { return totalTriangles_; }
+    // Per-frame culling telemetry (updated by record(), read by the VG_FRAME_TIME
+    // profiler). `visibleChunks` = slots that survived frustum culling and issued a
+    // draw this frame; `culledChunks` = slots in drawList_ skipped as off-screen;
+    // `drawCalls` = vkCmdDrawIndexed/Indirect calls recorded (opaque + water). These
+    // are what tell you whether record() is paying for too many draws (rec-bound) —
+    // drawnChunkCount() counts resident geometry, this counts what actually drew.
+    [[nodiscard]] std::size_t visibleChunkCount() const { return lastVisibleChunks_; }
+    [[nodiscard]] std::size_t culledChunkCount()  const { return lastCulledChunks_; }
+    [[nodiscard]] std::size_t drawCallCount()     const { return lastDrawCalls_; }
 
     // The block texture array's image view + sampler, so other passes (the HUD,
     // which draws isometric block icons) can sample the same textures.
@@ -251,6 +260,11 @@ private:
     glm::ivec3             counts_{0};        // chunk grid dimensions
     std::size_t            drawnChunks_    = 0; // slots with geometry
     std::size_t            totalTriangles_ = 0;
+    // Per-frame culling telemetry, recomputed each record(). Not part of the draw
+    // state — purely for the VG_FRAME_TIME readout (see *ChunkCount() getters).
+    std::size_t            lastVisibleChunks_ = 0;
+    std::size_t            lastCulledChunks_  = 0;
+    std::size_t            lastDrawCalls_     = 0;
 
     std::vector<Buffer>          uniformBuffers_; // one per frame in flight
     VkDescriptorPool             descriptorPool_ = VK_NULL_HANDLE;

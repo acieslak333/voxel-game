@@ -953,6 +953,9 @@ void WorldRenderer::record(VkCommandBuffer cmd, uint32_t frameIndex, VkExtent2D 
     const std::array<glm::vec4, 6> frustum = extractFrustum(proj * view);
     const glm::vec3 chunkExtent(static_cast<float>(Chunk::kSize));
 
+    // Reset per-frame culling telemetry (VG_FRAME_TIME readout; see *ChunkCount()).
+    std::size_t visible = 0, culled = 0, calls = 0;
+
     // --- Pass 1: opaque terrain (writes colour + depth) ----------------------
     // Iterate only the slots that actually have geometry (drawList_), not all ~17k
     // mesh slots (REVIEW R8).
@@ -962,8 +965,11 @@ void WorldRenderer::record(VkCommandBuffer cmd, uint32_t frameIndex, VkExtent2D 
             continue; // water-only chunk: nothing for the opaque pass
         }
         if (!aabbInFrustum(frustum, m.worldPos, m.worldPos + chunkExtent)) {
+            ++culled;
             continue;
         }
+        ++visible;
+        ++calls;
         PushConstants pc;
         pc.model      = glm::translate(glm::mat4(1.0f), m.worldPos);
         pc.params.x   = 1.0f; // fully opaque
@@ -985,6 +991,9 @@ void WorldRenderer::record(VkCommandBuffer cmd, uint32_t frameIndex, VkExtent2D 
     // the descriptor set layout is identical, but rebind it against the water
     // pipeline's layout to be explicit.
     if (drawnWaterChunks_ == 0) {
+        lastVisibleChunks_ = visible;
+        lastCulledChunks_  = culled;
+        lastDrawCalls_     = calls;
         return;
     }
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, waterPipeline_->handle());
@@ -998,6 +1007,7 @@ void WorldRenderer::record(VkCommandBuffer cmd, uint32_t frameIndex, VkExtent2D 
         if (!aabbInFrustum(frustum, m.worldPos, m.worldPos + chunkExtent)) {
             continue;
         }
+        ++calls; // water draw for an in-frustum chunk (opaque pass already counted it)
         PushConstants pc;
         pc.model    = glm::translate(glm::mat4(1.0f), m.worldPos);
         pc.params.x = 0.7f; // ~70% opacity — see the seabed through it
@@ -1012,6 +1022,9 @@ void WorldRenderer::record(VkCommandBuffer cmd, uint32_t frameIndex, VkExtent2D 
         // opaque vertices in the same buffer — firstWaterVertex is the offset.
         vkCmdDrawIndexed(cmd, m.waterIndexCount, 1, 0, m.firstWaterVertex, 0);
     }
+    lastVisibleChunks_ = visible;
+    lastCulledChunks_  = culled;
+    lastDrawCalls_     = calls;
 }
 
 } // namespace vg
