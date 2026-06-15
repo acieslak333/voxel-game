@@ -13,6 +13,64 @@ on the byte layouts described here.
 
 ---
 
+## Implementation status
+
+Landed on the branch (build-green; verified where possible):
+- Part A telemetry, `SpanAllocator` (+test), both shaders, device features, CMake.
+- `MeshArena` (`src/render/MeshArena.{h,cpp}`) — the shared-arena class, **drafted
+  but kept OUT of the CMake target** (`add_executable`) until `WorldRenderer` uses
+  it, so the build stays green. Wire it in (add the `.cpp` to the target) as part
+  of the integration commit below.
+
+Remaining (the integration — needs a build loop; rewrites the fragile streaming
+path, so apply with the compiler in hand, not blind):
+
+### Per-frame GPU resources to add to WorldRenderer
+- `std::unique_ptr<MeshArena> arena_;` created once `counts_` is known (size from a
+  config budget; e.g. `vertexCapacity = nonEmptySlots * avgVertsPerChunk * 2`).
+- Per frame-in-flight, host-visible: a draw-data SSBO (`vec4` per slot, binding 2),
+  an opaque indirect buffer and a water indirect buffer (`INDIRECT_BUFFER`,
+  sized to `drawList_.size()` commands). CPU scratch: `std::vector<glm::vec4>
+  drawDataCpu_` and `std::vector<VkDrawIndexedIndirectCommand>` builders.
+- `retiredAllocs_` (`{int framesLeft; MeshArena::Alloc}`) alongside the existing
+  `retired_` (staging `Buffer`s); `tickRetired()` ages both, freeing arena spans
+  via `arena_->free`.
+
+### ChunkMesh (replaces the per-chunk Buffer)
+```cpp
+struct ChunkMesh {
+    MeshArena::Alloc arena;                 // span in the shared arena
+    uint32_t indexCount = 0,      firstIndex = 0;  int32_t baseVertex = 0;       // opaque
+    uint32_t waterIndexCount = 0, waterFirstIndex = 0; int32_t waterBaseVertex = 0; // water
+    glm::vec3 worldPos{0.0f}; int drawListPos = -1;
+};
+```
+where (from the mesh's `MeshLayout L` and the alloc `a`):
+`baseVertex = a.baseVertex; firstIndex = a.firstIndex; waterBaseVertex =
+a.baseVertex + L.firstWaterVertex; waterFirstIndex = a.firstIndex + L.indexCount`.
+
+### install/upload (replaces createDeviceLocal / per-chunk dev Buffer)
+`a = arena_->allocate(totalVerts, totalIdx)`, write the blob to a staging buffer
+(unchanged `writeBlob`), then queue TWO copies (vertices → vertex arena at
+`a.baseVertex*stride`, indices → index arena at `a.firstIndex*4`). `swapChunkBuffers`
+retires the old `arena` span into `retiredAllocs_` instead of a `Buffer`.
+
+### record() (Stage 1 — CPU cull + one indirect draw per pass)
+```
+refresh drawDataCpu_[slot]=vec4(worldPos,0) for changed slots; upload to frame SSBO
+bind arena vertex buffer (offset 0) + index buffer (offset 0) + descriptor set
+opaque: for slot in drawList_ if indexCount>0 && inFrustum: push {indexCount,1,
+        firstIndex,baseVertex,slot}; upload; vkCmdDrawIndexedIndirect(opaqueBuf,0,n,stride)
+water:  same with water* fields, 0.7 alpha push-constant, water pipeline
+```
+Stage 2 swaps the CPU command build for the `chunk_cull.comp` dispatch (see above).
+
+### Descriptor set layout (Pipeline)
+Add binding 2 = `STORAGE_BUFFER`, `VK_SHADER_STAGE_VERTEX_BIT`; bump pool sizes
+(+1 storage buffer/frame); point the chunk pipeline at `chunk_indirect.vert.spv`.
+
+---
+
 ## Why the current renderer can't just call indirect draw
 
 Today each chunk owns its **own** `VkBuffer` (`ChunkMesh::meshBuffer`,
