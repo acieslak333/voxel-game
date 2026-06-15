@@ -153,19 +153,22 @@ WorldRenderer::WorldRenderer(VulkanContext& ctx, VkRenderPass renderPass,
     }
     textures_ = std::make_unique<TextureArray>(ctx_, world_.registry().texturePaths(),
                                                textureDir);
+    // GPU-driven (indirect) vertex shader: per-chunk translation comes from the
+    // draw-data SSBO (binding 2) via gl_InstanceIndex, not a push-constant model.
     pipeline_ = std::make_unique<Pipeline>(ctx_, renderPass,
-                                           shaderDir + "/chunk.vert.spv",
+                                           shaderDir + "/chunk_indirect.vert.spv",
                                            shaderDir + "/chunk.frag.spv");
     // Same shaders, but the translucent flavor (alpha blend on, depth-write off)
     // for the second, water pass — drawn after opaque so the seabed shows through.
     waterPipeline_ = std::make_unique<Pipeline>(ctx_, renderPass,
-                                                shaderDir + "/chunk.vert.spv",
+                                                shaderDir + "/chunk_indirect.vert.spv",
                                                 shaderDir + "/chunk.frag.spv",
                                                 /*translucent=*/true);
-    buildMeshes();
-    createUniformBuffers(framesInFlight);
-    createDescriptorSets(framesInFlight);
     framesInFlight_ = framesInFlight;
+    buildMeshes(); // creates arena_, sizes it from counts_, uploads the core window
+    createUniformBuffers(framesInFlight);
+    createGpuDrivenBuffers(framesInFlight); // draw-data SSBO + indirect buffers
+    createDescriptorSets(framesInFlight);   // references drawDataBuffers_
     meshVersion_.assign(meshes_.size(), 0);
     if (world_.streaming() && world_.streamWorkers() > 0) {
         startWorkers(world_.streamWorkers());
@@ -346,10 +349,44 @@ void WorldRenderer::uploadChunkMesh(int cx, int cy, int cz) {
     installMesh(cx, cy, cz, std::move(mesh), /*deferOldBuffers=*/false);
 }
 
-void WorldRenderer::swapChunkBuffers(int cx, int cy, int cz, Buffer&& meshBuffer,
-                                     VkDeviceSize indexOffset, uint32_t indexCount,
-                                     VkDeviceSize waterIndexOffset, uint32_t waterIndexCount,
-                                     int32_t firstWaterVertex, bool deferOldBuffers) {
+// Allocate an arena span for `mesh`, fill `stage` with its blob, and report the
+// placement + the two copy regions (vertices -> vertex arena, indices -> index
+// arena) the caller records. Element offsets in the placement are exactly the
+// indirect draw's vertexOffset/firstIndex. `mesh` must be non-empty.
+WorldRenderer::MeshPlacement WorldRenderer::stageMesh(
+    const MeshData& mesh, Buffer& stage, VkDeviceSize& vtxDst, VkDeviceSize& vtxSize,
+    VkDeviceSize& idxSrc, VkDeviceSize& idxDst, VkDeviceSize& idxSize) {
+    const MeshLayout L = computeLayout(mesh);
+    const uint32_t totalVerts =
+        static_cast<uint32_t>(mesh.vertices.size() + mesh.waterVertices.size());
+    const uint32_t totalIdx =
+        static_cast<uint32_t>(mesh.indices.size() + mesh.waterIndices.size());
+
+    const MeshArena::Alloc a = arena_->allocate(totalVerts, totalIdx); // throws if full
+    MeshPlacement p;
+    p.arena           = a;
+    p.indexCount      = L.indexCount;
+    p.firstIndex      = a.firstIndex;
+    p.baseVertex      = static_cast<int32_t>(a.baseVertex);
+    p.waterIndexCount = L.waterIndexCount;
+    p.waterFirstIndex = a.firstIndex + L.indexCount;
+    p.waterBaseVertex = a.baseVertex + L.firstWaterVertex;
+
+    // Staging blob is [opaqueV | waterV | pad | opaqueI | waterI]; the vertices
+    // occupy [0, L.indexOffset minus pad) and the indices [L.indexOffset, L.total).
+    stage = Buffer(ctx_, L.total, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                   VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    writeBlob(static_cast<char*>(stage.map()), mesh, L);
+    vtxDst  = arena_->vertexByteOffset(a.baseVertex);
+    vtxSize = static_cast<VkDeviceSize>(totalVerts) * MeshArena::kVertexStride;
+    idxSrc  = L.indexOffset;
+    idxDst  = arena_->indexByteOffset(a.firstIndex);
+    idxSize = static_cast<VkDeviceSize>(totalIdx) * MeshArena::kIndexStride;
+    return p;
+}
+
+void WorldRenderer::swapChunkBuffers(int cx, int cy, int cz, const MeshPlacement& place,
+                                     bool deferOldSpan) {
     const uint32_t slot = static_cast<uint32_t>(chunkIndex(cx, cy, cz));
     ChunkMesh& cm = meshes_[slot];
 
@@ -358,23 +395,27 @@ void WorldRenderer::swapChunkBuffers(int cx, int cy, int cz, Buffer&& meshBuffer
     const bool hadGeometry = cm.indexCount > 0 || cm.waterIndexCount > 0;
     const bool hadWater    = cm.waterIndexCount > 0;
     totalTriangles_ -= (cm.indexCount + cm.waterIndexCount) / 3;
-    if (hadGeometry) {
-        --drawnChunks_;
-        if (deferOldBuffers) {
-            // An in-flight frame may still reference the old buffer, and the worker
-            // path can't issue a per-frame device wait — retire it for a few frames
-            // instead of freeing now. tickRetired() reaps it.
-            retired_.emplace_back(static_cast<int>(framesInFlight_) + 1, std::move(cm.meshBuffer));
+    if (cm.arena.valid) {
+        if (deferOldSpan) {
+            // An in-flight frame may still read the old span; retire it for a few
+            // frames instead of freeing now. tickRetired() reaps it.
+            retiredAllocs_.emplace_back(static_cast<int>(framesInFlight_) + 1, cm.arena);
+        } else {
+            arena_->free(cm.arena);
         }
     }
-    cm.meshBuffer       = std::move(meshBuffer);
-    cm.indexOffset      = indexOffset;
-    cm.indexCount       = indexCount;
-    cm.waterIndexOffset = waterIndexOffset;
-    cm.waterIndexCount  = waterIndexCount;
-    cm.firstWaterVertex = firstWaterVertex;
-    const bool nowGeometry = indexCount > 0 || waterIndexCount > 0;
-    const bool nowWater    = waterIndexCount > 0;
+    if (hadGeometry) {
+        --drawnChunks_;
+    }
+    cm.arena           = place.arena;
+    cm.indexCount      = place.indexCount;
+    cm.firstIndex      = place.firstIndex;
+    cm.baseVertex      = place.baseVertex;
+    cm.waterIndexCount = place.waterIndexCount;
+    cm.waterFirstIndex = place.waterFirstIndex;
+    cm.waterBaseVertex = place.waterBaseVertex;
+    const bool nowGeometry = place.indexCount > 0 || place.waterIndexCount > 0;
+    const bool nowWater    = place.waterIndexCount > 0;
     if (nowGeometry) {
         ++drawnChunks_;
     }
@@ -394,27 +435,37 @@ void WorldRenderer::swapChunkBuffers(int cx, int cy, int cz, Buffer&& meshBuffer
         cm.drawListPos = -1;
     }
     cm.worldPos = glm::vec3(cx, cy, cz) * static_cast<float>(Chunk::kSize);
+    // Keep the draw-data mirror (uploaded to the per-frame SSBO in record()) in
+    // sync; the indirect vertex shader reads this by slot via gl_InstanceIndex.
+    // Sized in buildMeshes() before any swap, so the index is always valid.
+    if (slot < drawDataCpu_.size()) {
+        drawDataCpu_[slot] = glm::vec4(cm.worldPos, 0.0f);
+    }
     totalTriangles_ += (cm.indexCount + cm.waterIndexCount) / 3;
 }
 
 void WorldRenderer::installMesh(int cx, int cy, int cz, MeshData&& mesh, bool deferOldBuffers) {
-    // Main-thread immediate path (one GPU submit+wait in createDeviceLocal) — fine
-    // for the rare, small sync remeshes (block edits, falloff). The streaming path
-    // uses installMeshBatch(). Vertices + indices share ONE allocation (halves the
-    // device allocation count vs a buffer each — see docs/WORLD_GEN_AGENT_TIPS.md §5).
+    // Main-thread immediate path (one GPU submit+wait) — fine for the rare, small
+    // sync remeshes (block edits, falloff). The streaming path uses installMeshBatch().
+    // Geometry is copied into the shared arena at the placement's offsets.
     if (mesh.empty()) {
-        swapChunkBuffers(cx, cy, cz, Buffer{}, 0, 0, 0, 0, 0, deferOldBuffers);
+        swapChunkBuffers(cx, cy, cz, MeshPlacement{}, deferOldBuffers);
         return;
     }
-    const MeshLayout L = computeLayout(mesh);
-    std::vector<uint8_t> blob(static_cast<size_t>(L.total));
-    writeBlob(reinterpret_cast<char*>(blob.data()), mesh, L);
-    Buffer mb = Buffer::createDeviceLocal(
-        ctx_, blob.data(), L.total,
-        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
-    swapChunkBuffers(cx, cy, cz, std::move(mb), L.indexOffset, L.indexCount,
-                     L.waterIndexOffset, L.waterIndexCount, L.firstWaterVertex,
-                     deferOldBuffers);
+    Buffer stage;
+    VkDeviceSize vtxDst, vtxSize, idxSrc, idxDst, idxSize;
+    const MeshPlacement p = stageMesh(mesh, stage, vtxDst, vtxSize, idxSrc, idxDst, idxSize);
+    VkCommandBuffer cmd = ctx_.beginSingleTimeCommands();
+    if (vtxSize) {
+        VkBufferCopy c{}; c.srcOffset = 0;      c.dstOffset = vtxDst; c.size = vtxSize;
+        vkCmdCopyBuffer(cmd, stage.handle(), arena_->vertexBuffer(), 1, &c);
+    }
+    if (idxSize) {
+        VkBufferCopy c{}; c.srcOffset = idxSrc; c.dstOffset = idxDst; c.size = idxSize;
+        vkCmdCopyBuffer(cmd, stage.handle(), arena_->indexBuffer(), 1, &c);
+    }
+    ctx_.endSingleTimeCommands(cmd); // submit+wait, then stage is freed (RAII)
+    swapChunkBuffers(cx, cy, cz, p, deferOldBuffers);
 }
 
 void WorldRenderer::installMeshBatch(std::vector<MeshResult>& batch) {
@@ -429,29 +480,17 @@ void WorldRenderer::installMeshBatch(std::vector<MeshResult>& batch) {
             continue; // superseded by a newer request — discard this stale mesh
         }
         if (r.data.empty()) {
-            swapChunkBuffers(r.cx, r.cy, r.cz, Buffer{}, 0, 0, 0, 0, 0, /*deferOldBuffers=*/true);
+            swapChunkBuffers(r.cx, r.cy, r.cz, MeshPlacement{}, /*deferOldSpan=*/true);
             continue;
         }
-        const MeshLayout L = computeLayout(r.data);
-        // One host staging buffer holding all vertices then all indices.
-        Buffer stage(ctx_, L.total, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-        writeBlob(static_cast<char*>(stage.map()), r.data, L);
-        // One device buffer used as both vertex and index source.
-        Buffer dev(ctx_, L.total,
-                   VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
-                       VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                   VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-
+        // Stage the blob + reserve the arena span now (no GPU work yet); the
+        // staging->arena copies are recorded into the frame's command buffer by
+        // recordPendingUploads(), so the upload rides the frame's own submit.
         PendingUpload up;
-        up.dst   = dev.handle(); // stable handle; the slot owns the buffer after the swap
-        up.size  = L.total;
-        up.stage = std::move(stage);
+        const MeshPlacement p =
+            stageMesh(r.data, up.stage, up.vtxDst, up.vtxSize, up.idxSrc, up.idxDst, up.idxSize);
         pendingUploads_.push_back(std::move(up));
-
-        swapChunkBuffers(r.cx, r.cy, r.cz, std::move(dev), L.indexOffset, L.indexCount,
-                         L.waterIndexOffset, L.waterIndexCount, L.firstWaterVertex,
-                         /*deferOldBuffers=*/true);
+        swapChunkBuffers(r.cx, r.cy, r.cz, p, /*deferOldSpan=*/true);
     }
 }
 
@@ -460,9 +499,15 @@ void WorldRenderer::recordPendingUploads(VkCommandBuffer cmd) {
         return;
     }
     for (PendingUpload& p : pendingUploads_) {
-        VkBufferCopy copy{};
-        copy.size = p.size;
-        vkCmdCopyBuffer(cmd, p.stage.handle(), p.dst, 1, &copy);
+        // Two copies per chunk: vertices -> vertex arena, indices -> index arena.
+        if (p.vtxSize) {
+            VkBufferCopy c{}; c.srcOffset = 0;      c.dstOffset = p.vtxDst; c.size = p.vtxSize;
+            vkCmdCopyBuffer(cmd, p.stage.handle(), arena_->vertexBuffer(), 1, &c);
+        }
+        if (p.idxSize) {
+            VkBufferCopy c{}; c.srcOffset = p.idxSrc; c.dstOffset = p.idxDst; c.size = p.idxSize;
+            vkCmdCopyBuffer(cmd, p.stage.handle(), arena_->indexBuffer(), 1, &c);
+        }
     }
     // One barrier so the transfer writes are visible to the vertex/index fetch in
     // the render pass that follows in this same command buffer.
@@ -482,22 +527,43 @@ void WorldRenderer::recordPendingUploads(VkCommandBuffer cmd) {
 }
 
 void WorldRenderer::tickRetired() {
-    if (retired_.empty()) {
-        return;
+    // Age + reap deferred staging-buffer frees (RAII releases the Buffer).
+    if (!retired_.empty()) {
+        for (auto& r : retired_) --r.first;
+        retired_.erase(std::remove_if(retired_.begin(), retired_.end(),
+                                      [](const std::pair<int, Buffer>& r) { return r.first <= 0; }),
+                       retired_.end());
     }
-    for (auto& r : retired_) {
-        --r.first;
+    // Age + reap deferred arena-span frees: safe to return to the arena now that
+    // framesInFlight_+1 frames have elapsed (no in-flight frame still reads them).
+    if (!retiredAllocs_.empty()) {
+        for (auto& r : retiredAllocs_) --r.first;
+        retiredAllocs_.erase(
+            std::remove_if(retiredAllocs_.begin(), retiredAllocs_.end(),
+                           [this](std::pair<int, MeshArena::Alloc>& r) {
+                               if (r.first <= 0) { arena_->free(r.second); return true; }
+                               return false;
+                           }),
+            retiredAllocs_.end());
     }
-    // Erasing frees the Buffer (RAII): safe now — framesInFlight_+1 frames have
-    // elapsed, so every frame that could reference it has completed.
-    retired_.erase(std::remove_if(retired_.begin(), retired_.end(),
-                                  [](const std::pair<int, Buffer>& r) { return r.first <= 0; }),
-                   retired_.end());
 }
 
 void WorldRenderer::buildMeshes() {
     counts_ = world_.chunkCounts();
-    meshes_.resize(static_cast<size_t>(counts_.x) * counts_.y * counts_.z);
+    const size_t numSlots = static_cast<size_t>(counts_.x) * counts_.y * counts_.z;
+    meshes_.resize(numSlots);
+    drawDataCpu_.assign(numSlots, glm::vec4(0.0f)); // per-slot world pos for the SSBO
+
+    // Size the shared arena from the slot count. These per-slot budgets are the one
+    // OOM risk of the GPU-driven path: allocate() throws if a window's live geometry
+    // exceeds them (dense terrain + large view_radius). kArenaVertsPerSlot/IdxPerSlot
+    // are generous averages (most slots are empty sky or solid interior with few
+    // faces); raise them if MeshArena throws. TODO(R7): move to world.yaml arena_tuning.
+    constexpr uint32_t kArenaVertsPerSlot = 1024;
+    constexpr uint32_t kArenaIdxPerSlot   = 1536; // 1.5 indices per vertex (6 per quad / 4 verts)
+    arena_ = std::make_unique<MeshArena>(
+        ctx_, static_cast<uint32_t>(numSlots) * kArenaVertsPerSlot,
+        static_cast<uint32_t>(numSlots) * kArenaIdxPerSlot);
 
     // Greedy-meshing thousands of chunks one-at-a-time on the main thread was the
     // bulk of startup. greedyMesh() only READS the world, so mesh every chunk in
@@ -562,24 +628,26 @@ void WorldRenderer::buildMeshes() {
             const glm::ivec3& c = coords[i];
             MeshData& m = meshed[i];
             if (m.empty()) {
-                swapChunkBuffers(c.x, c.y, c.z, Buffer{}, 0, 0, 0, 0, 0, /*deferOldBuffers=*/false);
+                swapChunkBuffers(c.x, c.y, c.z, MeshPlacement{}, /*deferOldSpan=*/false);
                 continue;
             }
-            const MeshLayout L = computeLayout(m);
-            Buffer stage(ctx_, L.total, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-            writeBlob(static_cast<char*>(stage.map()), m, L);
-            Buffer dev(ctx_, L.total,
-                       VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
-                           VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                       VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-            VkBufferCopy copy{};
-            copy.size = L.total;
-            vkCmdCopyBuffer(cmd, stage.handle(), dev.handle(), 1, &copy);
+            // Stage + reserve the arena span, then record the two arena copies into
+            // this slice's command buffer (vertices -> vertex arena, indices -> index
+            // arena). Staging stays alive until endSingleTimeCommands completes.
+            Buffer stage;
+            VkDeviceSize vtxDst, vtxSize, idxSrc, idxDst, idxSize;
+            const MeshPlacement p =
+                stageMesh(m, stage, vtxDst, vtxSize, idxSrc, idxDst, idxSize);
+            if (vtxSize) {
+                VkBufferCopy cp{}; cp.srcOffset = 0;      cp.dstOffset = vtxDst; cp.size = vtxSize;
+                vkCmdCopyBuffer(cmd, stage.handle(), arena_->vertexBuffer(), 1, &cp);
+            }
+            if (idxSize) {
+                VkBufferCopy cp{}; cp.srcOffset = idxSrc; cp.dstOffset = idxDst; cp.size = idxSize;
+                vkCmdCopyBuffer(cmd, stage.handle(), arena_->indexBuffer(), 1, &cp);
+            }
             staging.push_back(std::move(stage));
-            swapChunkBuffers(c.x, c.y, c.z, std::move(dev), L.indexOffset, L.indexCount,
-                             L.waterIndexOffset, L.waterIndexCount, L.firstWaterVertex,
-                             /*deferOldBuffers=*/false);
+            swapChunkBuffers(c.x, c.y, c.z, p, /*deferOldSpan=*/false);
         }
         ctx_.endSingleTimeCommands(cmd); // one submit+wait for the whole slice
     }
@@ -594,6 +662,13 @@ void WorldRenderer::buildMeshes() {
         std::printf("[mesh] gpu pool: %u blocks, %.1f MiB allocated, %.1f MiB live\n",
                     a.blockCount(), static_cast<double>(a.bytesAllocated()) / (1024.0 * 1024.0),
                     static_cast<double>(a.bytesReserved()) / (1024.0 * 1024.0));
+        // Arena occupancy: live vs capacity for each of the two shared buffers
+        // (watch this approach 100% — that's when allocate() would start throwing).
+        std::printf("[mesh] arena: verts %u/%u (%.0f%%), idx %u/%u (%.0f%%)\n",
+                    arena_->vertexUsed(), arena_->vertexCapacity(),
+                    100.0 * arena_->vertexUsed() / std::max(1u, arena_->vertexCapacity()),
+                    arena_->indexUsed(), arena_->indexCapacity(),
+                    100.0 * arena_->indexUsed() / std::max(1u, arena_->indexCapacity()));
     }
     std::cout << "[world] meshed " << drawnChunks_ << " non-empty chunks, "
               << totalTriangles_ << " triangles";
@@ -855,10 +930,31 @@ void WorldRenderer::createUniformBuffers(uint32_t n) {
     }
 }
 
+void WorldRenderer::createGpuDrivenBuffers(uint32_t n) {
+    // One draw-data SSBO + opaque/water indirect buffer per frame in flight, all
+    // host-visible (the CPU refills them in record(); host writes before the queue
+    // submit are visible to the device, so no extra barrier is needed). Sized to
+    // the slot count — at most one command per slot per pass.
+    const VkDeviceSize slots     = static_cast<VkDeviceSize>(meshes_.size());
+    const VkDeviceSize ssboBytes = slots * sizeof(glm::vec4);
+    const VkDeviceSize cmdBytes  = slots * sizeof(VkDrawIndexedIndirectCommand);
+    const VkMemoryPropertyFlags host =
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+    drawDataBuffers_.reserve(n);
+    opaqueIndirect_.reserve(n);
+    waterIndirect_.reserve(n);
+    for (uint32_t i = 0; i < n; ++i) {
+        drawDataBuffers_.emplace_back(ctx_, ssboBytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, host);
+        opaqueIndirect_.emplace_back(ctx_, cmdBytes, VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, host);
+        waterIndirect_.emplace_back(ctx_, cmdBytes, VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, host);
+    }
+}
+
 void WorldRenderer::createDescriptorSets(uint32_t n) {
-    std::array<VkDescriptorPoolSize, 2> sizes{};
+    std::array<VkDescriptorPoolSize, 3> sizes{};
     sizes[0] = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, n};
     sizes[1] = {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, n};
+    sizes[2] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, n}; // binding 2: per-chunk draw data
 
     VkDescriptorPoolCreateInfo poolInfo{};
     poolInfo.sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -893,7 +989,12 @@ void WorldRenderer::createDescriptorSets(uint32_t n) {
         imageInfo.imageView   = textures_->view();
         imageInfo.sampler     = textures_->sampler();
 
-        std::array<VkWriteDescriptorSet, 2> writes{};
+        VkDescriptorBufferInfo drawDataInfo{};
+        drawDataInfo.buffer = drawDataBuffers_[i].handle();
+        drawDataInfo.offset = 0;
+        drawDataInfo.range  = VK_WHOLE_SIZE;
+
+        std::array<VkWriteDescriptorSet, 3> writes{};
         writes[0].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         writes[0].dstSet          = descriptorSets_[i];
         writes[0].dstBinding      = 0;
@@ -907,6 +1008,13 @@ void WorldRenderer::createDescriptorSets(uint32_t n) {
         writes[1].descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         writes[1].descriptorCount = 1;
         writes[1].pImageInfo      = &imageInfo;
+
+        writes[2].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[2].dstSet          = descriptorSets_[i];
+        writes[2].dstBinding      = 2;
+        writes[2].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        writes[2].descriptorCount = 1;
+        writes[2].pBufferInfo     = &drawDataInfo;
 
         vkUpdateDescriptorSets(ctx_.device(), static_cast<uint32_t>(writes.size()),
                                writes.data(), 0, nullptr);
@@ -942,86 +1050,96 @@ void WorldRenderer::record(VkCommandBuffer cmd, uint32_t frameIndex, VkExtent2D 
     scissor.extent = extent;
     vkCmdSetScissor(cmd, 0, 1, &scissor);
 
+    // Upload this frame's per-chunk draw-data SSBO (chunk world translation per slot,
+    // read by the indirect vertex shader via gl_InstanceIndex). swapChunkBuffers keeps
+    // the mirror current; re-uploading the whole array is cheap (slots * 16 B).
+    if (!drawDataCpu_.empty()) {
+        drawDataBuffers_[frameIndex].upload(drawDataCpu_.data(),
+                                            drawDataCpu_.size() * sizeof(glm::vec4));
+    }
+
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_->layout(),
                             0, 1, &descriptorSets_[frameIndex], 0, nullptr);
 
-    // One draw per non-empty chunk, each translated to its world position via a
-    // push constant. Empty slots (air chunks) carry no geometry and are skipped,
-    // as are chunks whose bounding box falls entirely outside the view frustum
-    // (frustum culling — the GPU already discards back faces, but skipping the
-    // draw call entirely also spares vertex processing for off-screen chunks).
+    // Bind the shared arena ONCE for both passes; each chunk's draw addresses into it
+    // via its indirect command's vertexOffset/firstIndex. Pipeline binds don't unbind
+    // vertex/index buffers, so the water pass reuses these.
+    VkBuffer     arenaVtx = arena_->vertexBuffer();
+    VkDeviceSize zero     = 0;
+    vkCmdBindVertexBuffers(cmd, 0, 1, &arenaVtx, &zero);
+    vkCmdBindIndexBuffer(cmd, arena_->indexBuffer(), 0, VK_INDEX_TYPE_UINT32);
+
     const std::array<glm::vec4, 6> frustum = extractFrustum(proj * view);
     const glm::vec3 chunkExtent(static_cast<float>(Chunk::kSize));
-
-    // Reset per-frame culling telemetry (VG_FRAME_TIME readout; see *ChunkCount()).
-    std::size_t visible = 0, culled = 0, calls = 0;
+    std::size_t visible = 0, culled = 0;
 
     // --- Pass 1: opaque terrain (writes colour + depth) ----------------------
-    // Iterate only the slots that actually have geometry (drawList_), not all ~17k
-    // mesh slots (REVIEW R8).
+    // CPU frustum cull builds a compact indirect command array (one command per
+    // in-frustum opaque chunk; firstInstance = slot so the vertex shader resolves the
+    // chunk's world pos). A SINGLE vkCmdDrawIndexedIndirect issues them all — this is
+    // the recording-cost win over the old per-chunk bind+push+draw loop. (Stage 2
+    // moves this cull/build into chunk_cull.comp — see docs/GPU_DRIVEN_RENDERING.md.)
+    cmdScratch_.clear();
     for (const uint32_t slot : drawList_) {
         const ChunkMesh& m = meshes_[slot];
-        if (m.indexCount == 0) {
-            continue; // water-only chunk: nothing for the opaque pass
-        }
-        if (!aabbInFrustum(frustum, m.worldPos, m.worldPos + chunkExtent)) {
-            ++culled;
-            continue;
-        }
+        if (m.indexCount == 0) continue; // water-only chunk
+        if (!aabbInFrustum(frustum, m.worldPos, m.worldPos + chunkExtent)) { ++culled; continue; }
         ++visible;
-        ++calls;
-        PushConstants pc;
-        pc.model      = glm::translate(glm::mat4(1.0f), m.worldPos);
-        pc.params.x   = 1.0f; // fully opaque
+        VkDrawIndexedIndirectCommand c{};
+        c.indexCount    = m.indexCount;
+        c.instanceCount = 1;
+        c.firstIndex    = m.firstIndex;
+        c.vertexOffset  = m.baseVertex;
+        c.firstInstance = slot;
+        cmdScratch_.push_back(c);
+    }
+    std::size_t calls = cmdScratch_.size();
+    if (!cmdScratch_.empty()) {
+        opaqueIndirect_[frameIndex].upload(
+            cmdScratch_.data(), cmdScratch_.size() * sizeof(VkDrawIndexedIndirectCommand));
+        PushConstants pc{}; // model unused in the indirect path; params.x = opaque alpha
+        pc.params.x = 1.0f;
         vkCmdPushConstants(cmd, pipeline_->layout(), VK_SHADER_STAGE_VERTEX_BIT, 0,
                            Pipeline::kPushConstantSize, &pc);
-
-        VkBuffer     vb   = m.meshBuffer.handle();
-        VkDeviceSize zero = 0;
-        vkCmdBindVertexBuffers(cmd, 0, 1, &vb, &zero);
-        vkCmdBindIndexBuffer(cmd, vb, m.indexOffset, VK_INDEX_TYPE_UINT32);
-        vkCmdDrawIndexed(cmd, m.indexCount, 1, 0, 0, 0);
+        vkCmdDrawIndexedIndirect(cmd, opaqueIndirect_[frameIndex].handle(), 0,
+                                 static_cast<uint32_t>(cmdScratch_.size()),
+                                 sizeof(VkDrawIndexedIndirectCommand));
     }
 
     // --- Pass 2: translucent water (depth test on, depth write off) ----------
-    // Skip the whole pass (pipeline bind + descriptor bind + scan) when nothing in
-    // the window has water — the common above-ground case (REVIEW R8). Drawn after
-    // all opaque geometry so each water surface alpha-blends over the seabed/terrain
-    // already in the colour buffer. The viewport/scissor are dynamic and persist;
-    // the descriptor set layout is identical, but rebind it against the water
-    // pipeline's layout to be explicit.
-    if (drawnWaterChunks_ == 0) {
-        lastVisibleChunks_ = visible;
-        lastCulledChunks_  = culled;
-        lastDrawCalls_     = calls;
-        return;
+    // Skipped entirely when the window has no water (common above-ground case, R8).
+    // Drawn after opaque so each surface alpha-blends over the terrain already in the
+    // colour buffer.
+    if (drawnWaterChunks_ != 0) {
+        cmdScratch_.clear();
+        for (const uint32_t slot : drawList_) {
+            const ChunkMesh& m = meshes_[slot];
+            if (m.waterIndexCount == 0) continue;
+            if (!aabbInFrustum(frustum, m.worldPos, m.worldPos + chunkExtent)) continue;
+            VkDrawIndexedIndirectCommand c{};
+            c.indexCount    = m.waterIndexCount;
+            c.instanceCount = 1;
+            c.firstIndex    = m.waterFirstIndex;
+            c.vertexOffset  = m.waterBaseVertex;
+            c.firstInstance = slot;
+            cmdScratch_.push_back(c);
+        }
+        if (!cmdScratch_.empty()) {
+            waterIndirect_[frameIndex].upload(
+                cmdScratch_.data(), cmdScratch_.size() * sizeof(VkDrawIndexedIndirectCommand));
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, waterPipeline_->handle());
+            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, waterPipeline_->layout(),
+                                    0, 1, &descriptorSets_[frameIndex], 0, nullptr);
+            PushConstants pc{}; pc.params.x = 0.7f; // ~70% opacity — see the seabed through it
+            vkCmdPushConstants(cmd, waterPipeline_->layout(), VK_SHADER_STAGE_VERTEX_BIT, 0,
+                               Pipeline::kPushConstantSize, &pc);
+            vkCmdDrawIndexedIndirect(cmd, waterIndirect_[frameIndex].handle(), 0,
+                                     static_cast<uint32_t>(cmdScratch_.size()),
+                                     sizeof(VkDrawIndexedIndirectCommand));
+            calls += cmdScratch_.size();
+        }
     }
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, waterPipeline_->handle());
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, waterPipeline_->layout(),
-                            0, 1, &descriptorSets_[frameIndex], 0, nullptr);
-    for (const uint32_t slot : drawList_) {
-        const ChunkMesh& m = meshes_[slot];
-        if (m.waterIndexCount == 0) {
-            continue;
-        }
-        if (!aabbInFrustum(frustum, m.worldPos, m.worldPos + chunkExtent)) {
-            continue;
-        }
-        ++calls; // water draw for an in-frustum chunk (opaque pass already counted it)
-        PushConstants pc;
-        pc.model    = glm::translate(glm::mat4(1.0f), m.worldPos);
-        pc.params.x = 0.7f; // ~70% opacity — see the seabed through it
-        vkCmdPushConstants(cmd, waterPipeline_->layout(), VK_SHADER_STAGE_VERTEX_BIT, 0,
-                           Pipeline::kPushConstantSize, &pc);
 
-        VkBuffer     vb   = m.meshBuffer.handle();
-        VkDeviceSize zero = 0;
-        vkCmdBindVertexBuffers(cmd, 0, 1, &vb, &zero);
-        vkCmdBindIndexBuffer(cmd, vb, m.waterIndexOffset, VK_INDEX_TYPE_UINT32);
-        // Water indices are 0-based into the water vertices, which sit after the
-        // opaque vertices in the same buffer — firstWaterVertex is the offset.
-        vkCmdDrawIndexed(cmd, m.waterIndexCount, 1, 0, m.firstWaterVertex, 0);
-    }
     lastVisibleChunks_ = visible;
     lastCulledChunks_  = culled;
     lastDrawCalls_     = calls;

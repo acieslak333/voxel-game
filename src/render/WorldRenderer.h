@@ -1,6 +1,7 @@
 #pragma once
 
 #include "render/Buffer.h"
+#include "render/MeshArena.h"
 #include "world/ChunkMesher.h"
 
 #include <vulkan/vulkan.h>
@@ -153,21 +154,30 @@ private:
         glm::vec4 params{1.0f};
     };
     static_assert(sizeof(PushConstants) == 20 * sizeof(float), "matches Pipeline::kPushConstantSize");
-    // GPU buffers + placement for one chunk's mesh. An empty chunk keeps a slot
-    // here with indexCount == 0 and null buffers (skipped while drawing). One
-    // allocation holds, in order: opaque vertices, water vertices, opaque indices,
-    // water indices. Water indices are 0-based into the water vertices, so the
-    // water draw passes firstWaterVertex as its vkCmdDrawIndexed vertexOffset.
+    // GPU buffers + placement for one chunk's mesh, now as a span in the shared
+    // MeshArena (not a per-chunk VkBuffer). An empty chunk keeps a slot here with
+    // indexCount == 0 and an invalid arena alloc (skipped while drawing). Opaque
+    // vertices/indices come first in the chunk's arena span, water after; the water
+    // draw uses waterBaseVertex/waterFirstIndex (its indices are 0-based into the
+    // water vertices). baseVertex/firstIndex are element offsets — exactly what
+    // VkDrawIndexedIndirectCommand.vertexOffset / .firstIndex consume.
     struct ChunkMesh {
-        Buffer       meshBuffer;           // all vertices then all indices, ONE allocation
-        VkDeviceSize indexOffset = 0;      // byte offset of the opaque index data
-        uint32_t     indexCount = 0;       // opaque index count
-        VkDeviceSize waterIndexOffset = 0; // byte offset of the water index data
-        uint32_t     waterIndexCount = 0;  // translucent water index count
-        int32_t      firstWaterVertex = 0; // vertexOffset for water draws (= opaque vertex count)
-        glm::vec3    worldPos{0.0f};
-        int          drawListPos = -1;     // index of this slot in drawList_, or -1 if empty
-                                           // (lets swapChunkBuffers swap-remove in O(1); R8)
+        MeshArena::Alloc arena;            // span in the shared vertex+index arena
+        uint32_t indexCount      = 0;      // opaque index count
+        uint32_t firstIndex      = 0;      // opaque first index (= arena.firstIndex)
+        int32_t  baseVertex      = 0;      // opaque vertexOffset (= arena.baseVertex)
+        uint32_t waterIndexCount = 0;      // translucent water index count
+        uint32_t waterFirstIndex = 0;      // water first index
+        int32_t  waterBaseVertex = 0;      // water vertexOffset
+        glm::vec3 worldPos{0.0f};
+        int       drawListPos = -1;        // index in drawList_, or -1 if empty (R8)
+    };
+    // A chunk's computed arena placement, passed from the install paths to
+    // swapChunkBuffers (replaces the old per-chunk Buffer + offsets bundle).
+    struct MeshPlacement {
+        MeshArena::Alloc arena;
+        uint32_t indexCount = 0,      firstIndex = 0;      int32_t baseVertex = 0;
+        uint32_t waterIndexCount = 0, waterFirstIndex = 0; int32_t waterBaseVertex = 0;
     };
     // A queued mesh job / its finished result, exchanged with the worker pool.
     struct MeshJob    { int cx, cy, cz; std::uint64_t version; };
@@ -190,13 +200,21 @@ private:
     // in-flight frame may still reference them) — required when uploading from the
     // worker path, which can't issue a device-idle wait every frame.
     void installMesh(int cx, int cy, int cz, MeshData&& mesh, bool deferOldBuffers);
-    // Swap an already-built combined mesh buffer into a slot (retire old, update
-    // tallies). The buffer holds vertices then indices; indexOffset is where the
-    // indices start.
-    void swapChunkBuffers(int cx, int cy, int cz, Buffer&& meshBuffer,
-                          VkDeviceSize indexOffset, uint32_t indexCount,
-                          VkDeviceSize waterIndexOffset, uint32_t waterIndexCount,
-                          int32_t firstWaterVertex, bool deferOldBuffers);
+    // Swap an already-arena-resident mesh into a slot (retire the old arena span,
+    // update tallies + draw list). deferOldSpan retires the previous span for
+    // framesInFlight_+1 frames (an in-flight frame may still reference it) instead
+    // of freeing it now. An empty placement (invalid arena, zero counts) clears the
+    // slot. The geometry must already be (or be queued to be) uploaded into the
+    // arena at the placement's offsets.
+    void swapChunkBuffers(int cx, int cy, int cz, const MeshPlacement& place,
+                          bool deferOldSpan);
+    // Allocate an arena span for `mesh`, fill `stage` with its blob and return the
+    // placement + the copy regions to record (vertices -> vertex arena, indices ->
+    // index arena). Shared by every upload path. `stage` is left holding the data.
+    [[nodiscard]] MeshPlacement stageMesh(const MeshData& mesh, Buffer& stage,
+                                          VkDeviceSize& vtxDst, VkDeviceSize& vtxSize,
+                                          VkDeviceSize& idxSrc, VkDeviceSize& idxDst,
+                                          VkDeviceSize& idxSize);
     // Upload a whole batch of finished worker meshes with a SINGLE GPU submit+wait
     // for every staging copy (vs one device-idle wait per buffer, which is what
     // made loading lag). Discards results superseded by a newer request.
@@ -232,6 +250,9 @@ private:
     [[nodiscard]] int chunkIndex(int cx, int cy, int cz) const;
     void createUniformBuffers(uint32_t n);
     void createDescriptorSets(uint32_t n);
+    // Per-frame GPU-driven draw resources: the chunk draw-data SSBO (binding 2) and
+    // the opaque/water indirect command buffers. Created once counts_ is known.
+    void createGpuDrivenBuffers(uint32_t n);
 
     VulkanContext& ctx_;
     const World&   world_;
@@ -270,6 +291,23 @@ private:
     VkDescriptorPool             descriptorPool_ = VK_NULL_HANDLE;
     std::vector<VkDescriptorSet> descriptorSets_;
 
+    // --- GPU-driven (arena + indirect) draw state ----------------------------
+    // All chunk geometry lives in one shared vertex arena + one index arena, so
+    // record() binds once and issues a single vkCmdDrawIndexedIndirect per pass.
+    std::unique_ptr<MeshArena> arena_;
+    // Per frame in flight, host-visible: the per-slot draw-data SSBO (vec4 world
+    // pos, indexed by slot via gl_InstanceIndex) and the opaque/water indirect
+    // command buffers. Double-buffered so the CPU can refill frame N while the GPU
+    // reads frame N-framesInFlight.
+    std::vector<Buffer> drawDataBuffers_;   // binding 2 SSBO (numSlots * vec4)
+    std::vector<Buffer> opaqueIndirect_;    // numSlots * VkDrawIndexedIndirectCommand
+    std::vector<Buffer> waterIndirect_;
+    std::vector<glm::vec4> drawDataCpu_;     // mirror of the SSBO (worldPos per slot)
+    // Reused per-frame scratch for building the indirect command arrays on the CPU.
+    std::vector<VkDrawIndexedIndirectCommand> cmdScratch_;
+    // Freed arena spans awaiting reuse (framesInFlight_+1 frames), like retired_.
+    std::vector<std::pair<int, MeshArena::Alloc>> retiredAllocs_;
+
     // --- Streaming worker pool (active only when streaming + stream_workers > 0) -
     uint32_t                   framesInFlight_ = 0;
     std::vector<std::uint64_t> meshVersion_;       // latest requested mesh per slot
@@ -292,9 +330,9 @@ private:
     // copies into the frame command buffer before the render pass. The staging
     // buffers are kept alive here until then, then retired for framesInFlight_.
     struct PendingUpload {
-        VkBuffer     dst  = VK_NULL_HANDLE; // the chunk's combined device buffer
-        VkDeviceSize size = 0;              // total bytes (vertices + indices)
-        Buffer       stage;                 // one host staging buffer
+        Buffer       stage;                 // one host staging buffer (verts then indices)
+        VkDeviceSize vtxDst = 0, vtxSize = 0; // -> arena vertex buffer (src offset 0)
+        VkDeviceSize idxSrc = 0, idxDst = 0, idxSize = 0; // -> arena index buffer
     };
     std::vector<PendingUpload> pendingUploads_;
 };
