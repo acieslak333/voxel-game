@@ -32,7 +32,7 @@ layout(set = 0, binding = 0) uniform CameraUBO {
     mat4 proj;
     vec4 sunDir;
     vec4 sunCol;
-    vec4 misc;   // x: animation time, y: PS1 jitter grid, z: affine flag
+    vec4 misc;   // x: animation time, z: affine flag
     vec4 heldLight;
     vec4 heldLightCol;
 } camera;
@@ -79,10 +79,6 @@ void main() {
         p.z += amp * cos(t * 1.3 + ph * 1.1);
     }
     gl_Position = camera.proj * camera.view * vec4(p + chunkPos, 1.0);
-    if (camera.misc.y > 0.0) {
-        vec2 g = vec2(camera.misc.y);
-        gl_Position.xy = floor(gl_Position.xy / gl_Position.w * g) / g * gl_Position.w;
-    }
     vec2 outUV = inUV;
     fragUV         = outUV;
     fragUVaffine   = outUV;

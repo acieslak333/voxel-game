@@ -428,7 +428,7 @@ void FarTerrainRenderer::record(VkCommandBuffer cmd, uint32_t frameIndex, VkExte
 
     CameraUBO ubo{view, proj, sunDirAmbient, sunColIntensity,
                   glm::vec4(camPos, fadeStart), glm::vec4(hazeColor, fadeEnd),
-                  glm::vec4(fadeNear_, 56.0f, retroJitter_, 0.0f)};
+                  glm::vec4(fadeNear_, 56.0f, 0.0f, 0.0f)};
     uniformBuffers_[frameIndex].upload(&ubo, sizeof(ubo));
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_);

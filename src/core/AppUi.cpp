@@ -974,30 +974,6 @@ void App::buildMenu(Ui& ui, float px, float py, float pw, float ph) {
             cycleFont(+1);
         }
     } else if (menuTab_ == 1) { // --- Effects: post-processing -------------------
-        // Bloom: glow off the frame's bright areas. Toggle, then its sliders.
-        if (toggle("Bloom: ", settings_.bloom)) {
-            settings_.bloom = !settings_.bloom;
-        }
-        if (settings_.bloom) {
-            const float bi = sliderRow("Bloom strength", settings_.bloomIntensity, 0.0f, 2.0f, 0, 2);
-            if (std::abs(bi - settings_.bloomIntensity) > 1e-4f) settings_.bloomIntensity = bi;
-            const float bt = sliderRow("Bloom threshold", settings_.bloomThreshold, 0.0f, 1.0f, 0, 2);
-            if (std::abs(bt - settings_.bloomThreshold) > 1e-4f) settings_.bloomThreshold = bt;
-            const float br = sliderRow("Bloom spread", settings_.bloomRadius, 1.0f, 8.0f, 0, 1);
-            if (std::abs(br - settings_.bloomRadius) > 1e-4f) settings_.bloomRadius = br;
-        }
-        // God rays: sun shafts through terrain/trees/clouds.
-        if (toggle("God rays: ", settings_.godrays)) {
-            settings_.godrays = !settings_.godrays;
-        }
-        if (settings_.godrays) {
-            const float gs = sliderRow("Ray strength", settings_.godrayStrength, 0.0f, 1.0f, 0, 2);
-            if (std::abs(gs - settings_.godrayStrength) > 1e-4f) settings_.godrayStrength = gs;
-            const float gl = sliderRow("Ray reach", settings_.godrayLength, 0.3f, 1.5f, 0, 2);
-            if (std::abs(gl - settings_.godrayLength) > 1e-4f) settings_.godrayLength = gl;
-            const float gd = sliderRow("Ray decay", settings_.godrayDecay, 0.85f, 0.99f, 0, 3);
-            if (std::abs(gd - settings_.godrayDecay) > 1e-4f) settings_.godrayDecay = gd;
-        }
         // Dark-area sensor grain (0 = off .. 0.5 = strong static in near-black).
         const float dn = sliderRow("Dark noise", settings_.darkNoise, 0.0f, 0.5f, 0, 2);
         if (std::abs(dn - settings_.darkNoise) > 1e-4f) {
@@ -1070,9 +1046,7 @@ void App::buildMenu(Ui& ui, float px, float py, float pw, float ph) {
         }
     } else { // --- Retro: independent PS1/PS2 FX (mix freely) -------------------
         // Every effect is its own control — slide one up to taste, or stack them.
-        // PS1 ~= wobble + affine + bits 5; PS2 ~= soft + interlace + bits 6.
-        const float j = sliderRow("Vertex wobble", settings_.retroJitter, 0.0f, 1.0f, 0, 2);
-        if (std::abs(j - settings_.retroJitter) > 1e-4f) settings_.retroJitter = j;
+        // PS1 ~= affine + bits 5; PS2 ~= interlace + bits 6.
         if (toggle("Affine warp: ", settings_.retroAffine)) {
             settings_.retroAffine = !settings_.retroAffine;
         }
@@ -1084,8 +1058,6 @@ void App::buildMenu(Ui& ui, float px, float py, float pw, float ph) {
         if (std::abs(dt - settings_.retroDither) > 1e-4f) settings_.retroDither = dt;
         const float il = sliderRow("Interlace", settings_.retroInterlace, 0.0f, 1.0f, 0, 2);
         if (std::abs(il - settings_.retroInterlace) > 1e-4f) settings_.retroInterlace = il;
-        const float sf = sliderRow("Soft blur", settings_.retroSoft, 0.0f, 1.0f, 0, 2);
-        if (std::abs(sf - settings_.retroSoft) > 1e-4f) settings_.retroSoft = sf;
         // Selectable colour palette: remaps the whole frame to the nearest swatch
         // (overrides "Colour bits"). Opens a popup that previews every
         // assets/colorpalettes/*.hex as a swatch strip so you can see each look.

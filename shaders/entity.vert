@@ -12,7 +12,7 @@ layout(set = 0, binding = 0) uniform CameraUBO {
     mat4 proj;
     vec4 sunDir; // xyz: toward the active light, w: ambient floor
     vec4 sunCol; // rgb: linear light tint, a: sky-light intensity
-    vec4 retro;  // x: PS1 vertex-jitter grid resolution (0 = off)
+    vec4 retro;  // reserved (was PS1 vertex-jitter grid; effect removed)
 } cam;
 
 // Per-entity model transform (world placement of the whole rig; the rig's joint
@@ -29,12 +29,6 @@ layout(location = 2) out flat uint fragLayer;
 void main() {
     vec4 worldPos = push.model * vec4(inPos, 1.0);
     gl_Position   = cam.proj * cam.view * worldPos;
-    // PS1 vertex jitter: snap the projected position to a coarse grid so mobs and
-    // held items quiver (cam.retro.x = grid resolution, 0 = off).
-    if (cam.retro.x > 0.0) {
-        vec2 g = vec2(cam.retro.x);
-        gl_Position.xy = floor(gl_Position.xy / gl_Position.w * g) / g * gl_Position.w;
-    }
     fragNormal    = normalize(mat3(push.model) * inNormal);
     fragUV        = inUV;
     fragLayer     = inLayer;

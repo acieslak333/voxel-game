@@ -65,9 +65,8 @@ public:
                 const glm::vec4& sunDirAmbient, const glm::vec4& sunColIntensity,
                 const glm::vec4& heldLight, const glm::vec4& heldLightCol);
 
-    // PS1 retro geometry knobs (folded into the chunk UBO's `misc`): `jitter` is the
-    // vertex-snap grid resolution (0 = off), `affine` toggles affine texture warp.
-    void setRetro(float jitter, float affine) { retroJitter_ = jitter; retroAffine_ = affine; }
+    // Affine texture-warp flag (folded into the chunk UBO's `misc.z`; 0/1).
+    void setRetro(float affine) { retroAffine_ = affine; }
 
     // Rebuild one chunk's mesh and swap its GPU buffers, leaving every other
     // chunk untouched. Call after the world's blocks change (see World::setBlock,
@@ -145,7 +144,6 @@ private:
         glm::vec4 heldLightCol; // rgb: linear colour, a: intensity (0..1)
     };
     float animTime_ = 0.0f; // accumulated per recorded frame; drives the sway/wave clock
-    float retroJitter_ = 0.0f; // PS1 vertex-jitter grid resolution (0 = off)
     float retroAffine_ = 0.0f; // PS1 affine texture-warp flag (0/1)
     // Per-draw push constant: chunk model matrix + params (params.x = output
     // alpha — 1 for the opaque pass, < 1 for the translucent water pass).

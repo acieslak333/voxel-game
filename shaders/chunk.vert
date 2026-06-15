@@ -16,7 +16,7 @@ layout(set = 0, binding = 0) uniform CameraUBO {
     mat4 proj;
     vec4 sunDir; // xyz: toward the active light (sun/moon), w: ambient floor
     vec4 sunCol; // rgb: linear light tint, a: sky-light intensity
-    vec4 misc;   // x: animation time (seconds) for foliage sway
+    vec4 misc;   // x: animation time (seconds) for foliage sway; z: affine-warp flag
     vec4 heldLight;    // xyz: held-emitter world pos, w: radius (0 = off)
     vec4 heldLightCol; // rgb: linear colour, a: intensity (0..1)
 } camera;
@@ -59,13 +59,6 @@ void main() {
         p.z += amp * cos(t * 1.3 + ph * 1.1);
     }
     gl_Position = camera.proj * camera.view * push.model * vec4(p, 1.0);
-    // --- PS1 vertex jitter -----------------------------------------------------
-    // Snap the projected position to a coarse grid (misc.y = grid resolution, 0 =
-    // off) so the low-precision look makes geometry quiver as it/the camera moves.
-    if (camera.misc.y > 0.0) {
-        vec2 g = vec2(camera.misc.y);
-        gl_Position.xy = floor(gl_Position.xy / gl_Position.w * g) / g * gl_Position.w;
-    }
     vec2 outUV = inUV;
     fragUV         = outUV;
     fragUVaffine   = outUV;

@@ -1847,17 +1847,10 @@ void App::run(long maxFrames, const std::string& screenshotPath) {
                 proj = rev * proj;
                 proj[1][1] *= -1.0f; // flip Y for Vulkan's clip space
 
-                // Retro geometry FX (independent): vertex-jitter grid + affine-warp
-                // flag, fed to every geometry pass so terrain/entities/far shell all
-                // quiver and warp together. Both 0/off leave the geometry unchanged.
-                const float retroJitterSnap =
-                    (settings_.retroJitter > 0.001f)
-                        ? glm::mix(360.0f, 90.0f, glm::clamp(settings_.retroJitter, 0.0f, 1.0f))
-                        : 0.0f;
+                // Affine texture warp (independent retro FX): fed to the chunk pass
+                // via the UBO's misc.z. 0/off leaves the geometry unchanged.
                 const float retroAffine = settings_.retroAffine ? 1.0f : 0.0f;
-                worldRenderer_.setRetro(retroJitterSnap, retroAffine);
-                entityRenderer_.setRetro(retroJitterSnap);
-                farTerrain_.setRetro(retroJitterSnap);
+                worldRenderer_.setRetro(retroAffine);
 
                 // Sky first (no depth), then the world over it, lit by the same
                 // sun/moon state so terrain shading matches the sky.
@@ -2123,40 +2116,15 @@ void App::run(long maxFrames, const std::string& screenshotPath) {
                 const float darkness  = 1.0f - glm::smoothstep(0.12f, 0.5f, eyeBright);
                 fog.noiseAmount = settings_.darkNoise * darkness;
                 fog.noiseTime   = static_cast<float>(glfwGetTime());
-                // Bloom: glow bled from the frame's bright areas (composite post pass).
-                fog.bloomIntensity = settings_.bloom ? settings_.bloomIntensity : 0.0f;
-                fog.bloomThreshold = settings_.bloomThreshold;
-                fog.bloomRadius    = settings_.bloomRadius;
-                // God rays: project the sun to screen space and gauge its visibility,
-                // so the composite can march light shafts from it. Faded out when the
-                // sun is behind the camera or below the horizon (night).
-                const glm::vec4 sunClip =
-                    proj * view * glm::vec4(cam.position + sky.sunDir * 1000.0f, 1.0f);
-                const bool sunFront = sunClip.w > 0.0f;
-                glm::vec2 sunUV(0.5f);
-                if (sunFront) {
-                    sunUV = glm::vec2(sunClip.x, sunClip.y) / sunClip.w * 0.5f + 0.5f;
-                }
-                const float sunVis =
-                    glm::clamp(sky.sunDir.y * 4.0f, 0.0f, 1.0f) * sky.skyIntensity;
-                fog.godrayIntensity = settings_.godrays ? settings_.godrayStrength : 0.0f;
-                fog.godrayDensity   = settings_.godrayLength;
-                fog.godrayDecay     = settings_.godrayDecay;
-                fog.sunScreen       = sunUV;
-                fog.sunInFront      = sunFront ? 1.0f : 0.0f;
-                fog.sunVisibility   = sunVis;
                 // Retro post FX (each independent): colour quantisation (bits < 8),
-                // ordered dither, interlace flicker, and soft/bilinear blur. Every
-                // term 0/neutral leaves the composite output unchanged.
+                // ordered dither, interlace flicker. Every term 0/neutral leaves the
+                // composite output unchanged.
                 retroParity_ ^= 1;
                 const int colBits = glm::clamp(settings_.retroColorBits, 3, 8);
                 fog.retroLevels    = (colBits < 8) ? static_cast<float>(1 << colBits) : 0.0f;
                 fog.retroDither    = settings_.retroDither;
                 fog.retroInterlace = settings_.retroInterlace;
-                fog.retroSoft      = settings_.retroSoft;
-                fog.retroBilinear  = (settings_.retroSoft > 0.001f) ? 1.0f : 0.0f;
                 fog.retroParity    = static_cast<float>(retroParity_);
-                fog.retroSoftRadius = 1.0f;
                 renderer_.setFog(fog);
             },
             [this](VkCommandBuffer cmd, uint32_t frameIndex, VkExtent2D extent) {

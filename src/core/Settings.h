@@ -27,31 +27,14 @@ struct Settings {
     // in darkness (caves/night). Any light at the eye (torch/daylight) fades it out;
     // 0 = off. Applied in composite.frag, kept subtle and near-monochrome.
     float       darkNoise      = 0.14f;
-    // Bloom: a soft glow bled out from the brightest parts of the frame (sun, snow,
-    // lava, lights). Applied in composite.frag's post pass. `bloom` toggles it;
-    // intensity = how much glow is added back, threshold = how bright a pixel must
-    // be to bloom (lower = more blooms), radius = glow spread in offscreen texels.
-    bool        bloom          = true;
-    float       bloomIntensity = 0.6f;       // 0..2-ish glow strength
-    float       bloomThreshold = 0.75f;      // 0..1 brightness cutoff
-    float       bloomRadius    = 3.0f;       // 1..8 spread in low-res texels
-    // God rays: screen-space sun shafts streaming through gaps in terrain/trees/
-    // clouds (composite.frag). `godrays` toggles; strength scales the added shafts,
-    // length is how far they reach from the sun, decay is the per-step falloff.
-    bool        godrays        = true;
-    float       godrayStrength = 0.35f;      // 0..1 final shaft intensity
-    float       godrayLength   = 0.9f;       // 0.3..1.5 reach (sample spacing)
-    float       godrayDecay    = 0.96f;      // 0.85..0.99 falloff along a shaft
     // Retro PS1/PS2 rendering — each effect is independent so they can be mixed
-    // freely (a "PS1 look" = jitter + affine + bits 5; "PS2" = soft + interlace +
-    // bits ~6). All-off/neutral leaves the output unchanged. See composite.frag +
-    // the chunk/entity/far vertex shaders.
-    float       retroJitter    = 0.0f;       // vertex wobble amount (0 = off .. 1)
+    // freely (affine + bits 5 for a PS1 look; interlace + bits ~6 for PS2).
+    // All-off/neutral leaves the output unchanged. See composite.frag + the chunk
+    // vertex shaders.
     bool        retroAffine    = false;      // affine (non-perspective) texture warp
     int         retroColorBits = 8;          // colour bits/channel (8 = off, 5 = PS1)
     float       retroDither    = 1.0f;       // ordered-dither amount (only when quantizing)
     float       retroInterlace = 0.0f;       // scanline-dim flicker (0 = off .. 1)
-    float       retroSoft      = 0.0f;       // soft/bilinear blur (0 = off .. 1, PS2)
     // Selectable post-process colour palette (file stem under assets/colorpalettes/,
     // e.g. "gameboy"; "" = off -> use the per-channel retroColorBits quantiser).
     // When set, the composite remaps the whole frame to the nearest palette colour.

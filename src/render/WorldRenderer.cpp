@@ -1032,7 +1032,7 @@ void WorldRenderer::record(VkCommandBuffer cmd, uint32_t frameIndex, VkExtent2D 
     animTime_ += 1.0f / 60.0f;
     if (animTime_ > 3600.0f) animTime_ -= 3600.0f;
     CameraUBO ubo{view, proj, sunDirAmbient, sunColIntensity,
-                  glm::vec4(animTime_, retroJitter_, retroAffine_, 0.0f),
+                  glm::vec4(animTime_, 0.0f, retroAffine_, 0.0f),
                   heldLight, heldLightCol};
     uniformBuffers_[frameIndex].upload(&ubo, sizeof(ubo));
 

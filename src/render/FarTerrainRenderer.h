@@ -92,12 +92,7 @@ public:
                 const glm::vec3& camPos, const glm::vec3& hazeColor,
                 float fadeStart, float fadeEnd);
 
-    // PS1 vertex-jitter grid resolution for the far shell (0 = off).
-    void setRetro(float jitter) { retroJitter_ = jitter; }
-
 private:
-    float retroJitter_ = 0.0f; // PS1 vertex-jitter grid resolution (0 = off)
-
     // Interleaved far-terrain vertex (matches farterrain.vert attributes).
     struct FarVertex {
         glm::vec3 pos;
