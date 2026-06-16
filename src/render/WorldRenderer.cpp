@@ -229,114 +229,7 @@ void WorldRenderer::buildLightBlock(int cx, int cy, int cz, unsigned char* out) 
             }
 }
 
-namespace {
-// Downsample a chunk to `step`-blocky content: each step³ group becomes its
-// most-common block (a cheap majority vote, so a mostly-air group reads air and a
-// mostly-solid group reads solid). The result is still a 16³ chunk, but its uniform
-// step³ groups let the EXISTING greedy mesher merge them into ~1/step² the quads —
-// LOD without a resolution-aware mesher rewrite. Per-pixel atlas lighting (S7) works
-// unchanged on the larger quads.
-Chunk downsampleChunk(const Chunk& src, int step) {
-    constexpr int N = Chunk::kSize;
-    Chunk dst;
-    for (int z = 0; z < N; z += step)
-        for (int y = 0; y < N; y += step)
-            for (int x = 0; x < N; x += step) {
-                // Cheap majority: solid iff at least half the group is non-air; the
-                // representative id is the first solid found (close enough at LOD
-                // distance). O(step³) per group, vs the O(step⁶) of a full vote.
-                int solid = 0, total = 0;
-                Block firstSolid{};
-                for (int az = 0; az < step && z + az < N; ++az)
-                    for (int ay = 0; ay < step && y + ay < N; ++ay)
-                        for (int ax = 0; ax < step && x + ax < N; ++ax) {
-                            ++total;
-                            const Block c = src.get(x + ax, y + ay, z + az);
-                            if (c.id != 0) { ++solid; if (firstSolid.id == 0) firstSolid = c; }
-                        }
-                const Block best = (solid * 2 >= total) ? firstSolid : Block{};
-                for (int az = 0; az < step && z + az < N; ++az)
-                    for (int ay = 0; ay < step && y + ay < N; ++ay)
-                        for (int ax = 0; ax < step && x + ax < N; ++ax)
-                            dst.set(x + ax, y + ay, z + az, best);
-            }
-    return dst;
-}
-
-// Cross-LOD seam skirt: hang a vertical "curtain" down from the top of each of the
-// four chunk-boundary edge columns, so where a coarse LOD chunk meets a finer (or
-// differently-coarsened) neighbour at a different surface height, the gap is filled
-// instead of showing a crack. The curtain drops into the terrain on a same-height
-// neighbour (hidden), and only shows in an actual gap. Flat-lit (not atlas-sampled,
-// since it hangs below the surface into dark solid) and double-sided. Cheap: 4N quads.
-void addLodSkirt(MeshData& mesh, const Chunk& ds, int step, const BlockRegistry& reg) {
-    constexpr int N = Chunk::kSize;
-    const float depth = static_cast<float>(2 * step); // covers up to a 2*step mismatch
-    const glm::vec2 lv(0.85f, 0.0f);                  // flat skirt brightness
-    auto emit = [&](const glm::vec3& p0, const glm::vec3& p1, const glm::vec3& p2,
-                    const glm::vec3& p3, int axis, uint32_t normal, uint16_t id) {
-        const uint32_t layer = reg.faceLayer(id, static_cast<int>(normal));
-        auto uvOf = [&](const glm::vec3& p) {
-            return glm::vec2(axis == 0 ? p.z : p.x, -p.y); // block-unit, upright
-        };
-        const auto b = static_cast<uint32_t>(mesh.vertices.size());
-        mesh.vertices.emplace_back(p0, uvOf(p0), layer, lv, normal, 0u, 0xFFFFFFFFu);
-        mesh.vertices.emplace_back(p1, uvOf(p1), layer, lv, normal, 0u, 0xFFFFFFFFu);
-        mesh.vertices.emplace_back(p2, uvOf(p2), layer, lv, normal, 0u, 0xFFFFFFFFu);
-        mesh.vertices.emplace_back(p3, uvOf(p3), layer, lv, normal, 0u, 0xFFFFFFFFu);
-        mesh.indices.insert(mesh.indices.end(),
-            {b, b + 1, b + 2, b, b + 2, b + 3,       // front
-             b, b + 2, b + 1, b, b + 3, b + 2});      // back (double-sided)
-    };
-    auto curtain = [&](int x, int z, int axis, uint32_t face, bool plusFace) {
-        int topY = -1;
-        for (int y = N - 1; y >= 0; --y)
-            if (ds.get(x, y, z).id != 0) { topY = y; break; }
-        if (topY < 0) return;
-        const uint16_t id = ds.get(x, topY, z).id;
-        const float yt = static_cast<float>(topY) + 1.0f;
-        const float yb = std::max(0.0f, yt - depth);
-        const float fx = static_cast<float>(x), fz = static_cast<float>(z);
-        if (axis == 0) { // X-plane curtain (varies in z), at x = fx + (plusFace?1:0)
-            const float px = fx + (plusFace ? 1.0f : 0.0f);
-            if (plusFace) emit({px, yb, fz + 1}, {px, yb, fz}, {px, yt, fz}, {px, yt, fz + 1}, 0, face, id);
-            else          emit({px, yb, fz}, {px, yb, fz + 1}, {px, yt, fz + 1}, {px, yt, fz}, 0, face, id);
-        } else {         // Z-plane curtain (varies in x), at z = fz + (plusFace?1:0)
-            const float pz = fz + (plusFace ? 1.0f : 0.0f);
-            if (plusFace) emit({fx, yb, pz}, {fx + 1, yb, pz}, {fx + 1, yt, pz}, {fx, yt, pz}, 2, face, id);
-            else          emit({fx + 1, yb, pz}, {fx, yb, pz}, {fx, yt, pz}, {fx + 1, yt, pz}, 2, face, id);
-        }
-    };
-    for (int z = 0; z < N; ++z) { curtain(0, z, 0, 0u, false); curtain(N - 1, z, 0, 1u, true); }
-    for (int x = 0; x < N; ++x) { curtain(x, 0, 2, 4u, false); curtain(x, N - 1, 2, 5u, true); }
-}
-} // namespace
-
-int WorldRenderer::lodFor(int cx, int /*cy*/, int cz) const {
-    if (!lodEnabled_) return 1;
-    // Horizontal chunk-distance from the camera's chunk → coarser rings outward.
-    const int d = std::max(std::abs(cx - lodCenterChunk_.x), std::abs(cz - lodCenterChunk_.z));
-    if (d <= 5)  return 1;  // full detail near the player
-    if (d <= 10) return 2;  // half resolution
-    return 4;               // quarter resolution far out
-}
-
 MeshData WorldRenderer::meshChunkData(int cx, int cy, int cz) const {
-    // S11: mesh at this chunk's current LOD step (set by the record() LOD eval; the
-    // worker reads it here). step 1 = full detail; 2/4 mesh a downsampled copy that
-    // greedy-merges to far fewer triangles. Per-pixel atlas lighting is unaffected.
-    const int step = lodLevel_.empty()
-                         ? 1
-                         : lodLevel_[static_cast<size_t>(chunkIndex(cx, cy, cz))];
-    if (step > 1) {
-        const Chunk ds = downsampleChunk(world_.chunk(cx, cy, cz), step);
-        MeshData m = ChunkMesher::greedyMesh(ds, world_.registry(), makeSampler(cx, cy, cz),
-                                             makeLightSampler(cx, cy, cz), /*smoothLighting=*/true,
-                                             glm::ivec3(cx, cy, cz) * kChunkSize,
-                                             makeTintSampler(cx, cy, cz));
-        addLodSkirt(m, ds, step, world_.registry()); // hide cross-LOD seams
-        return m;
-    }
     return ChunkMesher::greedyMesh(world_.chunk(cx, cy, cz), world_.registry(),
                                    makeSampler(cx, cy, cz), makeLightSampler(cx, cy, cz),
                                    /*smoothLighting=*/true,
@@ -599,18 +492,6 @@ void WorldRenderer::buildMeshes() {
     const size_t numSlots = static_cast<size_t>(counts_.x) * counts_.y * counts_.z;
     meshes_.resize(numSlots);
     drawDataCpu_.assign(numSlots, glm::vec4(0.0f)); // per-slot world pos for the SSBO
-    lodLevel_.assign(numSlots, 1);          // S11: per-slot LOD step (1 = full res)
-    lodEnabled_ = world_.config().lod;      // distance-based LOD (settings.yaml `lod`)
-    if (lodEnabled_) {
-        // The player spawns at the window centre, so seed the LOD centre there and
-        // pre-fill each slot's level — chunks then mesh at their final LOD up front
-        // instead of meshing full-res and being re-meshed coarse on the first frame.
-        lodCenterChunk_ = counts_ / 2;
-        for (int cz = 0; cz < counts_.z; ++cz)
-            for (int cy = 0; cy < counts_.y; ++cy)
-                for (int cx = 0; cx < counts_.x; ++cx)
-                    lodLevel_[static_cast<size_t>(chunkIndex(cx, cy, cz))] = lodFor(cx, cy, cz);
-    }
 
     // Size the shared arena from the slot count. The per-slot budget is the one OOM
     // risk of the GPU-driven path: allocate() throws if a window's live geometry
@@ -1109,31 +990,6 @@ void WorldRenderer::record(VkCommandBuffer cmd, uint32_t frameIndex, VkExtent2D 
                            const glm::vec4& heldLight, const glm::vec4& heldLightCol) {
     tickRetired();           // reap deferred buffer frees whose in-flight frames completed
     if (lightAtlas_) lightAtlas_->tick(); // recycle retired light slots + staging (S7)
-
-    // S11: when the camera moves into a new chunk, re-evaluate per-chunk LOD and
-    // queue any chunk whose ring changed for remesh (spread by the streaming pump).
-    if (lodEnabled_) {
-        const glm::vec3 camPos = glm::vec3(glm::inverse(view)[3]);
-        const glm::ivec3 camChunk(static_cast<int>(std::floor(camPos.x / Chunk::kSize)),
-                                  static_cast<int>(std::floor(camPos.y / Chunk::kSize)),
-                                  static_cast<int>(std::floor(camPos.z / Chunk::kSize)));
-        if (camChunk != lodCenterChunk_) {
-            lodCenterChunk_ = camChunk;
-            std::vector<glm::ivec3> changed;
-            for (const uint32_t slot : drawList_) {
-                const glm::vec3 wp = meshes_[slot].worldPos; // exact multiple of kSize
-                const glm::ivec3 cc(static_cast<int>(wp.x) / Chunk::kSize,
-                                    static_cast<int>(wp.y) / Chunk::kSize,
-                                    static_cast<int>(wp.z) / Chunk::kSize);
-                const int desired = lodFor(cc.x, cc.y, cc.z);
-                if (desired != lodLevel_[slot]) {
-                    lodLevel_[slot] = desired; // worker reads this when it remeshes
-                    changed.push_back(cc);
-                }
-            }
-            if (!changed.empty()) streamRemesh(changed);
-        }
-    }
 
     // Advance the animation clock one frame (~60fps). Used by the vertex shader for
     // foliage sway + water waves; wrapped so the float stays small over long sessions.

@@ -52,7 +52,7 @@ struct Settings {
     float       sensitivity    = 0.08f;      // mouse look
     float       flySpeed       = 12.0f;      // free-fly base speed (blocks/s)
     bool        viewBob        = true;       // subtle head-bob while walking
-    bool        lod            = true;       // distance-based chunk LOD: coarsen distant chunks
+    bool        lod            = true;       // (currently unused; far-terrain LOD was removed)
     float       dayLengthMinutes = 10.0f;    // real minutes per in-game day
     bool        timeRunning    = true;       // false freezes the time of day
     bool        fullscreen     = false;      // borderless-fullscreen vs windowed (F11)

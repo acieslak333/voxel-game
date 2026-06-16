@@ -79,11 +79,6 @@ struct WorldConfig {
     // the shared MeshArena capacity in WorldRenderer::buildMeshes (REVIEW R7).
     int arenaVertsPerSlot = 2048;
 
-    // Distance-based chunk LOD (S11): coarsen distant chunks to far fewer triangles.
-    // Player-driven via Settings (settings.yaml `lod`); App copies it in before the
-    // world is built. Read by WorldRenderer to gate lodFor().
-    bool lod = true;
-
     // (Removed with the worldgen overhaul: procedural terrain shape + surface
     //  materials, the feature/structure scatter, ore generation, and liquid flow.
     //  Generation is now a fixed flat layered world — see World::generateColumnInto.)

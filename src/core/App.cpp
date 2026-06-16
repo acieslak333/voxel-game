@@ -220,7 +220,6 @@ WorldConfig worldConfigWithSettings(const std::string& path, const Settings& s) 
     // arena can hold). Clamp to a sane band so a bad settings.yaml can't request a
     // multi-GB or impossibly small arena.
     c.arenaVertsPerSlot = std::clamp(s.arenaVertsPerSlot, 512, 8192);
-    c.lod = s.lod; // distance-based chunk LOD (S11)
     return c;
 }
 
