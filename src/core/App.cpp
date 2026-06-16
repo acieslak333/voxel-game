@@ -216,6 +216,11 @@ WorldConfig worldConfigWithSettings(const std::string& path, const Settings& s) 
     // value so the world is allocated at the chosen radius.
     c.viewRadius = std::clamp(s.renderDistance, 4, 16);
     c.chunksX = c.chunksZ = 2 * c.viewRadius + 1;
+    // GPU mesh-arena budget is player-driven too (memory vs. how dense a world the
+    // arena can hold). Clamp to a sane band so a bad settings.yaml can't request a
+    // multi-GB or impossibly small arena.
+    c.arenaVertsPerSlot = std::clamp(s.arenaVertsPerSlot, 512, 8192);
+    c.lod = s.lod; // distance-based chunk LOD (S11)
     return c;
 }
 

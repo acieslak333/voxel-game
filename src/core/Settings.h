@@ -23,6 +23,15 @@ struct Settings {
     // world.yaml's view_radius. Applied when the world is built, so a change takes
     // effect on the next launch (the window is allocated once at startup).
     int         renderDistance = 9;
+    // GPU mesh-arena budget, in vertices reserved per chunk slot (the index arena
+    // is sized 1.5x this). The arena is one big device-local buffer holding ALL
+    // chunk geometry; its capacity is (2*renderDistance+1)^2 * heightChunks slots *
+    // this value. Too low and dense terrain overflows it ("vertex arena full");
+    // higher costs VRAM (~44 B/vert: at renderDistance 16 each +512/slot is ~0.4 GB).
+    // The volumetric world fills nearly every slot, so it needs far more than a
+    // heightmap world (~1266 verts/slot measured). Applied once when the world is
+    // built (next launch). Clamped 512..8192.
+    int         arenaVertsPerSlot = 2048;
     // Low-light grain: max strength of the soft static shown when the player stands
     // in darkness (caves/night). Any light at the eye (torch/daylight) fades it out;
     // 0 = off. Applied in composite.frag, kept subtle and near-monochrome.
@@ -43,7 +52,7 @@ struct Settings {
     float       sensitivity    = 0.08f;      // mouse look
     float       flySpeed       = 12.0f;      // free-fly base speed (blocks/s)
     bool        viewBob        = true;       // subtle head-bob while walking
-    bool        lod            = true;       // distant-terrain LOD shell (FarTerrainRenderer)
+    bool        lod            = true;       // distance-based chunk LOD: coarsen distant chunks
     float       dayLengthMinutes = 10.0f;    // real minutes per in-game day
     bool        timeRunning    = true;       // false freezes the time of day
     bool        fullscreen     = false;      // borderless-fullscreen vs windowed (F11)

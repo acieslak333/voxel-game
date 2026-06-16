@@ -549,8 +549,8 @@ void WorldRenderer::buildMeshes() {
     const size_t numSlots = static_cast<size_t>(counts_.x) * counts_.y * counts_.z;
     meshes_.resize(numSlots);
     drawDataCpu_.assign(numSlots, glm::vec4(0.0f)); // per-slot world pos for the SSBO
-    lodLevel_.assign(numSlots, 1);                  // S11: per-slot LOD step (1 = full res)
-    lodEnabled_ = std::getenv("VG_LOD") != nullptr; // distance-based LOD opt-in
+    lodLevel_.assign(numSlots, 1);          // S11: per-slot LOD step (1 = full res)
+    lodEnabled_ = world_.config().lod;      // distance-based LOD (settings.yaml `lod`)
     if (lodEnabled_) {
         // The player spawns at the window centre, so seed the LOD centre there and
         // pre-fill each slot's level — chunks then mesh at their final LOD up front
