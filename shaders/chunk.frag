@@ -3,6 +3,9 @@
 // The block texture array. UVs are in block units and the sampler uses REPEAT
 // addressing, so each block of a greedy-merged quad shows one full texture tile.
 layout(set = 0, binding = 1) uniform sampler2DArray texArray;
+// S7: per-chunk light atlas — sky in R, block in G (0..1), sampled per-pixel so a
+// smooth light gradient no longer has to be baked per-vertex (frees greedy merges).
+layout(set = 0, binding = 3) uniform sampler3D lightVol;
 
 // Camera + day-night sun state (shared with the vertex shader).
 layout(set = 0, binding = 0) uniform CameraUBO {
@@ -13,6 +16,7 @@ layout(set = 0, binding = 0) uniform CameraUBO {
     vec4 misc;   // x: time, y: PS1 jitter grid, z: PS1 affine-warp flag (0/1)
     vec4 heldLight;    // xyz: held-emitter world pos, w: radius in blocks (0 = off)
     vec4 heldLightCol; // rgb: linear colour, a: intensity (0..1)
+    vec4 lightAtlas;   // S7: x = slots/row, yzw = atlas texel dims
 } camera;
 
 layout(location = 0) in vec2      fragUV;
@@ -24,6 +28,8 @@ layout(location = 5) in vec3      fragBlockColor; // emitter hue for the block-l
 layout(location = 6) in vec3      fragTint;        // biome vegetation tint (white = none)
 layout(location = 7) noperspective in vec2 fragUVaffine; // PS1 affine-warped UV
 layout(location = 8) in vec3 fragWorldPos; // world-space position (held point light)
+layout(location = 9) in flat int fragLightSlot; // S7: light-atlas slot (-1 = none)
+layout(location = 10) in vec3 fragLocalPos;     // S7: chunk-local pos for atlas sampling
 
 layout(location = 0) out vec4 outColor;
 
@@ -32,6 +38,16 @@ const vec3 kNormals[6] = vec3[6](
     vec3(-1, 0, 0), vec3(1, 0, 0),
     vec3(0, -1, 0), vec3(0, 1, 0),
     vec3(0, 0, -1), vec3(0, 0, 1));
+
+// Fixed directional shade by face (matches the mesher's faceShade): top brightest,
+// bottom darkest, X != Z so adjacent walls read distinctly. Used for the block-lit
+// term of atlas-lit cube faces (the sky term gets the dynamic sun directional).
+float faceShade(uint f) {
+    if (f == 3u) return 1.0;             // +Y top
+    if (f == 2u) return 0.45;            // -Y bottom
+    if (f == 0u || f == 1u) return 0.62; // X faces
+    return 0.80;                         // Z faces
+}
 
 // 4x4 ordered (Bayer) dither matrix.
 const float kBayer[16] = float[16](
@@ -63,12 +79,36 @@ void main() {
     // are bright, faces away fall to the ambient floor — so shading sweeps
     // around the blocks as the day passes. The sky term gates it (caves get no
     // sun even at noon); intensity dims the whole thing toward night.
-    vec3 N = kNormals[fragNormal];
+    // The low 3 bits of fragNormal are the Face index; bit 3 (|8) marks an ATLAS-LIT
+    // cube face (S7). Cube faces sample sky+block from the light atlas on the air side
+    // of the face and apply the per-vertex AO; non-cube geometry keeps its flat
+    // per-vertex light (fragLight.x = sky, .y = block) exactly as before.
+    uint face = uint(fragNormal) & 7u;
+    bool atlasLit = (uint(fragNormal) & 8u) != 0u;
+    vec3 N = kNormals[face];
     float ndl = max(dot(N, camera.sunDir.xyz), 0.0);
     float ambient = camera.sunDir.w;
     float directional = ambient + (1.0 - ambient) * ndl;
-    float sky   = fragLight.x * directional * camera.sunCol.a;
-    float block = fragLight.y;
+
+    float skyTerm, blockTerm;
+    if (atlasLit && fragLightSlot >= 0) {
+        float cols  = camera.lightAtlas.x;
+        vec3  dims  = camera.lightAtlas.yzw;
+        float scol  = mod(float(fragLightSlot), cols);
+        float srow  = floor(float(fragLightSlot) / cols);
+        vec3  origin = vec3(scol * 18.0, srow * 18.0, 0.0);
+        vec3  airPos = fragLocalPos + 0.5 * N;          // step to the lit (air) side
+        vec3  tc     = (origin + airPos + 1.0) / dims;  // +1 = padding; cell c -> texel c+1
+        vec2  sb     = texture(lightVol, tc).rg;        // r = sky, g = block (0..1)
+        float ao     = fragLight.x;                     // per-vertex AO factor
+        skyTerm   = ao * sb.r;
+        blockTerm = ao * faceShade(face) * sb.g;
+    } else {
+        skyTerm   = fragLight.x; // already AO*sky (non-cube flat light)
+        blockTerm = fragLight.y; // already faceShade*AO*block
+    }
+    float sky   = skyTerm * directional * camera.sunCol.a;
+    float block = blockTerm;
 
     // --- Coloured light ------------------------------------------------------
     // Sky light is tinted by the time of day (warm noon, orange dusk, pale blue

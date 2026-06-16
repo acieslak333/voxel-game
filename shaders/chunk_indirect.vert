@@ -35,6 +35,7 @@ layout(set = 0, binding = 0) uniform CameraUBO {
     vec4 misc;   // x: animation time, z: affine flag
     vec4 heldLight;
     vec4 heldLightCol;
+    vec4 lightAtlas; // S7: x = slots/row, yzw = atlas texel dims
 } camera;
 
 // Per-chunk draw data, indexed by gl_InstanceIndex (== the command's firstInstance
@@ -63,6 +64,8 @@ layout(location = 5) out vec3      fragBlockColor;
 layout(location = 6) out vec3      fragTint;
 layout(location = 7) noperspective out vec2 fragUVaffine;
 layout(location = 8) out vec3 fragWorldPos;
+layout(location = 9) out flat int fragLightSlot; // S7: this chunk's light-atlas slot (-1 = none)
+layout(location = 10) out vec3 fragLocalPos;     // S7: chunk-local position for atlas sampling
 
 void main() {
     vec3 chunkPos = drawData.chunks[gl_InstanceIndex].posPad.xyz;
@@ -89,4 +92,6 @@ void main() {
     fragBlockColor = inBlockColor.rgb;
     fragTint       = inTint.rgb;
     fragWorldPos   = p + chunkPos;
+    fragLightSlot  = int(drawData.chunks[gl_InstanceIndex].posPad.w);
+    fragLocalPos   = inPos; // chunk-local (model is a pure translation)
 }

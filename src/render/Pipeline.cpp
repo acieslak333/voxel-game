@@ -67,11 +67,21 @@ void Pipeline::createDescriptorSetLayout() {
     drawDataBinding.descriptorCount = 1;
     drawDataBinding.stageFlags      = VK_SHADER_STAGE_VERTEX_BIT;
 
-    VkDescriptorSetLayoutBinding bindings[] = {uboBinding, samplerBinding, drawDataBinding};
+    // binding 3: the per-chunk light atlas (3D texture, S7). The fragment shader
+    // samples sky/block/hue here per-pixel instead of reading them interpolated
+    // from the vertex, so lighting is decoupled from mesh geometry.
+    VkDescriptorSetLayoutBinding lightBinding{};
+    lightBinding.binding         = 3;
+    lightBinding.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    lightBinding.descriptorCount = 1;
+    lightBinding.stageFlags      = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+    VkDescriptorSetLayoutBinding bindings[] = {uboBinding, samplerBinding, drawDataBinding,
+                                               lightBinding};
 
     VkDescriptorSetLayoutCreateInfo info{};
     info.sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    info.bindingCount = 3;
+    info.bindingCount = 4;
     info.pBindings    = bindings;
 
     if (vkCreateDescriptorSetLayout(ctx_->device(), &info, nullptr, &descriptorSetLayout_) !=

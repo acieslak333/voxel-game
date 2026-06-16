@@ -1,5 +1,6 @@
 #include "render/WorldRenderer.h"
 
+#include "render/LightAtlas.h"
 #include "render/Pipeline.h"
 #include "render/TextureArray.h"
 #include "render/VulkanContext.h"
@@ -202,6 +203,32 @@ ChunkMesher::TintSampler WorldRenderer::makeTintSampler(int cx, int /*cy*/, int 
     };
 }
 
+void WorldRenderer::buildLightBlock(int cx, int cy, int cz, unsigned char* out) const {
+    constexpr int P = LightAtlas::kPad;   // 18 = 16 cells + 1 border each side
+    constexpr int N = Chunk::kSize;       // 16
+    const int baseX = cx * N, baseY = cy * N, baseZ = cz * N;
+    // Padded: local d in [-1, N], texel index (d+1) in [0, P-1]; x fastest, then y, z
+    // (matches the tightly-packed copy into the 3D image). Sky and block go in
+    // SEPARATE channels (R, G) so hardware trilinear can interpolate each cleanly —
+    // a single packed byte would let the block nibble bleed into sky across cells.
+    // 0..15 maps to 0..255 via *17 (15*17 = 255). Hue stays per-vertex (it only
+    // varies near emitters, so it barely fragments greedy merges).
+    for (int lz = -1; lz <= N; ++lz)
+        for (int ly = -1; ly <= N; ++ly)
+            for (int lx = -1; lx <= N; ++lx) {
+                const int wx = baseX + lx, wy = baseY + ly, wz = baseZ + lz;
+                const unsigned sky = world_.skyLightAt(wx, wy, wz);
+                const unsigned blk = world_.blockLightAt(wx, wy, wz);
+                const size_t idx =
+                    ((static_cast<size_t>(lz + 1) * P) + (ly + 1)) * P + (lx + 1);
+                unsigned char* px = out + idx * 4;
+                px[0] = static_cast<unsigned char>(sky * 17u);
+                px[1] = static_cast<unsigned char>(blk * 17u);
+                px[2] = 0;
+                px[3] = 255;
+            }
+}
+
 MeshData WorldRenderer::meshChunkData(int cx, int cy, int cz) const {
     return ChunkMesher::greedyMesh(world_.chunk(cx, cy, cz), world_.registry(),
                                    makeSampler(cx, cy, cz), makeLightSampler(cx, cy, cz),
@@ -313,6 +340,30 @@ void WorldRenderer::swapChunkBuffers(int cx, int cy, int cz, const MeshPlacement
     if (slot < drawDataCpu_.size()) {
         drawDataCpu_[slot] = glm::vec4(cm.worldPos, 0.0f);
     }
+
+    // S7: rotate the chunk's light-atlas slot. A (re)meshed chunk's light is written
+    // to a FRESH slot, so an in-flight frame still sampling the old slot is never
+    // overwritten in place (the old slot is retired for framesInFlight+1 frames, like
+    // the arena span above). Empty chunks release their slot. If the pool is
+    // momentarily exhausted, keep the old slot's (slightly stale) light rather than
+    // overwrite a slot the GPU may be reading. The live slot index rides drawData.w.
+    if (lightAtlas_) {
+        const int oldLight = cm.lightSlot;
+        int newLight = oldLight;
+        if (nowGeometry) {
+            const int fresh = lightAtlas_->alloc();
+            if (fresh >= 0) {
+                newLight = fresh;
+                pendingLightWrites_.push_back({fresh, cx, cy, cz});
+                if (oldLight >= 0) lightAtlas_->freeDeferred(oldLight);
+            }
+        } else {
+            if (oldLight >= 0) lightAtlas_->freeDeferred(oldLight);
+            newLight = -1;
+        }
+        cm.lightSlot = newLight;
+        if (slot < drawDataCpu_.size()) drawDataCpu_[slot].w = static_cast<float>(newLight);
+    }
     totalTriangles_ += (cm.indexCount + cm.waterIndexCount) / 3;
 }
 
@@ -367,35 +418,51 @@ void WorldRenderer::installMeshBatch(std::vector<MeshResult>& batch) {
 }
 
 void WorldRenderer::recordPendingUploads(VkCommandBuffer cmd) {
-    if (pendingUploads_.empty()) {
+    if (pendingUploads_.empty() && pendingLightWrites_.empty()) {
         return;
     }
-    for (PendingUpload& p : pendingUploads_) {
-        // Two copies per chunk: vertices -> vertex arena, indices -> index arena.
-        if (p.vtxSize) {
-            VkBufferCopy c{}; c.srcOffset = 0;      c.dstOffset = p.vtxDst; c.size = p.vtxSize;
-            vkCmdCopyBuffer(cmd, p.stage.handle(), arena_->vertexBuffer(), 1, &c);
+    if (!pendingUploads_.empty()) {
+        for (PendingUpload& p : pendingUploads_) {
+            // Two copies per chunk: vertices -> vertex arena, indices -> index arena.
+            if (p.vtxSize) {
+                VkBufferCopy c{}; c.srcOffset = 0;      c.dstOffset = p.vtxDst; c.size = p.vtxSize;
+                vkCmdCopyBuffer(cmd, p.stage.handle(), arena_->vertexBuffer(), 1, &c);
+            }
+            if (p.idxSize) {
+                VkBufferCopy c{}; c.srcOffset = p.idxSrc; c.dstOffset = p.idxDst; c.size = p.idxSize;
+                vkCmdCopyBuffer(cmd, p.stage.handle(), arena_->indexBuffer(), 1, &c);
+            }
         }
-        if (p.idxSize) {
-            VkBufferCopy c{}; c.srcOffset = p.idxSrc; c.dstOffset = p.idxDst; c.size = p.idxSize;
-            vkCmdCopyBuffer(cmd, p.stage.handle(), arena_->indexBuffer(), 1, &c);
-        }
-    }
-    // One barrier so the transfer writes are visible to the vertex/index fetch in
-    // the render pass that follows in this same command buffer.
-    VkMemoryBarrier barrier{};
-    barrier.sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    barrier.dstAccessMask = VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT | VK_ACCESS_INDEX_READ_BIT;
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_VERTEX_INPUT_BIT,
-                         0, 1, &barrier, 0, nullptr, 0, nullptr);
+        // One barrier so the transfer writes are visible to the vertex/index fetch in
+        // the render pass that follows in this same command buffer.
+        VkMemoryBarrier barrier{};
+        barrier.sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+        barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        barrier.dstAccessMask = VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT | VK_ACCESS_INDEX_READ_BIT;
+        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_VERTEX_INPUT_BIT,
+                             0, 1, &barrier, 0, nullptr, 0, nullptr);
 
-    // Keep the staging buffers alive until this frame's GPU work (the copy) is done.
-    const int life = static_cast<int>(framesInFlight_) + 1;
-    for (PendingUpload& p : pendingUploads_) {
-        retired_.emplace_back(life, std::move(p.stage));
+        // Keep the staging buffers alive until this frame's GPU work (the copy) is done.
+        const int life = static_cast<int>(framesInFlight_) + 1;
+        for (PendingUpload& p : pendingUploads_) {
+            retired_.emplace_back(life, std::move(p.stage));
+        }
+        pendingUploads_.clear();
     }
-    pendingUploads_.clear();
+
+    // S7: flush this frame's light-atlas slot writes into the same command buffer
+    // (recordWrite owns the staging buffer + emits its own transfer->fragment
+    // barrier). Cross-frame safety is the rotating slots: a freshly allocated slot
+    // is never one an in-flight frame is still sampling.
+    if (!pendingLightWrites_.empty() && lightAtlas_) {
+        std::vector<unsigned char> block(static_cast<size_t>(LightAtlas::kPad) *
+                                         LightAtlas::kPad * LightAtlas::kPad * 4);
+        for (const PendingLight& pl : pendingLightWrites_) {
+            buildLightBlock(pl.cx, pl.cy, pl.cz, block.data());
+            lightAtlas_->recordWrite(cmd, pl.slot, block.data());
+        }
+        pendingLightWrites_.clear();
+    }
 }
 
 void WorldRenderer::tickRetired() {
@@ -426,16 +493,28 @@ void WorldRenderer::buildMeshes() {
     meshes_.resize(numSlots);
     drawDataCpu_.assign(numSlots, glm::vec4(0.0f)); // per-slot world pos for the SSBO
 
-    // Size the shared arena from the slot count. These per-slot budgets are the one
-    // OOM risk of the GPU-driven path: allocate() throws if a window's live geometry
-    // exceeds them (dense terrain + large view_radius). kArenaVertsPerSlot/IdxPerSlot
-    // are generous averages (most slots are empty sky or solid interior with few
-    // faces); raise them if MeshArena throws. TODO(R7): move to world.yaml arena_tuning.
-    constexpr uint32_t kArenaVertsPerSlot = 1024;
-    constexpr uint32_t kArenaIdxPerSlot   = 1536; // 1.5 indices per vertex (6 per quad / 4 verts)
+    // Size the shared arena from the slot count. The per-slot budget is the one OOM
+    // risk of the GPU-driven path: allocate() throws if a window's live geometry
+    // exceeds it (dense terrain x large render distance). It is player-tunable via
+    // settings.yaml arenaVertsPerSlot (REVIEW R7) because the right value depends on
+    // the world shape: a heightmap leaves most slots empty (a few hundred verts/slot
+    // averages fine), but the current volumetric 3D-noise world fills nearly every
+    // slot (~1266 verts/slot measured), so the default is 2048 (1.5x headroom). The
+    // index arena is 1.5x (6 indices per quad / 4 verts).
+    const uint32_t kArenaVertsPerSlot =
+        static_cast<uint32_t>(world_.config().arenaVertsPerSlot);
+    const uint32_t kArenaIdxPerSlot = kArenaVertsPerSlot + kArenaVertsPerSlot / 2;
     arena_ = std::make_unique<MeshArena>(
         ctx_, static_cast<uint32_t>(numSlots) * kArenaVertsPerSlot,
         static_cast<uint32_t>(numSlots) * kArenaIdxPerSlot);
+
+    // S7: the per-chunk light atlas. One PAD³ slot per drawn chunk; capacity is the
+    // slot count plus headroom for in-flight slot rotations (a relit chunk writes a
+    // fresh slot and retires its old one for a few frames). alloc() returning -1
+    // (pool momentarily exhausted) degrades gracefully — the chunk keeps its slot.
+    lightAtlas_ = std::make_unique<LightAtlas>(
+        ctx_, static_cast<uint32_t>(numSlots) + std::max(512u, static_cast<uint32_t>(numSlots) / 4),
+        framesInFlight_);
 
     // Greedy-meshing thousands of chunks one-at-a-time on the main thread was the
     // bulk of startup. greedyMesh() only READS the world, so mesh every chunk in
@@ -825,7 +904,7 @@ void WorldRenderer::createGpuDrivenBuffers(uint32_t n) {
 void WorldRenderer::createDescriptorSets(uint32_t n) {
     std::array<VkDescriptorPoolSize, 3> sizes{};
     sizes[0] = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, n};
-    sizes[1] = {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, n};
+    sizes[1] = {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2 * n}; // binding 1 (textures) + 3 (light)
     sizes[2] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, n}; // binding 2: per-chunk draw data
 
     VkDescriptorPoolCreateInfo poolInfo{};
@@ -866,7 +945,12 @@ void WorldRenderer::createDescriptorSets(uint32_t n) {
         drawDataInfo.offset = 0;
         drawDataInfo.range  = VK_WHOLE_SIZE;
 
-        std::array<VkWriteDescriptorSet, 3> writes{};
+        VkDescriptorImageInfo lightInfo{}; // binding 3: per-chunk light atlas (S7)
+        lightInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+        lightInfo.imageView   = lightAtlas_->view();
+        lightInfo.sampler     = lightAtlas_->sampler();
+
+        std::array<VkWriteDescriptorSet, 4> writes{};
         writes[0].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         writes[0].dstSet          = descriptorSets_[i];
         writes[0].dstBinding      = 0;
@@ -888,6 +972,13 @@ void WorldRenderer::createDescriptorSets(uint32_t n) {
         writes[2].descriptorCount = 1;
         writes[2].pBufferInfo     = &drawDataInfo;
 
+        writes[3].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[3].dstSet          = descriptorSets_[i];
+        writes[3].dstBinding      = 3;
+        writes[3].descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        writes[3].descriptorCount = 1;
+        writes[3].pImageInfo      = &lightInfo;
+
         vkUpdateDescriptorSets(ctx_.device(), static_cast<uint32_t>(writes.size()),
                                writes.data(), 0, nullptr);
     }
@@ -897,7 +988,8 @@ void WorldRenderer::record(VkCommandBuffer cmd, uint32_t frameIndex, VkExtent2D 
                            const glm::mat4& view, const glm::mat4& proj,
                            const glm::vec4& sunDirAmbient, const glm::vec4& sunColIntensity,
                            const glm::vec4& heldLight, const glm::vec4& heldLightCol) {
-    tickRetired(); // reap deferred buffer frees whose in-flight frames have completed
+    tickRetired();           // reap deferred buffer frees whose in-flight frames completed
+    if (lightAtlas_) lightAtlas_->tick(); // recycle retired light slots + staging (S7)
 
     // Advance the animation clock one frame (~60fps). Used by the vertex shader for
     // foliage sway + water waves; wrapped so the float stays small over long sessions.
@@ -905,7 +997,8 @@ void WorldRenderer::record(VkCommandBuffer cmd, uint32_t frameIndex, VkExtent2D 
     if (animTime_ > 3600.0f) animTime_ -= 3600.0f;
     CameraUBO ubo{view, proj, sunDirAmbient, sunColIntensity,
                   glm::vec4(animTime_, 0.0f, retroAffine_, 0.0f),
-                  heldLight, heldLightCol};
+                  heldLight, heldLightCol,
+                  lightAtlas_ ? lightAtlas_->shaderParams() : glm::vec4(0.0f)};
     uniformBuffers_[frameIndex].upload(&ubo, sizeof(ubo));
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_->handle());

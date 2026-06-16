@@ -25,6 +25,7 @@ namespace vg {
 class VulkanContext;
 class Pipeline;
 class TextureArray;
+class LightAtlas;
 class World;
 
 // -----------------------------------------------------------------------------
@@ -142,6 +143,7 @@ private:
         glm::vec4 misc;   // x: animation time (seconds) for foliage sway / water waves
         glm::vec4 heldLight;    // xyz: held-emitter world pos, w: radius (0 = off)
         glm::vec4 heldLightCol; // rgb: linear colour, a: intensity (0..1)
+        glm::vec4 lightAtlas;   // S7: x = slots/row, yzw = atlas texel dims (frag sampling)
     };
     float animTime_ = 0.0f; // accumulated per recorded frame; drives the sway/wave clock
     float retroAffine_ = 0.0f; // PS1 affine texture-warp flag (0/1)
@@ -169,6 +171,7 @@ private:
         int32_t  waterBaseVertex = 0;      // water vertexOffset
         glm::vec3 worldPos{0.0f};
         int       drawListPos = -1;        // index in drawList_, or -1 if empty (R8)
+        int       lightSlot   = -1;        // S7: this chunk's slot in the light atlas (-1 = none)
     };
     // A chunk's computed arena placement, passed from the install paths to
     // swapChunkBuffers (replaces the old per-chunk Buffer + offsets bundle).
@@ -252,8 +255,18 @@ private:
     const World&   world_;
 
     std::unique_ptr<TextureArray> textures_;
+    std::unique_ptr<LightAtlas>   lightAtlas_;          // S7: per-chunk-slot light volume
     std::unique_ptr<Pipeline>     pipeline_;            // opaque terrain
     std::unique_ptr<Pipeline>     waterPipeline_;       // translucent water (2nd pass)
+
+    // S7: chunks whose light block must be (re)written into their atlas slot. Filled
+    // by swapChunkBuffers when a chunk gains/changes geometry; flushed into the frame
+    // command buffer by recordPendingUploads (so the upload rides the frame's submit).
+    struct PendingLight { int slot, cx, cy, cz; };
+    std::vector<PendingLight> pendingLightWrites_;
+    // Fill `out` (kPad³ RGBA8, x fastest) with chunk (cx,cy,cz)'s padded light block:
+    // RGBA = [sky<<4 | block, hueR, hueG, hueB] per voxel, incl. a 1-voxel border.
+    void buildLightBlock(int cx, int cy, int cz, unsigned char* out) const;
 
     std::vector<ChunkMesh> meshes_;          // indexed by chunkIndex(); may be empty
     // Compact list of the meshes_ slots that currently have geometry (opaque or

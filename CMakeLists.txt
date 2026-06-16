@@ -229,6 +229,7 @@ add_executable(voxelgame
     src/render/GpuAllocator.cpp
     src/utilities/alloc/SpanAllocator.cpp
     src/render/MeshArena.cpp
+    src/render/LightAtlas.cpp
     src/render/TextureArray.cpp
     src/render/Pipeline.cpp
     src/render/WorldRenderer.cpp

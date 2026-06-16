@@ -3,6 +3,7 @@
 #include "render/VulkanContext.h"
 
 #include <stdexcept>
+#include <string>
 
 namespace vg {
 
@@ -27,8 +28,13 @@ MeshArena::Alloc MeshArena::allocate(uint32_t vertexCount, uint32_t indexCount) 
         const uint64_t off = vtxAlloc_.allocate(vertexCount, 1);
         if (off == SpanAllocator::kInvalid) {
             throw std::runtime_error(
-                "MeshArena: vertex arena full — raise the vertex budget "
-                "(world.yaml arena_tuning); see docs/GPU_DRIVEN_RENDERING.md");
+                "MeshArena: vertex arena full (" +
+                std::to_string(vtxAlloc_.used()) + "/" +
+                std::to_string(vtxAlloc_.capacity()) + " verts used, largest free " +
+                std::to_string(vtxAlloc_.largestFreeBlock()) + ", needed " +
+                std::to_string(vertexCount) +
+                ") — raise settings.yaml arenaVertsPerSlot or lower renderDistance; "
+                "see docs/GPU_DRIVEN_RENDERING.md");
         }
         a.baseVertex = static_cast<uint32_t>(off);
     }
@@ -38,8 +44,12 @@ MeshArena::Alloc MeshArena::allocate(uint32_t vertexCount, uint32_t indexCount) 
             // Roll back the vertex reservation so a partial alloc doesn't leak.
             if (vertexCount > 0) vtxAlloc_.free(a.baseVertex);
             throw std::runtime_error(
-                "MeshArena: index arena full — raise the index budget "
-                "(world.yaml arena_tuning); see docs/GPU_DRIVEN_RENDERING.md");
+                "MeshArena: index arena full (" +
+                std::to_string(idxAlloc_.used()) + "/" +
+                std::to_string(idxAlloc_.capacity()) + " indices used, needed " +
+                std::to_string(indexCount) +
+                ") — raise settings.yaml arenaVertsPerSlot or lower renderDistance; "
+                "see docs/GPU_DRIVEN_RENDERING.md");
         }
         a.firstIndex = static_cast<uint32_t>(off);
     }

@@ -76,17 +76,15 @@ struct Mask {
     uint32_t tint      = 0xFFFFFFFFu; // biome vegetation tint (white = none)
     float    baseShade = 0.0f;  // directional (top/bottom/side) brightness
     uint8_t  ao[4]     = {3, 3, 3, 3};         // occlusion 0..3 at the 4 face corners
-    float    sky[4]    = {15, 15, 15, 15};      // smoothed sky light 0..15 per corner
-    float    blk[4]    = {0, 0, 0, 0};          // smoothed block light 0..15 per corner
     glm::vec3 col[4]   = {};                     // smoothed block-light hue per corner
 
+    // S7: sky+block light are NO LONGER in the merge key — they're sampled per-pixel
+    // from the light atlas, so a smooth light gradient no longer fragments a greedy
+    // quad. Only geometric AO and the (near-emitter-only) hue can still split it.
     bool operator==(const Mask& o) const {
         return present == o.present && block == o.block && positive == o.positive &&
                layer == o.layer && tint == o.tint && baseShade == o.baseShade && ao[0] == o.ao[0] &&
                ao[1] == o.ao[1] && ao[2] == o.ao[2] && ao[3] == o.ao[3] &&
-               sky[0] == o.sky[0] && sky[1] == o.sky[1] && sky[2] == o.sky[2] &&
-               sky[3] == o.sky[3] && blk[0] == o.blk[0] && blk[1] == o.blk[1] &&
-               blk[2] == o.blk[2] && blk[3] == o.blk[3] &&
                col[0] == o.col[0] && col[1] == o.col[1] &&
                col[2] == o.col[2] && col[3] == o.col[3];
     }
@@ -205,12 +203,15 @@ MeshData ChunkMesher::greedyMesh(const Chunk& chunk, const BlockRegistry& reg,
         // still read as 3D. p0..p3 map to mask corners 0..3 (a merge requires
         // all four AO + sky + block values to match).
         auto lightOf = [&](int k) -> glm::vec2 {
-            const float ao = kAoShade[m.ao[k]];
-            return glm::vec2(ao * (m.sky[k] / 15.0f),
-                             m.baseShade * ao * (m.blk[k] / 15.0f));
+            // S7: the vertex carries only the per-corner AO factor (x); the fragment
+            // shader multiplies it into the sky+block light it samples from the atlas.
+            return glm::vec2(kAoShade[m.ao[k]], 0.0f);
         };
         auto colorOf = [&](int k) -> uint32_t { return packColorRGBA8(m.col[k]); };
-        const auto faceNormal = static_cast<uint32_t>(faceIndex(d, m.positive));
+        // |8 marks this as an ATLAS-LIT cube face (S7): the fragment shader samples
+        // sky+block from the light atlas for it. Non-cube geometry (second pass) omits
+        // the bit and keeps its flat per-vertex light. Low 3 bits stay the Face index.
+        const auto faceNormal = static_cast<uint32_t>(faceIndex(d, m.positive)) | 8u;
 
         const auto base_index = static_cast<uint32_t>(outV.size());
         outV.push_back({p0, uvFor(p0), m.layer, lightOf(0), faceNormal, colorOf(0), m.tint});
@@ -378,8 +379,6 @@ MeshData ChunkMesher::greedyMesh(const Chunk& chunk, const BlockRegistry& reg,
             if (!smoothLighting) {
                 // Simple mode: flat directional shade only (no AO, full sky light).
                 m.ao[0] = m.ao[1] = m.ao[2] = m.ao[3] = 3;
-                m.sky[0] = m.sky[1] = m.sky[2] = m.sky[3] = 15.0f;
-                m.blk[0] = m.blk[1] = m.blk[2] = m.blk[3] = 0.0f;
                 m.col[0] = m.col[1] = m.col[2] = m.col[3] = glm::vec3(0.0f);
                 return;
             }
@@ -387,10 +386,7 @@ MeshData ChunkMesher::greedyMesh(const Chunk& chunk, const BlockRegistry& reg,
             const int dv[4] = {-1, -1, +1, +1};
             for (int k = 0; k < 4; ++k) {
                 m.ao[k] = cornerAo(L, cu, cv, du[k], dv[k]);
-                const CornerLight lc = cornerLight(L, cu, cv, du[k], dv[k]);
-                m.sky[k] = lc.light.x;
-                m.blk[k] = lc.light.y;
-                m.col[k] = lc.col;
+                m.col[k] = cornerLight(L, cu, cv, du[k], dv[k]).col; // hue only (S7)
             }
         };
 
