@@ -3,47 +3,70 @@
 #include <vulkan/vulkan.h>
 
 #include <glm/glm.hpp>
+#include <glm/gtc/packing.hpp> // packHalf2x16
 
 #include <array>
 #include <cstdint>
 
 namespace vg {
 
+// Float -> IEEE half (16-bit). packHalf2x16 packs (x,y) with x in the low 16 bits,
+// so masking off the low half gives the half-encoding of a single float.
+[[nodiscard]] inline uint16_t toHalf(float f) {
+    return static_cast<uint16_t>(glm::packHalf2x16(glm::vec2(f, 0.0f)) & 0xFFFFu);
+}
+[[nodiscard]] inline uint8_t toUnorm8(float f) {
+    const float c = f < 0.0f ? 0.0f : (f > 1.0f ? 1.0f : f);
+    return static_cast<uint8_t>(c * 255.0f + 0.5f);
+}
+
 // -----------------------------------------------------------------------------
 //  Vertex
 // -----------------------------------------------------------------------------
-//  One vertex of chunk geometry.
+//  One vertex of chunk geometry, packed to 24 bytes (was 44). The mesher still
+//  constructs it from the same logical fields (the packing constructor below has
+//  the same argument order the call sites already use); the GPU vertex-input
+//  formats unpack each field, so neither the mesher nor the shaders change.
 //
-//   * uv is measured in *block units*, not 0..1. A greedy-meshed quad spanning
-//     N blocks gets uv up to N, and the sampler uses REPEAT addressing, so the
-//     texture tiles once per block instead of stretching across the whole quad.
-//     This is the crux of combining greedy meshing with textures.
-//   * layer selects which slice of the 2D texture *array* to sample.
-//   * light is per-vertex brightness split by source: x = sky-lit, y = block-lit
-//     (each already includes ambient occlusion). Keeping them separate lets the
-//     shader tint sky light and block light different colours. The rasteriser
-//     interpolates both, giving the soft "smooth lighting" gradient.
-//   * normal is the face index (the Face enum, 0..5); the shader decodes it to a
-//     unit normal and lights the face against the *current* sun/moon direction,
-//     so shading sweeps around with the time of day without remeshing.
-//   * blockColor is the *hue* of the block light reaching this vertex, packed
-//     RGBA8 (the dominant nearby emitter's colour — a warm torch vs orange lava).
-//     The shader tints the block-lit term by it, so different emitters glow in
-//     different colours. Only meaningful where the block-light term (light.y) is
-//     non-zero; elsewhere it is black and the shader ignores it.
+//   * pos  — chunk-local position, half-float. The chunk is 16 blocks plus small
+//     sub-block shape fractions/overhangs (slabs, leaf crowns), all well within
+//     half precision (~0.008-block error at 16).
+//   * uv   — block-unit UV (tiles via REPEAT), half-float.
+//   * layer— texture-array slice (uint16).
+//   * light— x = the per-corner ambient-occlusion factor (the fragment shader
+//     multiplies it into the sky+block light it samples from the light atlas, S7);
+//     y is unused. UNORM8.
+//   * normal — low 3 bits = Face index (0..5); bit 3 (|8) marks an atlas-lit cube
+//     face. Decoded in the shader against the time-of-day sun. UINT8.
+//   * blockColor — packed RGBA8 block-light hue (kept per-vertex; only meaningful
+//     near emitters and for non-cube geometry).
+//   * tint — biome vegetation tint, packed RGBA8 (white = none; alpha < 1 marks
+//     swayable foliage).
 // -----------------------------------------------------------------------------
 struct Vertex {
-    glm::vec3 pos;
-    glm::vec2 uv;
-    uint32_t  layer;
-    glm::vec2 light;
-    uint32_t  normal;
-    uint32_t  blockColor = 0; // packed RGBA8 emitter hue (R low byte)
-    // Biome vegetation tint, packed RGBA8 (white = no tint). The fragment shader
-    // multiplies the sampled albedo by this, so grass/leaves/plants take on a
-    // per-biome colour (lush forest, dry savanna, pale snow, dark swamp) while all
-    // other blocks carry the default white and are unaffected.
-    uint32_t  tint = 0xFFFFFFFFu;
+    uint16_t pos[3];      // half-float chunk-local position
+    uint16_t uv[2];       // half-float block-unit UV
+    uint16_t layer;       // texture-array slice
+    uint8_t  light[2];    // x = AO factor (UNORM8), y unused
+    uint8_t  normal;      // Face index | (atlas-lit << 3)
+    uint8_t  pad;         // keep blockColor 4-byte aligned
+    uint32_t blockColor;  // RGBA8 emitter hue (R low byte)
+    uint32_t tint;        // RGBA8 biome tint (white = none)
+
+    Vertex() = default;
+    // Same argument order as the old aggregate fields, so every existing
+    // push_back({pos, uv, layer, light, normal, color, tint}) site calls this and
+    // packs transparently.
+    Vertex(const glm::vec3& p, const glm::vec2& u, uint32_t lyr, const glm::vec2& lt,
+           uint32_t nrm, uint32_t color = 0, uint32_t tnt = 0xFFFFFFFFu)
+        : pos{toHalf(p.x), toHalf(p.y), toHalf(p.z)},
+          uv{toHalf(u.x), toHalf(u.y)},
+          layer(static_cast<uint16_t>(lyr)),
+          light{toUnorm8(lt.x), toUnorm8(lt.y)},
+          normal(static_cast<uint8_t>(nrm)),
+          pad(0),
+          blockColor(color),
+          tint(tnt) {}
 
     // How to fetch one Vertex from the vertex buffer.
     static VkVertexInputBindingDescription bindingDescription() {
@@ -54,17 +77,19 @@ struct Vertex {
         return b;
     }
 
-    // How to interpret each field as a shader input attribute.
+    // How to interpret each packed field as a shader input attribute. The shader
+    // declarations (vec3 inPos, vec2 inUV, uint inLayer, vec2 inLight, uint
+    // inNormal, vec4 inBlockColor, vec4 inTint) are unchanged — the format does the
+    // widening (half->float, unorm8->float, uint8->uint).
     static std::array<VkVertexInputAttributeDescription, 7> attributeDescriptions() {
         std::array<VkVertexInputAttributeDescription, 7> a{};
-        a[0] = {0, 0, VK_FORMAT_R32G32B32_SFLOAT,  offsetof(Vertex, pos)};
-        a[1] = {1, 0, VK_FORMAT_R32G32_SFLOAT,     offsetof(Vertex, uv)};
-        a[2] = {2, 0, VK_FORMAT_R32_UINT,          offsetof(Vertex, layer)};
-        a[3] = {3, 0, VK_FORMAT_R32G32_SFLOAT,     offsetof(Vertex, light)};
-        a[4] = {4, 0, VK_FORMAT_R32_UINT,          offsetof(Vertex, normal)};
-        // R8G8B8A8_UNORM: read in the shader as a normalised vec4 in [0,1].
-        a[5] = {5, 0, VK_FORMAT_R8G8B8A8_UNORM,    offsetof(Vertex, blockColor)};
-        a[6] = {6, 0, VK_FORMAT_R8G8B8A8_UNORM,    offsetof(Vertex, tint)};
+        a[0] = {0, 0, VK_FORMAT_R16G16B16_SFLOAT, offsetof(Vertex, pos)};
+        a[1] = {1, 0, VK_FORMAT_R16G16_SFLOAT,    offsetof(Vertex, uv)};
+        a[2] = {2, 0, VK_FORMAT_R16_UINT,         offsetof(Vertex, layer)};
+        a[3] = {3, 0, VK_FORMAT_R8G8_UNORM,       offsetof(Vertex, light)};
+        a[4] = {4, 0, VK_FORMAT_R8_UINT,          offsetof(Vertex, normal)};
+        a[5] = {5, 0, VK_FORMAT_R8G8B8A8_UNORM,   offsetof(Vertex, blockColor)};
+        a[6] = {6, 0, VK_FORMAT_R8G8B8A8_UNORM,   offsetof(Vertex, tint)};
         return a;
     }
 };
