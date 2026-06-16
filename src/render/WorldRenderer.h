@@ -8,6 +8,7 @@
 
 #include <glm/glm.hpp>
 
+#include <array>
 #include <atomic>
 #include <condition_variable>
 #include <cstddef>
@@ -117,6 +118,13 @@ public:
     // with zero extra GPU sync. No-op if nothing is queued.
     void recordPendingUploads(VkCommandBuffer cmd);
 
+    // GPU frustum cull (opt-in VG_GPUCULL): dispatch chunk_cull.comp to write this
+    // frame's indirect commands. MUST be called before the render pass (compute can't
+    // run inside one) — pair it with recordPendingUploads in the frame's pre-pass hook.
+    // Uses the frustum record() stored last frame (one frame stale is harmless for a
+    // conservative AABB cull). No-op when GPU cull is off.
+    void recordCull(VkCommandBuffer cmd, uint32_t frameIndex);
+
     [[nodiscard]] std::size_t drawnChunkCount() const { return drawnChunks_; }
     [[nodiscard]] std::size_t triangleCount()   const { return totalTriangles_; }
     // Per-frame culling telemetry (updated by record(), read by the VG_FRAME_TIME
@@ -172,6 +180,13 @@ private:
         glm::vec3 worldPos{0.0f};
         int       drawListPos = -1;        // index in drawList_, or -1 if empty (R8)
         int       lightSlot   = -1;        // S7: this chunk's slot in the light atlas (-1 = none)
+    };
+    // Per-slot mesh metadata the GPU cull shader reads (mirrors chunk_cull.comp's
+    // ChunkMeta, std430): aabb = world bounds; opaque/water = (indexCount, firstIndex,
+    // vertexOffset-as-uint, slot) for that range's indirect command.
+    struct ChunkMeta {
+        glm::vec4  aabbMin, aabbMax;
+        glm::uvec4 opaque, water;
     };
     // A chunk's computed arena placement, passed from the install paths to
     // swapChunkBuffers (replaces the old per-chunk Buffer + offsets bundle).
@@ -310,6 +325,22 @@ private:
     std::vector<glm::vec4> drawDataCpu_;     // mirror of the SSBO (worldPos per slot)
     // Reused per-frame scratch for building the indirect command arrays on the CPU.
     std::vector<VkDrawIndexedIndirectCommand> cmdScratch_;
+
+    // --- GPU-driven culling (chunk_cull.comp; opt-in via VG_GPUCULL) ----------
+    // A compute pass tests each slot's AABB against the frustum and writes its
+    // opaque/water indirect commands (instanceCount 0 = culled/empty), so the draw is
+    // one vkCmdDrawIndexedIndirect over the whole dense per-slot array. Default off —
+    // the CPU cull above is the proven path and there is no measured win (GPU idle).
+    bool                         gpuCull_ = false;
+    VkDescriptorSetLayout        cullSetLayout_      = VK_NULL_HANDLE;
+    VkPipelineLayout             cullPipelineLayout_ = VK_NULL_HANDLE;
+    VkPipeline                   cullPipeline_       = VK_NULL_HANDLE;
+    VkDescriptorPool             cullPool_           = VK_NULL_HANDLE;
+    std::vector<VkDescriptorSet> cullSets_;     // per frame in flight
+    std::vector<Buffer>          metaBuffers_;  // per-slot ChunkMeta SSBO (per frame)
+    std::vector<ChunkMeta>       metaCpu_;      // CPU mirror, refilled by swapChunkBuffers
+    std::array<glm::vec4, 6>     lastFrustum_{}; // record() stores it; recordCull reads it
+    void createCullResources(const std::string& shaderDir, uint32_t n);
     // Freed arena spans awaiting reuse (framesInFlight_+1 frames), like retired_.
     std::vector<std::pair<int, MeshArena::Alloc>> retiredAllocs_;
 

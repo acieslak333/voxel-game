@@ -214,7 +214,7 @@ WorldConfig worldConfigWithSettings(const std::string& path, const Settings& s) 
     // Render distance is player-driven (Settings), overriding world.yaml's
     // view_radius. Recompute the derived chunk-grid dims load() set from the YAML
     // value so the world is allocated at the chosen radius.
-    c.viewRadius = std::clamp(s.renderDistance, 4, 16);
+    c.viewRadius = std::clamp(s.renderDistance, 4, 48);
     c.chunksX = c.chunksZ = 2 * c.viewRadius + 1;
     // GPU mesh-arena budget is player-driven too (memory vs. how dense a world the
     // arena can hold). Clamp to a sane band so a bad settings.yaml can't request a
@@ -1559,10 +1559,13 @@ void App::run(long maxFrames, const std::string& screenshotPath) {
         const auto profT2 = std::chrono::steady_clock::now();
 
         renderer_.drawFrame(
-            [this](VkCommandBuffer cmd, uint32_t, VkExtent2D) {
+            [this](VkCommandBuffer cmd, uint32_t frameIndex, VkExtent2D) {
                 // Upload this frame's streamed chunk meshes as part of the frame's
                 // own command buffer (before the render pass) — no extra GPU sync.
                 worldRenderer_.recordPendingUploads(cmd);
+                // GPU frustum cull (opt-in): dispatch chunk_cull.comp here, before the
+                // render pass begins (compute can't run inside one).
+                worldRenderer_.recordCull(cmd, frameIndex);
             },
             [this](VkCommandBuffer cmd, uint32_t frameIndex, VkExtent2D extent) {
                 const Camera& cam = player_.camera();

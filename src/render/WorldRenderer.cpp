@@ -18,6 +18,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <execution>
+#include <fstream>
 #include <iostream>
 #include <stdexcept>
 #include <utility>
@@ -145,6 +146,7 @@ WorldRenderer::WorldRenderer(VulkanContext& ctx, VkRenderPass renderPass,
     createUniformBuffers(framesInFlight);
     createGpuDrivenBuffers(framesInFlight); // draw-data SSBO + indirect buffers
     createDescriptorSets(framesInFlight);   // references drawDataBuffers_
+    createCullResources(shaderDir, framesInFlight); // GPU cull pipeline (opt-in VG_GPUCULL)
     meshVersion_.assign(meshes_.size(), 0);
     if (world_.streaming() && world_.streamWorkers() > 0) {
         startWorkers(world_.streamWorkers());
@@ -162,9 +164,12 @@ WorldRenderer::WorldRenderer(VulkanContext& ctx, VkRenderPass renderPass,
 
 WorldRenderer::~WorldRenderer() {
     stopWorkers(); // join threads before tearing down anything they read
-    if (descriptorPool_) {
-        vkDestroyDescriptorPool(ctx_.device(), descriptorPool_, nullptr);
-    }
+    VkDevice dev = ctx_.device();
+    if (cullPipeline_)       vkDestroyPipeline(dev, cullPipeline_, nullptr);
+    if (cullPipelineLayout_) vkDestroyPipelineLayout(dev, cullPipelineLayout_, nullptr);
+    if (cullSetLayout_)      vkDestroyDescriptorSetLayout(dev, cullSetLayout_, nullptr);
+    if (cullPool_)           vkDestroyDescriptorPool(dev, cullPool_, nullptr);
+    if (descriptorPool_)     vkDestroyDescriptorPool(dev, descriptorPool_, nullptr);
 }
 
 int WorldRenderer::chunkIndex(int cx, int cy, int cz) const {
@@ -340,6 +345,16 @@ void WorldRenderer::swapChunkBuffers(int cx, int cy, int cz, const MeshPlacement
     if (slot < drawDataCpu_.size()) {
         drawDataCpu_[slot] = glm::vec4(cm.worldPos, 0.0f);
     }
+    // Keep the GPU-cull metadata mirror in sync (AABB + per-range draw params).
+    if (slot < metaCpu_.size()) {
+        const glm::vec3 ext(static_cast<float>(Chunk::kSize));
+        metaCpu_[slot].aabbMin = glm::vec4(cm.worldPos, 0.0f);
+        metaCpu_[slot].aabbMax = glm::vec4(cm.worldPos + ext, 0.0f);
+        metaCpu_[slot].opaque  = glm::uvec4(cm.indexCount, cm.firstIndex,
+                                            static_cast<uint32_t>(cm.baseVertex), slot);
+        metaCpu_[slot].water   = glm::uvec4(cm.waterIndexCount, cm.waterFirstIndex,
+                                            static_cast<uint32_t>(cm.waterBaseVertex), slot);
+    }
 
     // S7: rotate the chunk's light-atlas slot. A (re)meshed chunk's light is written
     // to a FRESH slot, so an in-flight frame still sampling the old slot is never
@@ -492,6 +507,7 @@ void WorldRenderer::buildMeshes() {
     const size_t numSlots = static_cast<size_t>(counts_.x) * counts_.y * counts_.z;
     meshes_.resize(numSlots);
     drawDataCpu_.assign(numSlots, glm::vec4(0.0f)); // per-slot world pos for the SSBO
+    metaCpu_.assign(numSlots, ChunkMeta{});         // GPU-cull metadata mirror (filled by swaps)
 
     // Size the shared arena from the slot count. The per-slot budget is the one OOM
     // risk of the GPU-driven path: allocate() throws if a window's live geometry
@@ -891,14 +907,23 @@ void WorldRenderer::createGpuDrivenBuffers(uint32_t n) {
     const VkDeviceSize cmdBytes  = slots * sizeof(VkDrawIndexedIndirectCommand);
     const VkMemoryPropertyFlags host =
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+    const VkDeviceSize metaBytes = slots * sizeof(ChunkMeta);
     drawDataBuffers_.reserve(n);
     opaqueIndirect_.reserve(n);
     waterIndirect_.reserve(n);
+    metaBuffers_.reserve(n);
     for (uint32_t i = 0; i < n; ++i) {
         drawDataBuffers_.emplace_back(ctx_, ssboBytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, host);
-        opaqueIndirect_.emplace_back(ctx_, cmdBytes, VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, host);
-        waterIndirect_.emplace_back(ctx_, cmdBytes, VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, host);
+        // INDIRECT | STORAGE: the GPU-cull compute shader writes the commands here; the
+        // CPU-cull path uploads them. Both want host-visible (the CPU mirror writes too).
+        const VkBufferUsageFlags indirectUsage =
+            VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+        opaqueIndirect_.emplace_back(ctx_, cmdBytes, indirectUsage, host);
+        waterIndirect_.emplace_back(ctx_, cmdBytes, indirectUsage, host);
+        metaBuffers_.emplace_back(ctx_, metaBytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, host);
     }
+    // metaCpu_ is sized + filled earlier (buildMeshes + the startup swaps) — do NOT
+    // re-assign it here, that would wipe the startup chunks' metadata.
 }
 
 void WorldRenderer::createDescriptorSets(uint32_t n) {
@@ -984,6 +1009,130 @@ void WorldRenderer::createDescriptorSets(uint32_t n) {
     }
 }
 
+// Push-constant block for chunk_cull.comp (6 frustum planes + the slot count).
+struct CullPush {
+    glm::vec4 planes[6];
+    uint32_t  slotCount;
+};
+
+void WorldRenderer::createCullResources(const std::string& shaderDir, uint32_t n) {
+    gpuCull_ = std::getenv("VG_GPUCULL") != nullptr;
+
+    std::vector<char> code;
+    {
+        std::ifstream f(shaderDir + "/chunk_cull.comp.spv", std::ios::ate | std::ios::binary);
+        if (!f) throw std::runtime_error("WorldRenderer: cannot open chunk_cull.comp.spv");
+        const auto sz = static_cast<size_t>(f.tellg());
+        code.resize(sz);
+        f.seekg(0);
+        f.read(code.data(), static_cast<std::streamsize>(sz));
+    }
+    VkShaderModuleCreateInfo smi{};
+    smi.sType    = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+    smi.codeSize = code.size();
+    smi.pCode    = reinterpret_cast<const uint32_t*>(code.data());
+    VkShaderModule module = VK_NULL_HANDLE;
+    if (vkCreateShaderModule(ctx_.device(), &smi, nullptr, &module) != VK_SUCCESS)
+        throw std::runtime_error("WorldRenderer: cull shader module");
+
+    // Three storage buffers: meta in (0), opaque cmds out (1), water cmds out (2).
+    VkDescriptorSetLayoutBinding b[3]{};
+    for (uint32_t i = 0; i < 3; ++i) {
+        b[i].binding         = i;
+        b[i].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        b[i].descriptorCount = 1;
+        b[i].stageFlags      = VK_SHADER_STAGE_COMPUTE_BIT;
+    }
+    VkDescriptorSetLayoutCreateInfo dli{};
+    dli.sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    dli.bindingCount = 3;
+    dli.pBindings    = b;
+    if (vkCreateDescriptorSetLayout(ctx_.device(), &dli, nullptr, &cullSetLayout_) != VK_SUCCESS)
+        throw std::runtime_error("WorldRenderer: cull set layout");
+
+    VkPushConstantRange pcr{VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(CullPush)};
+    VkPipelineLayoutCreateInfo pli{};
+    pli.sType                  = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    pli.setLayoutCount         = 1;
+    pli.pSetLayouts            = &cullSetLayout_;
+    pli.pushConstantRangeCount = 1;
+    pli.pPushConstantRanges    = &pcr;
+    if (vkCreatePipelineLayout(ctx_.device(), &pli, nullptr, &cullPipelineLayout_) != VK_SUCCESS)
+        throw std::runtime_error("WorldRenderer: cull pipeline layout");
+
+    VkComputePipelineCreateInfo cpi{};
+    cpi.sType        = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+    cpi.stage.sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    cpi.stage.stage  = VK_SHADER_STAGE_COMPUTE_BIT;
+    cpi.stage.module = module;
+    cpi.stage.pName  = "main";
+    cpi.layout       = cullPipelineLayout_;
+    if (vkCreateComputePipelines(ctx_.device(), VK_NULL_HANDLE, 1, &cpi, nullptr, &cullPipeline_) !=
+        VK_SUCCESS)
+        throw std::runtime_error("WorldRenderer: cull pipeline");
+    vkDestroyShaderModule(ctx_.device(), module, nullptr);
+
+    VkDescriptorPoolSize ps{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 3 * n};
+    VkDescriptorPoolCreateInfo poolInfo{};
+    poolInfo.sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    poolInfo.poolSizeCount = 1;
+    poolInfo.pPoolSizes    = &ps;
+    poolInfo.maxSets       = n;
+    if (vkCreateDescriptorPool(ctx_.device(), &poolInfo, nullptr, &cullPool_) != VK_SUCCESS)
+        throw std::runtime_error("WorldRenderer: cull pool");
+    std::vector<VkDescriptorSetLayout> layouts(n, cullSetLayout_);
+    VkDescriptorSetAllocateInfo ai{};
+    ai.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    ai.descriptorPool     = cullPool_;
+    ai.descriptorSetCount = n;
+    ai.pSetLayouts        = layouts.data();
+    cullSets_.resize(n);
+    if (vkAllocateDescriptorSets(ctx_.device(), &ai, cullSets_.data()) != VK_SUCCESS)
+        throw std::runtime_error("WorldRenderer: cull descriptor sets");
+    for (uint32_t i = 0; i < n; ++i) {
+        VkDescriptorBufferInfo bi[3] = {
+            {metaBuffers_[i].handle(), 0, VK_WHOLE_SIZE},
+            {opaqueIndirect_[i].handle(), 0, VK_WHOLE_SIZE},
+            {waterIndirect_[i].handle(), 0, VK_WHOLE_SIZE},
+        };
+        VkWriteDescriptorSet w[3]{};
+        for (uint32_t j = 0; j < 3; ++j) {
+            w[j].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            w[j].dstSet          = cullSets_[i];
+            w[j].dstBinding      = j;
+            w[j].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            w[j].descriptorCount = 1;
+            w[j].pBufferInfo     = &bi[j];
+        }
+        vkUpdateDescriptorSets(ctx_.device(), 3, w, 0, nullptr);
+    }
+}
+
+void WorldRenderer::recordCull(VkCommandBuffer cmd, uint32_t frameIndex) {
+    if (!gpuCull_ || metaCpu_.empty()) return;
+    const uint32_t slotCount = static_cast<uint32_t>(metaCpu_.size());
+
+    // Per-slot metadata (host write; visible to the compute read before submit).
+    metaBuffers_[frameIndex].upload(metaCpu_.data(), metaCpu_.size() * sizeof(ChunkMeta));
+
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cullPipeline_);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cullPipelineLayout_, 0, 1,
+                            &cullSets_[frameIndex], 0, nullptr);
+    CullPush pc{};
+    for (int i = 0; i < 6; ++i) pc.planes[i] = lastFrustum_[static_cast<size_t>(i)];
+    pc.slotCount = slotCount;
+    vkCmdPushConstants(cmd, cullPipelineLayout_, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pc), &pc);
+    vkCmdDispatch(cmd, (slotCount + 63) / 64, 1, 1);
+
+    // Make the command writes visible to the indirect-draw read in the render pass.
+    VkMemoryBarrier b{};
+    b.sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+    b.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    b.dstAccessMask = VK_ACCESS_INDIRECT_COMMAND_READ_BIT;
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT, 0, 1, &b, 0, nullptr, 0, nullptr);
+}
+
 void WorldRenderer::record(VkCommandBuffer cmd, uint32_t frameIndex, VkExtent2D extent,
                            const glm::mat4& view, const glm::mat4& proj,
                            const glm::vec4& sunDirAmbient, const glm::vec4& sunColIntensity,
@@ -1035,8 +1184,38 @@ void WorldRenderer::record(VkCommandBuffer cmd, uint32_t frameIndex, VkExtent2D 
     vkCmdBindIndexBuffer(cmd, arena_->indexBuffer(), 0, VK_INDEX_TYPE_UINT32);
 
     const std::array<glm::vec4, 6> frustum = extractFrustum(proj * view);
+    lastFrustum_ = frustum; // recordCull() (next frame's pre-pass) reads this
     const glm::vec3 chunkExtent(static_cast<float>(Chunk::kSize));
     std::size_t visible = 0, culled = 0;
+
+    // --- GPU cull path: chunk_cull.comp already wrote dense per-slot commands -----
+    // recordCull() (pre-pass) filled opaque/water indirect with one command per slot
+    // (instanceCount 0 for culled/empty), so each pass is ONE indirect draw over the
+    // whole array — zero CPU cull/record. Opt-in (VG_GPUCULL); no measured win.
+    if (gpuCull_) {
+        const uint32_t slotCount = static_cast<uint32_t>(meshes_.size());
+        PushConstants pc{};
+        pc.params.x = 1.0f;
+        vkCmdPushConstants(cmd, pipeline_->layout(), VK_SHADER_STAGE_VERTEX_BIT, 0,
+                           Pipeline::kPushConstantSize, &pc);
+        vkCmdDrawIndexedIndirect(cmd, opaqueIndirect_[frameIndex].handle(), 0, slotCount,
+                                 sizeof(VkDrawIndexedIndirectCommand));
+        if (drawnWaterChunks_ != 0) {
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, waterPipeline_->handle());
+            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, waterPipeline_->layout(),
+                                    0, 1, &descriptorSets_[frameIndex], 0, nullptr);
+            PushConstants wpc{};
+            wpc.params.x = 0.7f;
+            vkCmdPushConstants(cmd, waterPipeline_->layout(), VK_SHADER_STAGE_VERTEX_BIT, 0,
+                               Pipeline::kPushConstantSize, &wpc);
+            vkCmdDrawIndexedIndirect(cmd, waterIndirect_[frameIndex].handle(), 0, slotCount,
+                                     sizeof(VkDrawIndexedIndirectCommand));
+        }
+        lastVisibleChunks_ = drawnChunks_; // GPU-side cull: CPU has no exact count
+        lastCulledChunks_  = 0;
+        lastDrawCalls_     = drawnChunks_;
+        return;
+    }
 
     // --- Pass 1: opaque terrain (writes colour + depth) ----------------------
     // CPU frustum cull builds a compact indirect command array (one command per
