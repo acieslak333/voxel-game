@@ -1,7 +1,7 @@
 #pragma once
 
-#include "world/NoiseMask.h"
-#include "world/NoiseStack.h"
+#include "utilities/noise/NoiseMask.h"
+#include "utilities/noise/NoiseStack.h"
 
 #include <yaml-cpp/yaml.h>
 

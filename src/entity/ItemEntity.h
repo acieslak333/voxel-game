@@ -9,7 +9,7 @@
 namespace vg {
 
 // -----------------------------------------------------------------------------
-//  ItemEntity / ItemEntities (ISSUES #13B)
+//  ItemEntity / ItemEntities 
 // -----------------------------------------------------------------------------
 //  Dropped items that live in the world as physical entities: they fall, settle on
 //  the ground, get magnetised toward a nearby player and are picked up on contact

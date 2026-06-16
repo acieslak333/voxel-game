@@ -9,7 +9,7 @@
 //
 // Returns 0 on success, non-zero on first failure.
 
-#include "render/SpanAllocator.h"
+#include "utilities/alloc/SpanAllocator.h"
 
 #include <algorithm>
 #include <cstdint>

@@ -1,7 +1,5 @@
 #pragma once
 
-#include "world/NoiseMask.h"
-
 #include <glm/glm.hpp>
 
 #include <cstdint>
@@ -36,33 +34,6 @@ struct RandF {
     bool  fixed = true;
     [[nodiscard]] float atf(uint32_t h) const;  // fixed -> a, else lerp(a,b,hash01(h))
     [[nodiscard]] int   ati(uint32_t h) const;  // ...rounded to an int
-};
-
-// Where a feature is scattered (its own grid, gates) — each feature owns this,
-// unlike the single global structures density.
-struct FeatureScatter {
-    enum class Dist { Grid, Noise };
-
-    float density = 0.2f;          // chance per candidate grid cell
-    int   spacing = 48;            // grid cell size in blocks
-    bool  surface = true;          // only root on dry land
-    int   minElevation = -1000000; // origin column height vs sea level
-    int   maxElevation =  1000000;
-    std::vector<int> biomeIds;     // allow-list of biome indices (empty = any)
-
-    // --- placement modifiers (atypical scatter) --------------------------------
-    Dist  dist        = Dist::Grid; // Grid = even spread; Noise = organic clumps
-    float noiseFreq   = 0.02f;      // Noise dist: lower = bigger clumps
-    float noiseThresh = 0.30f;      // Noise dist: higher = rarer/tighter clumps
-    int   minSlope    = 0;          // terrain steepness gate (max surface delta over
-    int   maxSlope    = 100000;     //   a small neighbourhood, in blocks)
-    bool  onWater     = false;      // root on the WATER surface (lilypads) not the land
-    int   nearWater   = 0;          // 0 = off; else only within this many blocks of water
-
-    // Noise MASK (`scatter.mask:`): a multi-layer noise field + threshold + steepness
-    // curve whose weight [0,1] multiplies the placement probability — the upgraded,
-    // appendable form of the single-noise `distribution: noise` above. Empty = off.
-    NoiseMask mask;
 };
 
 struct Feature {
@@ -107,7 +78,6 @@ struct Feature {
     struct Cell { uint16_t id = kSkip; bool force = true; };
 
     std::string    name;
-    FeatureScatter scatter;
     glm::ivec3     size{1};   // max bounding box (x,y,z) — gather reach + anchor default
     glm::ivec3     anchor{0}; // local cell meeting the surface (x,z centre; y = ground)
     std::vector<Op> ops;                   // the default form (variant 0)
@@ -131,10 +101,11 @@ struct Feature {
 // -----------------------------------------------------------------------------
 class FeatureSet {
 public:
-    // Load every *.yaml under `dir` (missing dir -> empty, features off). Block
-    // names resolve via the registry; biome names via the supplied lookup.
-    FeatureSet(const std::string& dir, const BlockRegistry& registry,
-               const std::vector<std::string>& biomeNames, uint32_t seed = 0);
+    // Load every *.yaml under `dir` as feature templates (missing dir -> empty).
+    // Block names resolve via the registry. Spawn/scatter logic was removed with the
+    // worldgen overhaul: this just loads the voxel-op data so a feature can be placed
+    // explicitly later. Block names resolve via the registry.
+    FeatureSet(const std::string& dir, const BlockRegistry& registry);
 
     [[nodiscard]] bool empty() const { return features_.empty(); }
     [[nodiscard]] const std::vector<Feature>& all() const { return features_; }

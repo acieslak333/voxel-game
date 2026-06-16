@@ -219,37 +219,6 @@ WorldConfig worldConfigWithSettings(const std::string& path, const Settings& s) 
     return c;
 }
 
-// Far-terrain LOD knobs, read from an OPTIONAL `far_terrain:` block in world.yaml
-// (any subset of keys; missing keys keep the code defaults). Keys:
-//   enabled (bool) · base_step (int blocks/cell, innermost ring) · ring_cells
-//   (int cells per ring side) · ring_count (int LOD levels) · skirt_depth (float
-//   blocks) · underlap (int blocks the shell reaches under the window) · y_bias
-//   (float; shell sits this far below the surface so near chunks win the seam).
-FarTerrainRenderer::Config farTerrainConfig(const std::string& path) {
-    FarTerrainRenderer::Config c; // sensible defaults if world.yaml has no block
-    try {
-        YAML::Node root = YAML::LoadFile(path);
-        if (const YAML::Node ft = root["far_terrain"]) {
-            if (ft["enabled"])     c.enabled    = ft["enabled"].as<bool>();
-            if (ft["base_step"])   c.baseStep   = ft["base_step"].as<int>();
-            if (ft["ring_cells"])  c.ringCells  = ft["ring_cells"].as<int>();
-            if (ft["ring_count"])  c.ringCount  = ft["ring_count"].as<int>();
-            if (ft["skirt_depth"]) c.skirtDepth = ft["skirt_depth"].as<float>();
-            if (ft["underlap"])    c.underlap   = ft["underlap"].as<int>();
-            if (ft["y_bias"])      c.yBias      = ft["y_bias"].as<float>();
-            if (ft["trees"])       c.trees      = ft["trees"].as<bool>();
-            if (ft["tree_dist"])   c.treeDist   = ft["tree_dist"].as<int>();
-            if (ft["forest_tint"]) c.forestTint = ft["forest_tint"].as<float>();
-        }
-    } catch (...) {
-        // Malformed/missing file: keep defaults (the world load already reported it).
-    }
-    c.baseStep  = std::max(1, c.baseStep);
-    c.ringCells = std::clamp(c.ringCells, 2, 256);
-    c.ringCount = std::clamp(c.ringCount, 0, 8);
-    c.treeDist  = std::clamp(c.treeDist, 0, 1024);
-    return c;
-}
 } // namespace
 
 std::string App::settingsPath() {
@@ -281,10 +250,6 @@ App::App()
                       static_cast<uint32_t>(Renderer::kMaxFramesInFlight), VG_SHADER_DIR,
                       worldRenderer_.blockTextureView(), worldRenderer_.blockTextureSampler(),
                       entitySkins_.view(), entitySkins_.sampler()),
-      farTerrain_(context_, renderer_.sceneRenderPass(),
-                  static_cast<uint32_t>(Renderer::kMaxFramesInFlight), VG_SHADER_DIR,
-                  worldRenderer_.blockTextureView(), worldRenderer_.blockTextureSampler(),
-                  farTerrainConfig(std::string(VG_ASSET_DIR) + "/world.yaml")),
       ui_(context_, renderer_.uiRenderPass(),
           static_cast<uint32_t>(Renderer::kMaxFramesInFlight),
           std::string(VG_ASSET_DIR) + "/fonts/ari/" + settings_.font, 32.0f,
@@ -292,42 +257,9 @@ App::App()
       input_(window_),
       player_(glm::vec3(0.0f)),
       crafting_(std::string(VG_ASSET_DIR) + "/recipes.yaml", world_.registry()) {
-    // Spawn on the EAST beach of the island. The island is centred at world (0,0)
-    // and its coastline is thousands of blocks out — far beyond the streamed window,
-    // which starts at the world origin. surfaceHeight() is a PURE function of world
-    // coords (valid anywhere, not just loaded chunks), so we march EAST (+X) from the
-    // centre to the shoreline, then recentre the streamed window onto that spawn so
-    // the coast is actually loaded before the player needs ground under them.
+    // Flat world: every column is identical, so spawn at the world origin on top of
+    // the grass surface (surfaceHeight scans the actual voxels — grass tops out at 16).
     int cx = 0, cz = 0;
-    {
-        const int seaLevel    = world_.generator().seaLevel();
-        constexpr int kMaxMarch = 6000; // past any island radius + archipelago reach
-        // The eastern shore at latitude z: the last land column before open ocean,
-        // backed off to a gentle beach (within a few blocks of the water line).
-        auto eastShore = [&](int z, int& outX, int& outH) -> bool {
-            int lastLand = -1;
-            for (int x = 0; x < kMaxMarch; ++x) {
-                const int h = world_.surfaceHeight(x, z);
-                if (h > seaLevel) lastLand = x;
-                else if (lastLand >= 0 && x > lastLand + 8) break; // cleared the coast
-            }
-            if (lastLand < 0) return false;
-            for (int x = lastLand; x >= std::max(0, lastLand - 96); --x) {
-                const int h = world_.surfaceHeight(x, z);
-                if (h > seaLevel && h <= seaLevel + 3) { outX = x; outH = h; return true; }
-            }
-            outX = lastLand; outH = world_.surfaceHeight(lastLand, z);
-            return true;
-        };
-        // Sample a fan of latitudes around the centre and keep the LOWEST shore, so we
-        // land on flat sand rather than a sea-cliff if z=0 happens to hit a headland.
-        int bestH = 1 << 30;
-        for (int z = -160; z <= 160; z += 16) {
-            int sx, sh;
-            if (!eastShore(z, sx, sh) || sh <= seaLevel) continue;
-            if (sh < bestH) { bestH = sh; cx = sx; cz = z; }
-        }
-    }
     spawnFeet_ = glm::vec3(static_cast<float>(cx),
                            static_cast<float>(world_.surfaceHeight(cx, cz)) + 2.0f,
                            static_cast<float>(cz));
@@ -371,11 +303,10 @@ App::App()
         [this](int x, int y, int z, ShapeBox out[]) {
             return world_.collisionBoxesAt(x, y, z, out);
         });
-    // Swim physics + drowning: tell the player which cells are water (resolve the id
-    // once; blockAt is a cheap window lookup).
-    const uint16_t waterId = world_.registry().idByName("water");
-    player_.setWaterFn(
-        [this, waterId](int x, int y, int z) { return world_.blockAt(x, y, z).id == waterId; });
+    // Swim physics + drowning: the flat world has no water, so nothing is ever "in
+    // water" (water was removed with the worldgen overhaul). Keep the predicate so
+    // the player API stays wired; it simply always reports dry.
+    player_.setWaterFn([](int, int, int) { return false; });
 
     // Start in creative with every block available (press G to switch to survival).
     // In survival, mining adds to the inventory and placing consumes the held slot;
@@ -400,7 +331,6 @@ App::App()
         give("planks", 32);
         give("oak_trunk", 16);
         give("oak_leaves", 16);
-        give("glowstone", 8);
         give("torch", 16);
         give("chest", 3);
         give("iron_boots", 1); // only armour piece (ISSUES #15: armour trimmed to boots)
@@ -454,7 +384,6 @@ void App::applySettings() {
     player_.setMouseSensitivity(settings_.sensitivity);
     player_.setFlySpeed(settings_.flySpeed);
     player_.setViewBob(settings_.viewBob);
-    farTerrain_.setEnabled(settings_.lod);
     window_.setFullscreen(settings_.fullscreen);
     dayNight_.setDayLengthMinutes(settings_.dayLengthMinutes);
     dayNight_.setRunning(settings_.timeRunning);
@@ -742,7 +671,6 @@ void App::breakBlockAt(const glm::ivec3& b) {
     // result installs via the per-frame streamPump (same path liquid flow uses); the
     // next mutation's streamBarrier orders worker reads before it. ~1 frame later.
     worldRenderer_.streamRemesh(dirty);
-    seedLiquid(b.x, b.y, b.z); // liquid may flow into the new gap
     // Break feedback: pop a burst of chips out of the gap. The effect can name its
     // own texture; an empty texture uses the broken block's top face.
     if (broken != 0) {
@@ -764,7 +692,6 @@ void App::placeBlockAt(const glm::ivec3& t, uint16_t id, uint8_t metadata) {
         player_.inventory().takeFromSelected(); // placing uses one up (creative is infinite)
     }
     worldRenderer_.streamRemesh(dirty); // async remesh, like breakBlockAt
-    seedLiquid(t.x, t.y, t.z);
     // Place poof: a soft dust puff in the placed block's own colour (ISSUES #13M).
     const uint32_t layer = placeEffect_.texture.empty()
         ? world_.registry().faceLayer(id, FacePosY)
@@ -786,27 +713,8 @@ void App::updateSurvival(float dt) {
     if (creativeMode_) {
         return; // creative: no environmental damage, no death
     }
-    // Environmental damage: standing in lava hurts continuously. Scan the block
-    // cells the player's AABB overlaps for lava (cheap: a handful of cells).
-    const glm::vec3 eye = player_.camera().position;
-    const int x0 = static_cast<int>(std::floor(eye.x - 0.3f));
-    const int x1 = static_cast<int>(std::floor(eye.x + 0.3f));
-    const int z0 = static_cast<int>(std::floor(eye.z - 0.3f));
-    const int z1 = static_cast<int>(std::floor(eye.z + 0.3f));
-    const int feetY = static_cast<int>(std::floor(eye.y - 1.62f)); // eye -> feet
-    const int headY = static_cast<int>(std::floor(eye.y));
-    const uint16_t lava = world_.registry().idByName("lava");
-    bool inLava = false;
-    for (int y = feetY; y <= headY && !inLava; ++y) {
-        for (int x = x0; x <= x1 && !inLava; ++x) {
-            for (int z = z0; z <= z1 && !inLava; ++z) {
-                if (world_.blockAt(x, y, z).id == lava) inLava = true;
-            }
-        }
-    }
-    if (inLava) {
-        player_.damage(kLavaDamagePerSec * dt);
-    }
+    // (Lava environmental damage was removed with the worldgen overhaul — the flat
+    // world has no lava.)
 
     // Death -> respawn at the world spawn with full health (player save comes later).
     if (player_.isDead()) {
@@ -907,162 +815,6 @@ void App::clickEquipSlot(int slotIndex) {
     applyEquipmentStats();
 }
 
-void App::seedLiquid(int x, int y, int z) {
-    if (liquidQueue_.size() > 12000) return; // hard cap: never let the queue run away
-    liquidQueue_.push_back({x, y, z});
-    liquidQueue_.push_back({x + 1, y, z});
-    liquidQueue_.push_back({x - 1, y, z});
-    liquidQueue_.push_back({x, y + 1, z});
-    liquidQueue_.push_back({x, y - 1, z});
-    liquidQueue_.push_back({x, y, z + 1});
-    liquidQueue_.push_back({x, y, z - 1});
-}
-
-void App::tickLiquids() {
-    if (liquidQueue_.empty()) {
-        return;
-    }
-    const uint16_t water = world_.registry().idByName("water");
-    const uint16_t lava  = world_.registry().idByName("lava");
-    const uint16_t stone = world_.registry().idByName("stone");
-    auto isLiquid = [&](uint16_t id) { return id == water || id == lava; };
-
-    // Mutating the world: sync with the streaming workers exactly like editBlocks,
-    // but never block on an in-flight relight — just skip this tick; flow resumes at
-    // the next 0.2s tick (REVIEW R3).
-    if (!tryPrepareWorldMutation()) {
-        return;
-    }
-
-    // Collect this tick's fills and apply them in ONE batched relight (see
-    // World::setBlocksBatch) — so the whole tick costs a single light flood, not
-    // one per fill. metadata is the liquid level: 0 = full source, rising to
-    // kMaxLevel at the thin spreading edge (where it stops).
-    // world.yaml `liquids:` tuning (REVIEW R7).
-    const int kMaxFills = world_.config().liquidMaxFills; // cells filled per tick (one relight)
-    const int kScan     = world_.config().liquidScan;     // blockAt reads per tick (drains dead cells)
-    // How far a liquid spreads from a source before the thin edge stops (each ring
-    // out is +1 level). Kept small: every extra ring is more cells to fill AND a
-    // larger remesh every tick while it spreads — the big puddles were frying the
-    // frame rate, and a falling stream re-sources to 0 so each landing spreads this
-    // far again. 3 = a ~7-wide puddle.
-    const int kMaxLevel = world_.config().liquidMaxLevel;
-    std::vector<std::pair<glm::ivec3, Block>> edits;
-    // Cells filled THIS tick must spread on the NEXT tick, not this one: the edits
-    // aren't applied to the world until the batch at the end, so re-reading a
-    // just-filled cell now returns air and it would be dropped (the bug that made
-    // flow stop after one ring). Collect them here and append after the batch.
-    std::deque<glm::ivec3> next;
-
-    auto pending = [&](int x, int y, int z) {
-        for (const auto& e : edits) {
-            if (e.first.x == x && e.first.y == y && e.first.z == z) return true;
-        }
-        return false;
-    };
-
-    int fills = 0, scans = 0;
-    while (!liquidQueue_.empty() && fills < kMaxFills && scans < kScan) {
-        const glm::ivec3 c = liquidQueue_.front();
-        liquidQueue_.pop_front();
-        ++scans;
-        const Block b = world_.blockAt(c.x, c.y, c.z);
-        if (!isLiquid(b.id)) {
-            continue; // emptied / changed since it was queued (cheap skip)
-        }
-        const uint16_t lid   = b.id;
-        const int      level = b.metadata;
-
-        // Water <-> lava contact: the lava cell turns to STONE (user: always stone,
-        // no obsidian). Scan the six neighbours; convert whichever cell is lava.
-        {
-            const int ndx[6] = {1, -1, 0, 0, 0, 0};
-            const int ndy[6] = {0, 0, 1, -1, 0, 0};
-            const int ndz[6] = {0, 0, 0, 0, 1, -1};
-            auto convertToStone = [&](int x, int y, int z) {
-                if (pending(x, y, z)) return; // already edited this tick
-                edits.push_back({glm::ivec3{x, y, z}, Block{stone, 0}});
-                ++fills; // count toward the per-tick cap so a big contact spreads over ticks
-            };
-            bool becameStone = false;
-            for (int k = 0; k < 6; ++k) {
-                const int nx = c.x + ndx[k], ny = c.y + ndy[k], nz = c.z + ndz[k];
-                const uint16_t nid = world_.blockAt(nx, ny, nz).id;
-                if (lid == lava && nid == water) {
-                    convertToStone(c.x, c.y, c.z); // this lava solidifies
-                    becameStone = true;
-                    break;
-                }
-                if (lid == water && nid == lava) {
-                    convertToStone(nx, ny, nz);    // the touched lava solidifies
-                }
-            }
-            if (becameStone) continue; // this cell is stone now — it no longer flows
-        }
-
-        // Infinite water source: a FLOWING water cell (level > 0) with >=2 horizontal
-        // SOURCE-water neighbours becomes a source itself (Minecraft rule). So a 2x2
-        // pool turns all-source and a hole between two sources refills permanently.
-        if (lid == water && level > 0) {
-            const int hx[4] = {1, -1, 0, 0};
-            const int hz[4] = {0, 0, 1, -1};
-            int sourceNeighbours = 0;
-            for (int k = 0; k < 4; ++k) {
-                const Block n = world_.blockAt(c.x + hx[k], c.y, c.z + hz[k]);
-                if (n.id == water && n.metadata == 0) ++sourceNeighbours;
-            }
-            if (sourceNeighbours >= 2 && !pending(c.x, c.y, c.z)) {
-                edits.push_back({c, Block{water, 0}}); // promote to a source
-                if (next.size() < 12000) next.push_back(c); // spreads as a source next tick
-                ++fills;
-                continue;
-            }
-        }
-
-        auto fill = [&](int x, int y, int z, int nl) {
-            if (world_.blockAt(x, y, z).id != 0 || pending(x, y, z)) {
-                return; // occupied, or already filled earlier this tick
-            }
-            edits.push_back({glm::ivec3{x, y, z}, Block{lid, static_cast<uint8_t>(nl)}});
-            if (next.size() < 12000) {
-                next.push_back({x, y, z}); // spreads on the NEXT tick (after the batch applies)
-            }
-            ++fills;
-        };
-
-        // Liquid prefers to fall; a falling stream re-sources to full (level 0) so
-        // it spreads at full strength wherever it lands. On a floor it spreads
-        // thinner (level+1) until it reaches the thin edge (kMaxLevel), then stops.
-        if (world_.blockAt(c.x, c.y - 1, c.z).id == 0) {
-            fill(c.x, c.y - 1, c.z, 0);
-        } else if (level < kMaxLevel) {
-            fill(c.x + 1, c.y, c.z, level + 1);
-            fill(c.x - 1, c.y, c.z, level + 1);
-            fill(c.x, c.y, c.z + 1, level + 1);
-            fill(c.x, c.y, c.z - 1, level + 1);
-            // Didn't finish all four under the fill cap? Re-queue so it resumes.
-            if (fills >= kMaxFills) {
-                liquidQueue_.push_back(c);
-            }
-        }
-    }
-
-    // Hand this tick's freshly-filled cells to the main queue now that the batch
-    // below applies them to the world — they spread on the next tick.
-    for (const glm::ivec3& c : next) {
-        liquidQueue_.push_back(c);
-    }
-
-    if (!edits.empty()) {
-        const std::vector<glm::ivec3> dirty = world_.setBlocksBatch(edits); // one relight
-        // Flow remeshes go through the async streaming path (applied by streamPump +
-        // recordPendingUploads, deferred-buffer retire) instead of remeshChunks. The
-        // old synchronous path did a full vkDeviceWaitIdle every 0.2s tick while water
-        // spread — the remaining flow-time stutter. The next tick's streamBarrier()
-        // (top of this fn) keeps worker reads ordered before the next mutation.
-        worldRenderer_.streamRemesh(dirty);
-    }
-}
 
 void App::streamWindow() {
     // Advance the streamed world one step toward the player each frame. This is the
@@ -1154,6 +906,17 @@ void App::streamWindow() {
         const bool teleport = need && (std::abs(targetX - org.x) >= cnt.x ||
                                        std::abs(targetZ - org.z) >= cnt.z);
 
+        // The window may have fallen behind the player (the gate stays closed while a
+        // relight/mesh of the previous column is still in flight). We let it trail
+        // freely — EXCEPT when the player is within kWindowEdgeSafetyChunks of the
+        // leading edge: past that they would leave the loaded window. `lag` is how many
+        // columns the origin still has to advance to recenter; lag == viewR means the
+        // player has reached the edge. Force a (blocking) load when that close — rare,
+        // only when out-running generation. This replaces the old per-frame starve
+        // counter that fired during normal play and caused the ~115ms streaming hitch.
+        const int lag = std::max(std::abs(targetX - org.x), std::abs(targetZ - org.z));
+        const bool forceLoad = need && lag >= std::max(1, viewR - kWindowEdgeSafetyChunks);
+
         if (teleport) {
             // Nothing in the window is reusable — take the synchronous full-regen path
             // (rare, inherently a load). recenter() regenerates EVERY column (touching
@@ -1164,16 +927,12 @@ void App::streamWindow() {
             pregenQueue_.clear();
             pregenRetired_.clear();
             pregenDir_ = 0;
-            const bool gateOpen =
-                !relightFuture_.valid() && worldRenderer_.streamWorkersIdle();
-            if (gateOpen ||
-                ++windowStepStarveFrames_ >= kMaxWindowStepStarveFrames) {
-                windowStepStarveFrames_ = 0;
-                forceDrainForStep();
-                std::vector<glm::ivec4> boxes;
-                std::vector<glm::ivec3> dirty = world_.recenter(pcx, pcz, boxes);
-                launchRelight(std::move(boxes), std::move(dirty));
-            }
+            // A teleport / huge jump is a genuine load (nothing in the window is
+            // reusable): drain and regenerate the whole window now.
+            forceDrainForStep();
+            std::vector<glm::ivec4> boxes;
+            std::vector<glm::ivec3> dirty = world_.recenter(pcx, pcz, boxes);
+            launchRelight(std::move(boxes), std::move(dirty));
         } else {
             // A turn invalidates the staged strips (they step along the old axis/dir):
             // drop them and rebuild for the new direction.
@@ -1191,9 +950,10 @@ void App::streamWindow() {
                     std::future_status::ready) {
                 const bool gateOpen =
                     !relightFuture_.valid() && worldRenderer_.streamWorkersIdle();
-                if (gateOpen ||
-                    ++windowStepStarveFrames_ >= kMaxWindowStepStarveFrames) {
-                    windowStepStarveFrames_ = 0;
+                // Step when the gate is open (no relight/mesh in flight — the common
+                // case, no frame cost) OR when the window has fallen to the edge and a
+                // load is forced. Otherwise wait: the frame is never blocked here.
+                if (gateOpen || forceLoad) {
                     // VG_STREAM_TIME: isolate the synchronous main-thread cost of a
                     // window step (worker drain + strip apply) — the heavy relight +
                     // remesh are off-thread/budget-spread, so this is what a boundary
@@ -1224,10 +984,27 @@ void App::streamWindow() {
                             return std::chrono::duration<double, std::milli>(b - a).count();
                         };
                         std::printf("[stream] step %s: drain %.2fms apply %.2fms total %.2fms\n",
-                                    gateOpen ? "gate" : "STARVE", ms(t0, t1), ms(t1, t2),
+                                    gateOpen ? "gate" : "LOAD", ms(t0, t1), ms(t1, t2),
                                     ms(t0, t2));
                     }
                 }
+            } else if (forceLoad) {
+                // forceLoad guarantees a step when the player reaches the window edge,
+                // but the cheap path above also requires a READY pregen strip. When the
+                // player has out-run pregen (queue empty or front still generating) the
+                // strip path would skip and the player could leave the loaded window
+                // (collision/edits then query air). Fall back to a blocking synchronous
+                // catch-up — recenter() steps column-by-column all the way to the player,
+                // regenerating entering columns inline. Rare and a genuine load, like the
+                // teleport path; safe because forceDrainForStep() drains relight+workers
+                // before the mutation. (Also the escape hatch for sustained worker-busy
+                // starvation, e.g. a large ongoing liquid flow holding the gate closed.)
+                retireQueue();
+                pregenDir_ = 0;
+                forceDrainForStep();
+                std::vector<glm::ivec4> boxes;
+                std::vector<glm::ivec3> dirty = world_.recenter(pcx, pcz, boxes);
+                launchRelight(std::move(boxes), std::move(dirty));
             }
 
             // Replenish up to kPregenAhead along the current travel axis. Re-read the
@@ -1248,9 +1025,6 @@ void App::streamWindow() {
                 }
             }
 
-            if (!need) {
-                windowStepStarveFrames_ = 0; // no step pending — not starved
-            }
         }
     } else if (world_.needsRecenter(pcx, pcz)) {
         // Synchronous: generate, relight, and enqueue on the main thread.
@@ -1740,34 +1514,6 @@ void App::run(long maxFrames, const std::string& screenshotPath) {
                 std::remove_if(damageNumbers_.begin(), damageNumbers_.end(),
                                [](const FloatText& d) { return d.age > 1.1f; }),
                 damageNumbers_.end());
-            // Lava embers: every ~0.12s probe a small region near the player for an
-            // exposed lava surface and pop a few rising sparks off one of them.
-            emberTimer_ += dt;
-            if (emberTimer_ >= 0.12f) {
-                emberTimer_ = 0.0f;
-                uint16_t lavaId = 0;
-                try { lavaId = world_.registry().idByName("lava"); } catch (...) {}
-                if (lavaId != 0) {
-                    const glm::ivec3 fp = glm::ivec3(glm::floor(player_.feetPosition()));
-                    std::vector<glm::ivec3> spots;
-                    for (int dx = -6; dx <= 6; ++dx)
-                        for (int dz = -6; dz <= 6; ++dz)
-                            for (int dy = -2; dy <= 2; ++dy) {
-                                const int x = fp.x + dx, y = fp.y + dy, z = fp.z + dz;
-                                if (world_.blockAt(x, y, z).id == lavaId &&
-                                    world_.blockAt(x, y + 1, z).id == 0) {
-                                    spots.push_back({x, y + 1, z});
-                                }
-                            }
-                    if (!spots.empty()) {
-                        const glm::ivec3& s = spots[emberCounter_++ % spots.size()];
-                        uint32_t elayer = 0;
-                        try { elayer = world_.registry().textureLayer(emberEffect_.texture); } catch (...) {}
-                        particles_.spawnEffect(emberEffect_,
-                                               glm::vec3(s) + glm::vec3(0.5f, 0.1f, 0.5f), elayer);
-                    }
-                }
-            }
             entityAnimTime_ += dt; // drive the test biped's walk cycle
             // Dropped-item entities: fall, magnetise to the player, walk-over pickup
             // (rendered as little spinning block cubes by the EntityRenderer pass).
@@ -1777,23 +1523,27 @@ void App::run(long maxFrames, const std::string& screenshotPath) {
             critters_.update(dt, [this](int x, int y, int z) { return world_.isSolid(x, y, z); });
             // Block-break chip particles: gravity + settle, age out.
             particles_.update(dt, [this](int x, int y, int z) { return world_.isSolid(x, y, z); });
-            // Liquid flow: drain a budget of the flow queue a few times a second.
-            liquidTimer_ += dt;
-            if (liquidTimer_ >= 0.20f) {
-                liquidTimer_ = 0.0f;
-                tickLiquids();
-            }
+            // VG_UPDATE_TIME: attribute per-frame update() spikes to the streaming
+            // sub-phases (window step / mesh upload pump / far-LOD rebuild). Prints any
+            // call over 4ms so an occasional frame stretch can be pinned to its source.
+            // Inert unless the env var is set.
+            static const bool kUpdateTime = std::getenv("VG_UPDATE_TIME") != nullptr;
+            auto timed = [](const char* tag, auto&& fn) {
+                if (!kUpdateTime) { fn(); return; }
+                const auto a = std::chrono::steady_clock::now();
+                fn();
+                const double ms = std::chrono::duration<double, std::milli>(
+                    std::chrono::steady_clock::now() - a).count();
+                if (ms > 4.0) std::printf("[update] %s %.2fms\n", tag, ms);
+            };
             // Stream chunks so the loaded window follows the player (the pregen /
             // relight futures + busy-gate; invariants stated on App::streamWindow).
-            streamWindow();
+            timed("streamWindow", [&] { streamWindow(); });
             // Apply a slice of streamed meshes each frame so a freshly streamed-in
             // edge melts in over several frames; a small budget keeps the per-frame
             // upload (buffer creation) under the frame budget instead of spiking.
             // Budget is a world.yaml stream_tuning knob (REVIEW R7).
-            worldRenderer_.streamPump(world_.config().streamPumpBudget);
-            // Far-terrain LOD shell: rebuild the coarse heightmap beyond the window
-            // when the player crosses a base cell (cheap, throttled internally).
-            farTerrain_.update(world_, player_.camera().position);
+            timed("streamPump", [&] { worldRenderer_.streamPump(world_.config().streamPumpBudget); });
             dayNight_.advance(dt);     // the sun keeps moving while playing
             clouds_.update(dt, dayNight_); // weather drifts with it
         }
@@ -1824,15 +1574,8 @@ void App::run(long maxFrames, const std::string& screenshotPath) {
                     const glm::vec3 j(std::sin(a), std::cos(a * 1.7f), std::sin(a * 0.7f));
                     view = glm::translate(glm::mat4(1.0f), j * (shakeMag_ * 0.05f)) * view;
                 }
-                // Push the far clip plane out to cover the LOD shell (its diagonal
-                // corners reach ~1.5x its Chebyshev extent). Near terrain stays
-                // well within float-depth precision, and the depth-based fog uses
-                // this same proj so it stays consistent.
-                float farPlane = cam.farZ;
-                if (farTerrain_.enabled()) {
-                    const float reach = farTerrain_.outerExtentBlocks(world_) * 1.5f + 48.0f;
-                    farPlane = std::max(farPlane, reach);
-                }
+                // The depth-based fog uses this same proj so it stays consistent.
+                const float farPlane = cam.farZ;
                 glm::mat4 proj = glm::perspective(glm::radians(cam.fovDegrees), aspect,
                                                   cam.nearZ, farPlane);
                 // Reversed-Z: remap clip depth [0,1] -> [1,0] (near->1, far->0) so the
@@ -1877,16 +1620,6 @@ void App::run(long maxFrames, const std::string& screenshotPath) {
                                           glm::clamp(sky.skyIntensity * 1.3f, 0.0f, 1.0f));
                 haze = glm::mix(haze, sky.sunsetColor, sky.sunsetAmount * 0.5f);
                 if (fogHazeTuned_) haze = fogHaze_; // tuning panel override
-                // Far-terrain LOD shell first (background): the coarse distant ground
-                // + tree impostors beyond the voxel window. Drawn before the near
-                // chunks so they occlude it at the seam (it also sits a touch lower —
-                // yBias). Its outer ~45% dissolves into `haze` so the edge isn't hard.
-                const float farReach = farTerrain_.enabled()
-                    ? static_cast<float>(farTerrain_.outerExtentBlocks(world_)) : 0.0f;
-                farTerrain_.record(cmd, frameIndex, extent, view, proj,
-                                   glm::vec4(sky.lightDir, ambient),
-                                   glm::vec4(lightCol, intensity),
-                                   cam.position, haze, farReach * 0.55f, farReach);
                 // Held light: if the selected hotbar item is an emitter (a lit
                 // torch, glowstone, ...), cast a dynamic point light from the eye
                 // that travels with the player. Lit per-fragment in the chunk
@@ -2097,14 +1830,12 @@ void App::run(long maxFrames, const std::string& screenshotPath) {
                                        fogOn * fogGroundMul_ * 0.0028f * fogAmt, // ground fog
                                        72.0f,                               // fog top Y
                                        fogMax_);                            // max fog
-                // Underwater (issue #13A): when the camera eye sits inside a water
-                // block, drown the view in blue murk via the composite pass.
-                const uint16_t waterId = world_.registry().idByName("water");
+                // Underwater murk is gone with the worldgen overhaul — the flat world
+                // has no water, so the view is never submerged.
+                fog.submerged = 0.0f;
                 const int eyeX = static_cast<int>(std::floor(cam.position.x));
                 const int eyeY = static_cast<int>(std::floor(cam.position.y));
                 const int eyeZ = static_cast<int>(std::floor(cam.position.z));
-                fog.submerged =
-                    (world_.blockAt(eyeX, eyeY, eyeZ).id == waterId) ? 1.0f : 0.0f;
                 // Low-light grain: static creeps in only when the player actually
                 // stands in darkness, and any light (a torch's block-light, or
                 // daylight reaching the spot) eliminates it. Brightness at the eye =

@@ -237,13 +237,9 @@ private:
     // Resolves a tintable block at chunk-local (x,z) to its biome vegetation tint.
     [[nodiscard]] ChunkMesher::TintSampler makeTintSampler(int cx, int cy, int cz) const;
 
-    // The single chunk-mesh chokepoint every build path funnels through: greedy
-    // meshing normally, or (VG_SURFACENETS=1) a Surface Nets mesh of the analytic
-    // terrain density (docs/WORLDGEN.md Layer 2) — an experimental smooth-terrain
-    // preview. Both only READ the world, so this is safe on the worker pool.
+    // The single chunk-mesh chokepoint every build path funnels through (greedy
+    // meshing). Only READS the world, so this is safe on the worker pool.
     [[nodiscard]] MeshData meshChunkData(int cx, int cy, int cz) const;
-    // Build a chunk mesh with Surface Nets over the generator's density field.
-    [[nodiscard]] MeshData buildSurfaceNetsMesh(int cx, int cy, int cz) const;
 
     [[nodiscard]] int chunkIndex(int cx, int cy, int cz) const;
     void createUniformBuffers(uint32_t n);
@@ -254,8 +250,6 @@ private:
 
     VulkanContext& ctx_;
     const World&   world_;
-    bool           surfaceNets_ = false; // VG_SURFACENETS: experimental Layer-2 mesher
-    int            landformMode_ = 0;    // VG_LANDFORM: 0 terrain, 1 pillars, 2 arch (SN demo)
 
     std::unique_ptr<TextureArray> textures_;
     std::unique_ptr<Pipeline>     pipeline_;            // opaque terrain

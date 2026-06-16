@@ -1,0 +1,151 @@
+[logic] PASS  worley F2-F1/manhattan: pure (bit-identical across builds)
+[logic] PASS  worley F2-F1/manhattan: output bounded to ~[-1,1]
+[logic] PASS  ridged multifractal: pure (bit-identical across builds)
+[logic] PASS  ridged multifractal: output bounded to ~[-1,1]
+[logic] PASS  hybrid multifractal: pure (bit-identical across builds)
+[logic] PASS  hybrid multifractal: output bounded to ~[-1,1]
+[logic] PASS  domain-warped perlin: pure (bit-identical across builds)
+[logic] PASS  domain-warped perlin: output bounded to ~[-1,1]
+[logic] PASS  domain warp changes the field (not a no-op)
+[logic] PASS  identity transfer is byte-identical (no regression)
+[logic] PASS  terraced stack stays bounded
+[logic] PASS  crisp terracing snaps the field onto discrete plateaus
+[logic] PASS  derivative-attenuated fbm: pure (bit-identical across builds)
+[logic] PASS  derivative-attenuated fbm: output bounded to ~[-1,1]
+[logic] PASS  derivative perlin() value == scalar perlin()
+[logic] PASS  analytic gradient matches central differences
+[logic] PASS  stone by hand = 1.5s
+[logic] PASS  stone with pickaxe = 0.3s (5x)
+[logic] PASS  sword does NOT speed stone
+[logic] PASS  pickaxe doesn't speed dirt (no preferred tool)
+[logic] PASS  bush breaks instantly
+[logic] PASS  pickaxe is a Pickaxe tool
+[logic] PASS  sword is a Sword tool
+[logic] PASS  stone is not a tool
+[logic] PASS  stone is placeable
+[logic] PASS  pickaxe is NOT placeable
+[logic] PASS  sword is NOT placeable
+[logic] PASS  torch is placeable
+[logic] PASS  torch emits block light
+[logic] PASS  torch is walk-through
+[logic] PASS  stone blocks sky light fully (opaque default)
+[logic] PASS  air passes sky light
+[logic] PASS  leaves dim the sky a little
+[logic] PASS  trunk dims the sky below it
+[logic] PASS  bush casts a faint shadow
+[logic] PASS  trunk shadows the sky yet stays non-opaque (decoupled from meshing)
+[logic] PASS  leaves shadow the sky yet stay non-opaque (decoupled from meshing)
+[logic] PASS  dirt drops by hand (no tier gate)
+[logic] PASS  stone needs a pickaxe (no bare-hand drop)
+[logic] PASS  wood pickaxe harvests stone
+[logic] PASS  stone pickaxe harvests stone
+[logic] PASS  stone pickaxe is tier 2
+[logic] PASS  bare hand is tier 0
+[logic] PASS  no fall = no damage
+[logic] PASS  a 2-3 block fall is safe
+[logic] PASS  a big fall hurts
+[logic] PASS  higher fall = more damage
+[logic] PASS  damage subtracts HP
+[logic] PASS  heal clamps at max
+[logic] PASS  lethal damage -> dead, HP floored at 0
+[logic] PASS  invulnerable ignores damage
+[logic] PASS  buoyancy: sinks far slower in water than air
+[logic] PASS  player reports submerged in water
+[logic] PASS  swim up: holding jump rises in water
+[logic] PASS  breath drains to 0 with head underwater
+[logic] PASS  drowning deals damage once breath is gone
+[logic] PASS  out of water: full breath, no drown damage
+[logic] PASS  sneak walks much slower than a normal walk
+[logic] PASS  sneak flag set while holding the sneak key
+[logic] PASS  sneak lowers the camera (crouch)
+[logic] PASS  walking off a pillar falls
+[logic] PASS  sneak edge-stop keeps the player on the pillar
+[logic] PASS  skeleton is parent-before-child ordered
+[logic] PASS  joint lookup by name
+[logic] PASS  rest pose places child above root
+[logic] PASS  90deg root spin swings child to -X
+[logic] PASS  slerp midpoint = 45deg
+[logic] PASS  loop wraps t=1.5 -> t=0.5
+[logic] PASS  unanimated channels keep their rest transform
+[logic] PASS  one box bakes to 36 vertices
+[logic] PASS  baked box verts lie within the box bounds
+[logic] PASS  baked normals are unit length
+[logic] PASS  translating a joint moves its baked box
+[logic] PASS  player save parses
+[logic] PASS  player save round-trips all fields
+[logic] PASS  corrupt player save is rejected
+[logic] PASS  recipes.yaml loaded some recipes
+[logic] PASS  found oak_trunk -> planks recipe
+[logic] PASS  empty inventory crafts nothing
+[logic] PASS  can't craft planks with no wood
+[logic] PASS  2 trunks -> planks is craftable
+[logic] PASS  craft consumes input, yields output
+[logic] PASS  one trunk consumed
+[logic] PASS  four planks produced
+[logic] PASS  chests recorded at two positions
+[logic] PASS  chest store parses
+[logic] PASS  chest A contents round-trip
+[logic] PASS  chest B contents round-trip
+[logic] PASS  erased chest is gone
+[logic] PASS  corrupt chest store is rejected
+[logic] PASS  slot 0 is the boots slot
+[logic] PASS  slot 1 is a trinket slot
+[logic] PASS  boots fit the boots slot
+[logic] PASS  a trinket doesn't fit the boots slot
+[logic] PASS  trinket fits a trinket slot
+[logic] PASS  boots don't fit a trinket slot
+[logic] PASS  6 armour = 6% reduction
+[logic] PASS  swift charm = 1.35x speed
+[logic] PASS  life charm = +3 regen
+[logic] PASS  25% armour: 40 damage -> 30 taken
+[logic] PASS  far item is not picked up
+[logic] PASS  item settles on the ground
+[logic] PASS  far item left the inventory empty
+[logic] PASS  no pickup before the delay
+[logic] PASS  nearby item is collected
+[logic] PASS  stone (solid opaque cube) is shapeable
+[logic] PASS  cobblestone is shapeable
+[logic] PASS  foliage is NOT shapeable
+[logic] PASS  hammer is NOT placeable (a held tool)
+[logic] PASS  metadata 0 decodes to Cube
+[logic] PASS  shape+orient packs and unpacks
+[logic] PASS  cube = one full box
+[logic] PASS  bottom slab = lower half
+[logic] PASS  top slab = upper half
+[logic] PASS  stairs = two boxes
+[logic] PASS  Y post = centred full-height column
+[logic] PASS  wall, no neighbours = post only
+[logic] PASS  wall with four connections = post + 4 arms
+[logic] PASS  player rests on a bottom-slab floor at y=0.5
+[logic] PASS  auto-step climbs onto a half-slab while walking
+[logic] PASS  camera eases over an auto-step (lags the instant body pop)
+[logic] PASS  stepped camera converges to true eye height
+[logic] PASS  foliage/relief casts a partial sky shadow (skylight 1..14)
+[logic] PASS  found a shaded region to relight-test
+[logic] PASS  no-op edit preserves sky light (edit relight matches gen-time flood)
+[logic] PASS  found an open-sky air cell to edit-test
+[logic] PASS  placing a sky-blocker relights to match a full recompute
+[logic] PASS  breaking the blocker relights to match a full recompute
+[logic] PASS  placing an emitter relights block light to match full
+[logic] PASS  removing the emitter relights block light to match full
+[logic] PASS  batched tall blocker (multi-chunk shadow) matches full
+[logic] PASS  removing the batched blocker matches full
+[logic] PASS  batched emitters (overlapping cross-chunk glow) match full
+[logic] PASS  removing the batched emitters matches full
+[logic] PASS  bounded recenter sky relight is byte-identical to full height
+[logic] PASS  bbmodel reads its skin filename
+[logic] PASS  bbmodel reads a positive skin resolution
+[logic] PASS  bbmodel outliner group -> a joint
+[logic] PASS  bbmodel elements -> boxes
+[logic] PASS  bbmodel skeleton is parent-ordered
+[logic] PASS  bbmodel group joint parents to root
+[logic] PASS  bbmodel boxes carry per-face UVs
+[logic] PASS  bbmodel per-face UVs are normalised into [0,1]
+[logic] PASS  bbmodel converts Blockbench units to block space
+[logic] PASS  box_uv element -> per-face UV box
+[logic] PASS  box_uv unwraps the top face rect
+[logic] PASS  box_uv gives distinct faces different rects
+[logic] PASS  box_uv rects are normalised into [0,1]
+[logic] PASS  embedded base64 texture is decoded
+[logic] PASS  decoded embedded texture is a real PNG (signature)
+[logic] ALL PASS (0 failure(s))

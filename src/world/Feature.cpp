@@ -1,8 +1,7 @@
 #include "world/Feature.h"
 
 #include "world/BlockRegistry.h"
-#include "world/Noise.h"
-#include "world/NoiseLoad.h"
+#include "utilities/noise/Noise.h"
 
 #include <yaml-cpp/yaml.h>
 
@@ -160,42 +159,15 @@ std::vector<Feature::Op> parseOps(const YAML::Node& ops, const BlockRegistry& re
     return out;
 }
 
-Feature loadOne(const std::string& path, const BlockRegistry& reg,
-                const std::vector<std::string>& biomeNames, uint32_t seed) {
+Feature loadOne(const std::string& path, const BlockRegistry& reg) {
     const YAML::Node root = YAML::LoadFile(path);
     Feature f;
     f.name = root["name"] ? root["name"].as<std::string>()
                           : std::filesystem::path(path).stem().string();
 
-    if (const YAML::Node sc = root["scatter"]) {
-        f.scatter.density = sc["density"] ? sc["density"].as<float>() : 0.2f;
-        f.scatter.spacing = std::max(4, sc["spacing"] ? sc["spacing"].as<int>() : 48);
-        f.scatter.surface = sc["surface"] ? sc["surface"].as<bool>() : true;
-        if (sc["min_elevation"]) f.scatter.minElevation = sc["min_elevation"].as<int>();
-        if (sc["max_elevation"]) f.scatter.maxElevation = sc["max_elevation"].as<int>();
-        if (sc["distribution"] && sc["distribution"].as<std::string>() == "noise")
-            f.scatter.dist = FeatureScatter::Dist::Noise;
-        if (sc["noise_freq"])      f.scatter.noiseFreq   = sc["noise_freq"].as<float>();
-        if (sc["noise_threshold"]) f.scatter.noiseThresh = sc["noise_threshold"].as<float>();
-        if (sc["min_slope"])  f.scatter.minSlope  = sc["min_slope"].as<int>();
-        if (sc["max_slope"])  f.scatter.maxSlope  = sc["max_slope"].as<int>();
-        if (sc["on_water"])   f.scatter.onWater   = sc["on_water"].as<bool>();
-        if (sc["near_water"]) f.scatter.nearWater = sc["near_water"].as<int>();
-        if (sc["mask"]) {
-            // Salt the mask noise by the world seed + feature name so each feature's
-            // mask pattern is distinct and seed-dependent (like the legacy noise dist).
-            uint32_t h = seed;
-            for (char c : f.name) h = h * 131u + static_cast<unsigned char>(c);
-            f.scatter.mask = loadMask(sc["mask"], h ^ 0x4d51e9u);
-        }
-        if (sc["biomes"] && sc["biomes"].IsSequence()) {
-            for (const auto& b : sc["biomes"]) {
-                const std::string bn = b.as<std::string>();
-                for (size_t i = 0; i < biomeNames.size(); ++i)
-                    if (biomeNames[i] == bn) { f.scatter.biomeIds.push_back(static_cast<int>(i)); break; }
-            }
-        }
-    }
+    // NOTE: a feature's `scatter:` block (density/spacing/biome gates/masks) is no
+    // longer parsed — automatic spawning was removed with the worldgen overhaul. A
+    // feature is now just its voxel-op data (size/anchor/ops), placed explicitly.
 
     if (const YAML::Node s = root["size"]; s && s.IsSequence() && s.size() >= 3)
         f.size = {std::max(1, s[0].as<int>()), std::max(1, s[1].as<int>()), std::max(1, s[2].as<int>())};
@@ -361,8 +333,7 @@ Feature::Cell Feature::at(uint32_t originSeed, int lx, int ly, int lz,
     return result;
 }
 
-FeatureSet::FeatureSet(const std::string& dir, const BlockRegistry& registry,
-                       const std::vector<std::string>& biomeNames, uint32_t seed) {
+FeatureSet::FeatureSet(const std::string& dir, const BlockRegistry& registry) {
     namespace fs = std::filesystem;
     std::error_code ec;
     if (!fs::is_directory(dir, ec)) return; // no dir -> features off
@@ -377,7 +348,7 @@ FeatureSet::FeatureSet(const std::string& dir, const BlockRegistry& registry,
     std::sort(files.begin(), files.end()); // deterministic order
     for (const auto& f : files) {
         try {
-            features_.push_back(loadOne(f.string(), registry, biomeNames, seed));
+            features_.push_back(loadOne(f.string(), registry));
         } catch (const std::exception& e) {
             throw std::runtime_error("Feature '" + f.filename().string() + "': " + e.what());
         }

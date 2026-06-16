@@ -89,20 +89,6 @@
   textures:
     all: stone.block.png
 
-- name: sand
-  hardness: 0.5
-  solid: true
-  opaque: true
-  textures:
-    all: sand.block.png
-
-- name: gravel
-  hardness: 0.6
-  solid: true
-  opaque: true
-  textures:
-    all: gravel.block.png
-
 - name: cobblestone
   hardness: 2.0
   preferred_tool: pickaxe
@@ -129,18 +115,6 @@
     top: oak_log_top.block.png
     bottom: oak_log_top.block.png
     side: oak_log_side.block.png
-
-# Emits light: `light` (0..15) seeds the world's block-light flood fill, so this
-# glows in caves and at night independently of the sky.
-- name: glowstone
-  hardness: 0.3
-  preferred_tool: pickaxe
-  solid: true
-  opaque: true
-  light: 14
-  light_color: [0.75, 0.35, 1.0]   # cool violet glow (R<G<B); raise R / drop B for warm
-  textures:
-    all: glowstone.block.png
 
 # --- Trees -------------------------------------------------------------------
 # A tree trunk: rendered as a centred 8/16-px-wide box (render: model), not a full
@@ -186,47 +160,6 @@
   textures:
     all: bush.block.png
 
-# --- Liquids (water & lava) --------------------------------------------------
-# Not solid, so you swim/fall through. Water is NON-opaque: the mesher draws it in
-# a separate translucent pass (so the seabed shows through), and — crucially —
-# non-opaque lets the sky-light flood pass DOWN through it, so submerged terrain
-# is lit instead of pitch black. Lava stays opaque (you can't see through molten
-# rock) and emits light (glows in caves / at night via the block-light flood).
-- name: water
-  solid: false
-  opaque: false
-  textures:
-    all: water.block.png
-- name: lava
-  solid: false
-  opaque: true
-  light: 13
-  light_color: [1.00, 0.38, 0.10]   # deep molten orange-red
-  textures:
-    all: lava.block.png
-
-# --- Ores --------------------------------------------------------------------
-# Iron ore: stone shot through with mineral flecks. The generator scatters it in
-# veins through the stone (assets/world.yaml `ores`). Iron is the only ore.
-- name: iron_ore
-  hardness: 3.0
-  preferred_tool: pickaxe
-  harvest_level: 2
-  solid: true
-  opaque: true
-  textures:
-    all: iron_ore.block.png
-
-# --- Biome surface ------------------------------------------------------------
-# Snow: the cold-biome / above-snow-line surface coat (see assets/biomes.yaml).
-# Appended at the end so existing block ids (and saved chunks) don't shift.
-- name: snow
-  hardness: 0.1
-  solid: true
-  opaque: true
-  textures:
-    all: snow.block.png
-
 # Tools and equipment (pickaxe, sword, hammer, charms, boots) are NOT blocks —
 # they live in assets/items.yaml, loaded right after this file as a continuation
 # of the same id space. This file is just the world's blocks.
@@ -256,36 +189,6 @@
   textures:
     all: torch.block.png
 
-# --- Flora expansion: ground plants (ISSUES #13F) -----------------------------
-# Cross-rendered sprite plants (walk through, break instantly like other foliage)
-# scattered by biome in worldgen (World::generateColumn, gated by the biome's
-# `plant:` theme). Non-solid + non-opaque so they don't cull terrain or block
-# light. Appended at the very end so existing block ids / saved chunks don't shift.
-- name: tall_grass
-  hardness: 0.0
-  solid: false
-  opaque: false
-  render: cross
-- name: fern
-  hardness: 0.0
-  solid: false
-  opaque: false
-  render: cross
-- name: flower_red
-  hardness: 0.0
-  solid: false
-  opaque: false
-  render: cross
-- name: flower_yellow
-  hardness: 0.0
-  solid: false
-  opaque: false
-  render: cross
-- name: red_mushroom
-  hardness: 0.0
-  solid: false
-  opaque: false
-  render: cross
 # --- Tree species -------------------------------------------------------------
 # Each species = a trunk (render: model, like oak_trunk) + a leafcube canopy, the
 # same primitives oak uses. World::generateColumn picks the species from the root

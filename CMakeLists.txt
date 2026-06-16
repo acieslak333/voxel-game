@@ -205,8 +205,6 @@ add_shader(composite.vert)
 add_shader(composite.frag)
 add_shader(entity.vert)
 add_shader(entity.frag)
-add_shader(farterrain.vert)
-add_shader(farterrain.frag)
 add_custom_target(shaders DEPENDS ${SPIRV_OUTPUTS})
 
 # -----------------------------------------------------------------------------
@@ -229,13 +227,12 @@ add_executable(voxelgame
     src/render/VulkanUtils.cpp
     src/render/Buffer.cpp
     src/render/GpuAllocator.cpp
-    src/render/SpanAllocator.cpp
+    src/utilities/alloc/SpanAllocator.cpp
     src/render/MeshArena.cpp
     src/render/TextureArray.cpp
     src/render/Pipeline.cpp
     src/render/WorldRenderer.cpp
     src/render/EntityRenderer.cpp
-    src/render/FarTerrainRenderer.cpp
     src/render/OffscreenTarget.cpp
     src/render/CompositeRenderer.cpp
     src/render/SkyRenderer.cpp
@@ -246,15 +243,14 @@ add_executable(voxelgame
     src/render/Screenshot.cpp
     src/world/BlockRegistry.cpp
     src/world/ChunkMesher.cpp
-    src/world/Noise.cpp
+    src/utilities/noise/FastNoise.cpp
+    src/utilities/noise/Noise.cpp
     src/world/Feature.cpp
-    src/world/NoiseMask.cpp
-    src/world/NoiseStack.cpp
+    src/utilities/noise/NoiseMask.cpp
+    src/utilities/noise/NoiseStack.cpp
     src/world/Raycast.cpp
     src/world/Shape.cpp
     src/world/Structure.cpp
-    src/world/SurfaceNets.cpp
-    src/world/TerrainGenerator.cpp
     src/world/World.cpp
     src/world/WorldConfig.cpp
     src/player/Camera.cpp
@@ -306,6 +302,17 @@ if(MSVC)
     target_compile_options(voxelgame PRIVATE /W4 /permissive-)
 else()
     target_compile_options(voxelgame PRIVATE -Wall -Wextra -Wno-unused-parameter)
+endif()
+
+# Vendored FastNoise (charlesangus/FastNoise, MIT) is third-party: silence its own
+# warnings (int->uchar narrowing, maybe-uninitialised) so the project's /W4 output
+# stays meaningful. Our own noise adapter (Noise.cpp) keeps full warnings.
+if(MSVC)
+    set_source_files_properties(src/utilities/noise/FastNoise.cpp
+        PROPERTIES COMPILE_OPTIONS "/w")
+else()
+    set_source_files_properties(src/utilities/noise/FastNoise.cpp
+        PROPERTIES COMPILE_OPTIONS "-w")
 endif()
 
 # Enable Vulkan validation layers automatically in Debug builds.

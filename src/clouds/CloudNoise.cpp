@@ -2,6 +2,7 @@
 
 #include "render/Buffer.h"
 #include "render/VulkanContext.h"
+#include "utilities/noise/FastNoise.h"
 
 #include <glm/glm.hpp>
 
@@ -11,73 +12,68 @@
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
+#include <unordered_map>
 
 namespace vg {
 
 namespace {
 
-// Deterministic integer hash (wrapped to the noise period) -> [0,1).
-float hash3(int x, int y, int z, int period, uint32_t seed) {
-    auto wrap = [period](int v) { return ((v % period) + period) % period; };
-    uint32_t h = seed;
-    h ^= static_cast<uint32_t>(wrap(x)) * 0x8da6b343u;
-    h ^= static_cast<uint32_t>(wrap(y)) * 0xd8163841u;
-    h ^= static_cast<uint32_t>(wrap(z)) * 0xcb1ab31fu;
-    h = (h ^ (h >> 13)) * 0x9e3779b1u;
-    h ^= h >> 16;
-    return static_cast<float>(h & 0x00FFFFFFu) / static_cast<float>(0x01000000);
+// FastNoise (charlesangus/FastNoise, MIT — see utilities/noise/FastNoise.LICENSE)
+// is the project's noise engine. Clouds need their two 3D fields to TILE so the
+// textures repeat seamlessly under a REPEAT sampler; FastNoise isn't periodic, so
+// tileable() recovers exact wrap-around by trilinearly blending a sample with its
+// period-shifted copies (the 8 cube corners). At each face the opposite copy reaches
+// full weight, so the seam cancels — the standard tileable-noise construction.
+
+// Lazily-built, frequency-1 FastNoise per seed (cellular set to squared-F1 distance,
+// which leaves GetPerlin unaffected). generate() is a one-off, disk-cached, and
+// single-threaded, so the cache needs no locking.
+FastNoise& noiseFor(uint32_t seed) {
+    static std::unordered_map<uint32_t, FastNoise> cache;
+    auto it = cache.find(seed);
+    if (it == cache.end()) {
+        FastNoise f;
+        f.SetSeed(static_cast<int>(seed));
+        f.SetFrequency(1.0f);
+        f.SetInterp(FastNoise::Quintic);
+        f.SetCellularDistanceFunction(FastNoise::Euclidean);
+        f.SetCellularReturnType(FastNoise::Distance); // squared F1 distance
+        it = cache.emplace(seed, f).first;
+    }
+    return it->second;
 }
 
-// Gradient for tiling Perlin: 12 edge directions picked by hash.
-glm::vec3 gradient(int x, int y, int z, int period, uint32_t seed) {
-    static const glm::vec3 g[12] = {
-        {1, 1, 0},  {-1, 1, 0},  {1, -1, 0}, {-1, -1, 0}, {1, 0, 1},  {-1, 0, 1},
-        {1, 0, -1}, {-1, 0, -1}, {0, 1, 1},  {0, -1, 1},  {0, 1, -1}, {0, -1, -1}};
-    const int i = static_cast<int>(hash3(x, y, z, period, seed) * 12.0f) % 12;
-    return g[i];
-}
-
-float fade(float t) { return t * t * t * (t * (t * 6.0f - 15.0f) + 10.0f); }
-
-// Tiling 3D Perlin noise, period `period` lattice cells over [0, period).
-float perlin(glm::vec3 p, int period, uint32_t seed) {
-    const glm::vec3 pf = glm::floor(p);
-    const glm::vec3 f = p - pf;
-    const int xi = static_cast<int>(pf.x), yi = static_cast<int>(pf.y),
-              zi = static_cast<int>(pf.z);
-    float n[8];
+template <class Sample>
+float tileable(glm::vec3 p, int period, Sample sample) {
+    const float T = static_cast<float>(period);
+    const glm::vec3 q = glm::mod(p, glm::vec3(T)); // fold into [0, T)
+    const glm::vec3 hi = q - glm::vec3(T);         // the period-shifted copy
+    float acc = 0.0f;
     for (int c = 0; c < 8; ++c) {
-        const int dx = c & 1, dy = (c >> 1) & 1, dz = (c >> 2) & 1;
-        const glm::vec3 grad = gradient(xi + dx, yi + dy, zi + dz, period, seed);
-        n[c] = glm::dot(grad, f - glm::vec3(dx, dy, dz));
+        const float sx = (c & 1) ? hi.x : q.x;
+        const float sy = (c & 2) ? hi.y : q.y;
+        const float sz = (c & 4) ? hi.z : q.z;
+        const float wx = (c & 1) ? q.x : (T - q.x);
+        const float wy = (c & 2) ? q.y : (T - q.y);
+        const float wz = (c & 4) ? q.z : (T - q.z);
+        acc += sample(sx, sy, sz) * wx * wy * wz;
     }
-    const float u = fade(f.x), v = fade(f.y), w = fade(f.z);
-    const float x00 = glm::mix(n[0], n[1], u), x10 = glm::mix(n[2], n[3], u);
-    const float x01 = glm::mix(n[4], n[5], u), x11 = glm::mix(n[6], n[7], u);
-    const float y0 = glm::mix(x00, x10, v), y1 = glm::mix(x01, x11, v);
-    return glm::mix(y0, y1, w); // ~[-0.7, 0.7]
+    return acc / (T * T * T);
 }
 
-// Tiling 3D Worley noise (inverted F1): 1 at feature points, 0 far away.
+// Tiling 3D Perlin over `period` lattice cells, ~[-1, 1].
+float perlin(glm::vec3 p, int period, uint32_t seed) {
+    FastNoise& f = noiseFor(seed);
+    return tileable(p, period,
+                    [&](float x, float y, float z) { return f.GetPerlin(x, y, z); });
+}
+
+// Tiling 3D Worley noise (inverted F1): ~1 at feature points, 0 far away.
 float worley(glm::vec3 p, int period, uint32_t seed) {
-    const glm::vec3 pf = glm::floor(p);
-    const int xi = static_cast<int>(pf.x), yi = static_cast<int>(pf.y),
-              zi = static_cast<int>(pf.z);
-    float best = 1e9f;
-    for (int dz = -1; dz <= 1; ++dz) {
-        for (int dy = -1; dy <= 1; ++dy) {
-            for (int dx = -1; dx <= 1; ++dx) {
-                const int cx = xi + dx, cy = yi + dy, cz = zi + dz;
-                const glm::vec3 feature =
-                    glm::vec3(cx, cy, cz) +
-                    glm::vec3(hash3(cx, cy, cz, period, seed),
-                              hash3(cx, cy, cz, period, seed ^ 0x1234567u),
-                              hash3(cx, cy, cz, period, seed ^ 0x89abcdefu));
-                best = std::min(best, glm::dot(p - feature, p - feature));
-            }
-        }
-    }
-    return std::max(0.0f, 1.0f - std::sqrt(best)); // inverted: blobs at features
+    FastNoise& f = noiseFor(seed);
+    return tileable(p, period, [&](float x, float y, float z) {
+        return std::max(0.0f, 1.0f - std::sqrt(f.GetCellular(x, y, z)));
+    });
 }
 
 float remapf(float x, float a, float b, float c, float d) {
@@ -85,7 +81,7 @@ float remapf(float x, float a, float b, float c, float d) {
 }
 
 constexpr uint32_t kCacheMagic   = 0x434C4431u; // "CLD1"
-constexpr uint32_t kCacheVersion = 3u; // bumped: domain-warp + ridged base, 3-oct detail
+constexpr uint32_t kCacheVersion = 4u; // bumped: FastNoise engine (tileable Perlin/cellular)
 
 } // namespace
 

@@ -157,3 +157,39 @@ as each lands.*
   `std::async`. Both gated on `stream_workers > 0`. The main thread still *waits*
   on gen+relight (they mutate shared World state, so they can't be fire-and-forget
   without a bigger async-generation pipeline), but the wait is now Nx/2x shorter.)*
+- [x] Stage 5 — de-gate the window step (kill the forced-drain hitch) *(done.
+  **Problem, measured.** Stage 4 gated a window step on
+  `!relightFuture_.valid() && streamWorkersIdle()`; if that gate stayed closed for
+  30 frames the step force-drained — `relightFuture_.get()` + `streamBarrier()` —
+  and applied anyway (the old REVIEW R5 starve counter). Under fast travel the gate
+  is closed almost every frame (the previous column's relight is still in flight),
+  so the force-drain fired on nearly every step and **blocked the frame ~115–148ms**
+  (`VG_AUTOWALK=120 VG_STREAM_TIME=1`: 68/69 steps `STARVE`). Normal travel (≤8 b/s)
+  never hitched. A per-chunk incremental-lighting rewrite was considered and rejected:
+  a freshly-entering column's light is mostly *necessary* work, so it would not cut
+  the cost — the hitch was the **gating**, not relight cost.
+  **Fix.** `App::streamWindow` no longer force-drains on a frame counter. A step
+  happens only when the gate is open (no frame cost) — otherwise the window simply
+  **trails** the player and catches up at relight throughput (the far-terrain LOD
+  shell covers anything beyond the window). The ONLY blocking load is the genuine
+  out-running case: a lag-based `forceLoad` when the player is within
+  `kWindowEdgeSafetyChunks` (1) of the leading edge — past that they would leave the
+  loaded window (collision/edits query air). `forceLoad` takes the ready pregen strip
+  when available, else falls back to a blocking synchronous `recenter()` catch-up
+  (mirrors the teleport path) so a step ALWAYS happens at the edge — this also bounds
+  any sustained-worker-busy starvation (e.g. a large liquid flow holding the gate
+  closed). The four threading invariants are unchanged: `forceDrainForStep()` still
+  precedes every world mutation, so workers are drained and any relight is joined
+  before the window moves.
+  **Result, measured.** At 26 b/s (fly-sprint, the max reachable in-game speed): 0
+  force-loads, every step is a free gate step (~1ms), no boundary frame spike — the
+  115ms hitch is gone at all real speeds (relight throughput ~6–10 cols/s ≫ the ~1.6
+  cols/s demand at 26 b/s). Beyond ~60 b/s (unreachable in game) the window trails and
+  the edge fallback does occasional bounded loads. New knob: `kWindowEdgeSafetyChunks`
+  (App.h). New diagnostic: `VG_UPDATE_TIME=1` prints any streamWindow/streamPump/
+  farTerrain call over 4ms (used to confirm no residual per-frame streaming spike).)*
+  > Note (discovered during this work, NOT caused by it): the `--selftest` in-process
+  > `h1==h2` check and the relight/`#11 scatter` logictests are **intermittently
+  > flaky** (~1 in 4 runs) — a latent non-determinism in the parallel
+  > (`std::execution::par`) lighting/feature-scatter, aggravated by machine contention.
+  > Pre-existing; orthogonal to streaming. Re-run to confirm green.

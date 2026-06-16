@@ -1,6 +1,6 @@
 #pragma once
 
-#include "world/NoiseStack.h"
+#include "utilities/noise/NoiseStack.h"
 
 #include <cstdint>
 #include <vector>

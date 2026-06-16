@@ -97,60 +97,12 @@ stream_tuning:
   upload_slice: 384
 
 # -----------------------------------------------------------------------------
-#  liquids: water/lava flow budget per 0.2s tick. Bigger spreads look better but
-#  cost more cells filled + a larger remesh every tick while flowing (REVIEW R7).
+#  Generation is now a FIXED FLAT layered world (cobblestone 0-3, stone 4-12,
+#  dirt 13-15, grass at 16) — see World::generateColumnInto. The procedural
+#  terrain/biome pipeline, the feature/structure scatter, ore generation and
+#  liquid flow were all removed, so the old `terrain:`/`island:`/`features:`/
+#  `structures:`/`ores:`/`liquids:` blocks are gone (they're no longer read).
 # -----------------------------------------------------------------------------
-liquids:
-  # Cells a single tick fills before stopping (the whole tick is one light flood).
-  max_fills: 16
-  # Cheap blockAt reads per tick used to drain already-settled queue cells.
-  scan: 4096
-  # Rings a source spreads before the thin edge stops (level 0 source .. max_level
-  # edge). 3 ≈ a 7-wide puddle; raise for wider pools, but each ring is more fills
-  # and a bigger per-tick remesh.
-  max_level: 3
-
-# -----------------------------------------------------------------------------
-#  Terrain SHAPE + surface materials (height, mountains, beaches, biome rings) are
-#  authored in assets/biomes.yaml and driven by vg::TerrainGenerator. The old
-#  `terrain:` (single-noise height/material) and `island:` (radial mask) blocks that
-#  lived here were removed — they were no longer read by generation.
-# -----------------------------------------------------------------------------
-
-# -----------------------------------------------------------------------------
-#  Surface decoration (trees, bushes, ground cover, lanterns, cairns, geodes) is
-#  authored entirely as procedural FEATURES — assets/features/*.yaml, edited in
-#  tools/feature_tool.py. The old built-in `features:` scatter block (lantern_/
-#  cairn_/geode_/tree_/bush_density) was removed; it is no longer read.
-#  NOTE: the biomes.yaml per-biome `trees:`/`tree:` values still drive the
-#  far-terrain LOD tree impostors (far_terrain.trees), not near-chunk geometry.
-# -----------------------------------------------------------------------------
-
-# -----------------------------------------------------------------------------
-#  structures: hand-authored voxel templates (assets/structures/*.yaml) stamped
-#  sparsely on land — wells, boulders, glowing pillars. Candidate origins sit on a
-#  coarse grid: every `spacing` blocks a cell has a `density` chance of rooting one
-#  (jittered within the cell, picked by weight). Seam-safe: each column gathers the
-#  nearby origins whose footprint covers it, so a structure is identical regardless
-#  of chunk load order. density: 0 disables them. Author new ones by dropping a YAML
-#  in assets/structures/ (see the files there for the layer/legend format).
-# -----------------------------------------------------------------------------
-structures:
-  spacing: 80      # average blocks between candidate structure cells
-  # UNIFIED: structures are now features (assets/features/well.yaml, pillar.yaml, ...
-  # as `voxels` ops). density 0 turns off the legacy structure scatter so nothing is
-  # generated twice. Edit them in tools/feature_tool.py like any other feature.
-  density: 0.0     # chance a candidate cell actually roots a structure (0 = off)
-
-# -----------------------------------------------------------------------------
-#  ores: iron replaces stone in small clusters (one roll shared across a 2x2x2
-#  block cell, so it comes in little veins) anywhere below max_y.
-#    density  per-cell probability (0..1). ↑ = more common ore; ↓ = rarer.
-#    max_y    absolute world Y ceiling for ore (relative to sea_level 24 and the
-#             world ceiling). ↑ = ore reaches higher up; scale with height_chunks.
-# -----------------------------------------------------------------------------
-ores:
-  iron: {density: 0.014, max_y: 48}
 
 # NOTE: light falloff (how fast sky/block light dies per spread step) is a
 # player-facing option — it lives in assets/settings.yaml ("skyFalloff" /

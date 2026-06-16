@@ -1,6 +1,6 @@
 #pragma once
 
-#include "world/Noise.h"
+#include "utilities/noise/Noise.h"
 
 #include <algorithm>
 #include <cmath>

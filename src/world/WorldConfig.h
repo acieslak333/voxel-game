@@ -1,7 +1,5 @@
 #pragma once
 
-#include "world/NoiseMask.h"
-
 #include <cstdint>
 #include <string>
 
@@ -75,39 +73,9 @@ struct WorldConfig {
     int streamUploadSlice = 384;// chunks per GPU submit in the startup batch upload
                                 // (bounded by Vulkan's maxMemoryAllocationCount ~4096)
 
-    // --- Liquid flow tuning (the `liquids:` block in world.yaml) ---------------
-    int liquidMaxFills = 16;    // cells a liquid tick fills before stopping (one relight)
-    int liquidScan     = 4096;  // cheap blockAt reads per tick to drain dead queue cells
-    int liquidMaxLevel = 3;     // rings a source spreads before the thin edge stops
-                                // (level 0 source .. liquidMaxLevel edge); bigger = wider
-                                // puddles but more cells filled + remeshed per tick
-
-    // (Removed: the old single-noise height/material fields and the radial island
-    //  mask. Terrain shape + surface materials are now authored in assets/biomes.yaml
-    //  and driven by vg::TerrainGenerator; columnHeight() calls gen_.height().)
-
-    // (Removed: the built-in lantern/cairn/geode/tree/bush scatter densities. All
-    //  surface decoration is now authored as procedural features — assets/features/
-    //  *.yaml — so these per-column built-in scatters no longer exist.)
-
-    // --- Structures (assets/structures/*.yaml) --------------------------------
-    // Hand-authored voxel templates stamped sparsely on land. Candidate origins sit
-    // on a coarse grid: every structureSpacing blocks a cell has a structureDensity
-    // chance of rooting one (jittered within the cell, seam-safe via per-column
-    // gather). 0 density disables them.
-    int   structureSpacing = 80;
-    float structureDensity = 0.35f;
-
-    // --- Ore (iron only) -------------------------------------------------------
-    // Iron replaces stone in small clusters (a roll shared across a 2x2x2 cell) up
-    // to its max world-Y.
-    float ironDensity = 0.013f;  int ironMaxY = 44;
-    // Optional noise MASK (`ores.iron.mask:` in world.yaml): a multi-layer field +
-    // threshold + steepness curve whose [0,1] weight MULTIPLIES the ore density, so
-    // iron concentrates into authored ore-rich regions/veins instead of a flat
-    // sprinkle. Empty (default) → weight 1 → unchanged. Same primitive + tool editor
-    // as the biome surface masks / feature scatter.
-    NoiseMask oreMask;
+    // (Removed with the worldgen overhaul: procedural terrain shape + surface
+    //  materials, the feature/structure scatter, ore generation, and liquid flow.
+    //  Generation is now a fixed flat layered world — see World::generateColumnInto.)
 
     // --- Lighting --------------------------------------------------------------
     // Light lost per block while *spreading* (the BFS flood), per source. Levels

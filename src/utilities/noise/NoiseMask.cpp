@@ -1,4 +1,4 @@
-#include "world/NoiseMask.h"
+#include "utilities/noise/NoiseMask.h"
 
 #include <algorithm>
 #include <cmath>

@@ -1,7 +1,5 @@
 #include "world/WorldConfig.h"
 
-#include "world/NoiseLoad.h"
-
 #include <yaml-cpp/yaml.h>
 
 #include <algorithm>
@@ -67,30 +65,9 @@ WorldConfig WorldConfig::load(const std::string& path) {
     c.streamMeltBudget  = std::max(c.streamPumpBudget, c.streamMeltBudget);
     c.streamCoreRadius  = std::max(0, c.streamCoreRadius);
     c.streamUploadSlice = std::max(1, c.streamUploadSlice);
-    if (const YAML::Node lq = root["liquids"]) {
-        get(lq["max_fills"], c.liquidMaxFills);
-        get(lq["scan"], c.liquidScan);
-        get(lq["max_level"], c.liquidMaxLevel);
-    }
-    c.liquidMaxFills = std::max(1, c.liquidMaxFills);
-    c.liquidScan     = std::max(1, c.liquidScan);
-    c.liquidMaxLevel = std::max(1, c.liquidMaxLevel);
-    // (The legacy `terrain:` and `island:` blocks are no longer read — terrain shape
-    //  + surface materials moved to assets/biomes.yaml / vg::TerrainGenerator.)
-    // (The legacy `features:` block — lantern/cairn/geode/tree/bush densities — is
-    //  no longer read: that built-in scatter was replaced by procedural features
-    //  in assets/features/*.yaml.)
-    if (const YAML::Node st = root["structures"]) {
-        get(st["spacing"], c.structureSpacing);
-        get(st["density"], c.structureDensity);
-    }
-    if (const YAML::Node ore = root["ores"]) {
-        if (const YAML::Node n = ore["iron"]) {
-            get(n["density"], c.ironDensity);
-            get(n["max_y"], c.ironMaxY);
-            if (n["mask"]) c.oreMask = loadMask(n["mask"], c.seed ^ 0x012E5u);
-        }
-    }
+    // (The legacy `terrain:`/`island:`/`features:`/`structures:`/`ores:`/`liquids:`
+    //  blocks are no longer read — procedural worldgen, ore generation and liquid
+    //  flow were removed. Generation is now a fixed flat layered world.)
     return c;
 }
 

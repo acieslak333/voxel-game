@@ -41,8 +41,8 @@ recipes:
     inputs:
       - { item: cobblestone, count: 4 }
 
-  # Pickaxe tier ladder (ISSUES #13I): wood -> stone -> iron. No furnace yet, so the
-  # ore stands in for the smelted ingot. Planks are the handle (no sticks item yet).
+  # Pickaxe tier ladder (ISSUES #13I): wood -> stone. The iron tier needed iron ore,
+  # which was removed with the worldgen overhaul. Planks are the handle.
   - output: wood_pickaxe
     count: 1
     inputs:
@@ -51,9 +51,4 @@ recipes:
     count: 1
     inputs:
       - { item: cobblestone, count: 3 }
-      - { item: planks, count: 2 }
-  - output: pickaxe          # iron tier
-    count: 1
-    inputs:
-      - { item: iron_ore, count: 3 }
       - { item: planks, count: 2 }

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "render/Buffer.h"
-#include "render/SpanAllocator.h"
+#include "utilities/alloc/SpanAllocator.h"
 #include "render/Vertex.h"
 
 #include <vulkan/vulkan.h>

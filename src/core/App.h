@@ -19,7 +19,6 @@
 #include "render/SkyRenderer.h"
 #include "render/Swapchain.h"
 #include "render/EntityRenderer.h"
-#include "render/FarTerrainRenderer.h"
 #include "render/TextureArray.h"
 #include "render/UiRenderer.h"
 #include "render/VulkanContext.h"
@@ -120,13 +119,6 @@ private:
     // see the definition's header comment before touching it.
     void streamWindow();
 
-    // Simple liquid flow (water & lava): drain a budget of queued liquid cells,
-    // spreading them down then sideways (decaying distance in Block::metadata, no
-    // recede). Event-driven — editBlocks seeds the queue around any edit. Mutates
-    // the world through the same stream-barrier path as editBlocks.
-    void tickLiquids();
-    void seedLiquid(int x, int y, int z); // queue a cell + its 6 neighbours
-
     // Build this frame's UI (HUD + menu) into ui_, handling menu interactions.
     void buildUi(const InputState& in);
     void buildHotbar(class Ui& ui, float w, float h);
@@ -217,7 +209,6 @@ private:
     WorldRenderer    worldRenderer_;
     TextureArray     entitySkins_;    // Blockbench-model skin atlas (assets/models/*.png)
     EntityRenderer   entityRenderer_; // animated box-rig entities (ISSUES #13E)
-    FarTerrainRenderer farTerrain_;   // coarse heightmap LOD shell beyond the window
     UiRenderer       ui_;        // 2D HUD/menu renderer (after renderer_)
     Input            input_;
     PlayerController  player_;
@@ -339,10 +330,6 @@ private:
     bool      fogHazeTuned_ = false;
     glm::vec3 fogHaze_{0.66f, 0.74f, 0.86f};
 
-    // Liquid flow: cells pending a flow evaluation, drained a budget per tick.
-    std::deque<glm::ivec3> liquidQueue_;
-    float                  liquidTimer_ = 0.0f; // accumulates dt between flow ticks
-
     // Async streaming: the in-flight background relight task (World::relightBoxes).
     // It returns the dirty chunk list; the MAIN thread enqueues the remeshes (so the
     // renderer's per-slot version state stays single-threaded). Invalid when none is
@@ -350,13 +337,20 @@ private:
     // task while world_/worldRenderer_ are still alive.
     std::future<std::vector<glm::ivec3>> relightFuture_;
     // A window step (pregen-strip apply / teleport regen) may only mutate the window
-    // when no relight is in flight AND the mesh workers are idle. A sustained remesh
-    // source (a big water flood re-queuing chunks every tick) can hold the workers
-    // busy indefinitely, postponing the step while the player walks past the window
-    // edge. This counts consecutive postponed frames; past the cap the step forces a
-    // bounded drain (join relight + streamBarrier) and applies anyway (REVIEW R5).
-    int        windowStepStarveFrames_ = 0;
-    static constexpr int kMaxWindowStepStarveFrames = 30; // ~0.5s at 60fps before forcing
+    // when no relight is in flight AND the mesh workers are idle (the gate). When the
+    // gate is closed the step simply waits — the frame is NEVER blocked on relight, so
+    // the window just trails the player and catches up at relight throughput (the
+    // far-terrain LOD shell covers anything beyond the window meanwhile). The old
+    // "force a bounded drain after N postponed frames" path was the streaming hitch:
+    // under fast travel the gate is closed most frames, so it fired almost every step
+    // and blocked the frame ~115ms on relightFuture_.get()+streamBarrier (measured).
+    // The ONLY time a step force-drains now is the genuine-load case below: the window
+    // has fallen so far behind that the player is about to reach its leading edge.
+    // Past that the player would leave the loaded window (collision/edits query air),
+    // so a bounded blocking catch-up is the right tradeoff there — and it is rare
+    // (only when the player out-runs generation, not during normal play).
+    static constexpr int kWindowEdgeSafetyChunks = 1; // force a load within this many
+                                                      // chunks of the leading edge
     // Background strip pregeneration (World::pregenStrip): the entering edge columns,
     // generated off-thread so the window step itself is just a swap (the per-boundary
     // frame spike was this generation). Reads only the immutable generator + save

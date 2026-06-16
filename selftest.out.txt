@@ -1,0 +1,2 @@
+[selftest] worldgen hash = 0xd0563486ce706325 (in-process regen check only; no golden — REVIEW R10)
+[selftest] PASS

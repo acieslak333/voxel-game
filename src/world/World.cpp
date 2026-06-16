@@ -1,7 +1,7 @@
 #include "world/World.h"
 
-#include "world/FeatureScatter.h"
-#include "world/Hash.h"
+#include "utilities/hash/Hash.h"
+#include "utilities/noise/Noise.h"
 
 #include <algorithm>
 #include <cmath>
@@ -45,7 +45,7 @@ inline glm::vec3 unpackLightColor(uint32_t p) {
 // seed, so they are never written). Format: magic + version + edge length, then
 // id(u16)+metadata(u8) per voxel in the chunk's storage order. See docs/STREAMING.md.
 constexpr uint32_t kChunkMagic   = 0x4B4E4843u; // 'CHNK'
-constexpr uint32_t kChunkVersion = 13u; // bump: removed rivers, lakes, and the cave/cavern/ravine system → default world changes
+constexpr uint32_t kChunkVersion = 17u; // bump: coherent low-freq fBm field (S1, replaces anisotropic speckle)
 
 std::string chunkPath(const std::string& dir, int cx, int cy, int cz) {
     return dir + "/c." + std::to_string(cx) + '.' + std::to_string(cy) + '.' +
@@ -107,42 +107,13 @@ void saveChunkFile(const std::string& path, const Chunk& c) {
 World::World(const WorldConfig& config, const std::string& blocksFile)
     : config_(config),
       counts_(config.chunksX, config.chunksY, config.chunksZ),
-      registry_(blocksFile),
-      // Data-driven shape + biome pipeline. Reads assets/biomes.yaml from the same
-      // asset dir as blocks.yaml; worldHeight is the vertical block extent.
-      gen_(config.seed, registry_,
-           std::filesystem::path(blocksFile).parent_path().string(),
-           config.chunksY * Chunk::kSize),
-      structures_((std::filesystem::path(blocksFile).parent_path() / "structures").string(),
-                  registry_),
-      featureNoise_(config.seed * 2246822519u + 0xFEA7u),
-      features_((std::filesystem::path(blocksFile).parent_path() / "features").string(),
-                registry_, gen_.biomeNames(), config.seed) {
-    // Resolve the block types the generator places (throws if a name is absent
-    // from the block-definition file).
+      registry_(blocksFile) {
+    // Resolve the block types the flat generator places (throws if a name is
+    // absent from the block-definition file).
     grassId_  = registry_.idByName("grass");
     dirtId_   = registry_.idByName("dirt");
     stoneId_  = registry_.idByName("stone");
-    sandId_   = registry_.idByName("sand");
-    gravelId_ = registry_.idByName("gravel");
     cobbleId_ = registry_.idByName("cobblestone");
-    logId_    = registry_.idByName("oak_log");
-    glowId_   = registry_.idByName("glowstone");
-    trunkId_  = registry_.idByName("oak_trunk");
-    leavesId_ = registry_.idByName("oak_leaves");
-    bushId_   = registry_.idByName("bush");
-    tallGrassId_    = registry_.idByName("tall_grass");
-    fernId_         = registry_.idByName("fern");
-    flowerRedId_    = registry_.idByName("flower_red");
-    flowerYellowId_ = registry_.idByName("flower_yellow");
-    redMushroomId_  = registry_.idByName("red_mushroom");
-    birchTrunkId_   = registry_.idByName("birch_trunk");
-    birchLeavesId_  = registry_.idByName("birch_leaves");
-    pineTrunkId_    = registry_.idByName("pine_trunk");
-    pineLeavesId_   = registry_.idByName("pine_leaves");
-    waterId_  = registry_.idByName("water");
-    lavaId_   = registry_.idByName("lava");
-    ironId_    = registry_.idByName("iron_ore");
 
     buildLightColorPalette();
 
@@ -205,37 +176,20 @@ const Chunk& World::chunk(int cx, int cy, int cz) const {
 // (hash01 2D/3D moved to world/Hash.h — shared canonical worldgen hashes.)
 
 int World::columnHeight(int wx, int wz) const {
-    // The surface height comes from the data-driven shape pipeline (continental/
-    // erosion/peaks splines -> oceans, plains, mountains). See TerrainGenerator and
-    // assets/biomes.yaml.
-    return gen_.height(wx, wz);
-}
-
-uint16_t World::oreAt(int wx, int wy, int wz) const {
-    // One roll shared across a 2x2x2 block cell, so an ore "hit" fills a little
-    // cluster instead of a single lonely voxel. Iron is the only ore.
-    const int cx = floordiv(wx, 2), cy = floordiv(wy, 2), cz = floordiv(wz, 2);
-    // Optional ore mask concentrates iron into authored regions/veins: its [0,1]
-    // weight scales the density. Empty mask → weight 1 → unchanged (byte-identical).
-    float density = config_.ironDensity;
-    if (!config_.oreMask.empty())
-        density *= config_.oreMask.weight(static_cast<float>(wx), static_cast<float>(wz));
-    if (wy <= config_.ironMaxY &&
-        hash01(cx, cy, cz, config_.seed ^ 0x0c55u) < density) {
-        return ironId_;
+    // Flat world: scan the actual voxels for the topmost solid block so the result
+    // reflects player edits. The generated base surface is grass at Y=16.
+    const glm::ivec3 o = originBlock();
+    for (int wy = o.y + sizeInBlocks().y - 1; wy >= o.y; --wy) {
+        if (isSolid(wx, wy, wz)) return wy;
     }
-    return 0; // stays stone
+    return 16; // flat grass surface (nothing solid found / out of window)
 }
 
-bool World::isVegTintable(uint16_t id) const {
-    return id == grassId_ || id == leavesId_ || id == bushId_ ||
-           id == tallGrassId_ || id == fernId_ ||
-           id == birchLeavesId_ || id == pineLeavesId_;
-}
+// Biome vegetation tinting is gone with the worldgen overhaul: the flat world has
+// no biomes, so foliage keeps its authored texture colour (a white multiplier).
+bool World::isVegTintable(uint16_t /*id*/) const { return false; }
 
-glm::vec3 World::vegTintAt(int wx, int wz) const {
-    return gen_.columnInfo(wx, wz).vegTint;
-}
+glm::vec3 World::vegTintAt(int /*wx*/, int /*wz*/) const { return glm::vec3(1.0f); }
 
 void World::generate() {
     // Iterate the loaded window's (X,Z) columns and generate each as a unit
@@ -296,267 +250,104 @@ void World::generateColumnInto(int cx, int cz, Chunk* const* stack,
         return; // the whole column was loaded from disk
     }
 
-    const uint32_t seed = config_.seed;
+    // --- 3D Perlin solid/air (multi-layer) ---------------------------------------
+    // The world IS a blend of several 3D Perlin fields. Each layer samples its own
+    // independently-seeded Perlin at the voxel's world position, remapped from
+    // ~[-1,1] to [0,1]; the layers are combined by a WEIGHTED AVERAGE (so the blend
+    // stays in [0,1]) and a single threshold decides solid vs air. Every layer is a
+    // pure function of (seed, world x/y/z), so chunk seams agree across threads/time
+    // (streaming-safe). Add/remove/retune layers here — the threshold logic below is
+    // untouched. Every tunable is spelled out below:
+    //   type          — which noise primitive (all that vg::Noise exposes):
+    //                     Perlin  raw rolling field (~[-1,1]).
+    //                     Ridged  1-2|perlin| -> sharp ridgelines / canyons.
+    //                     Billow  2|perlin|-1 -> rounded puffy blobs.
+    //                     Voronoi cellular/Worley -> cells, cracks, fluting
+    //                             (honours `metric` + `cell` below).
+    //   seedOffset    — added to the world seed; this is the ONLY thing vg::Noise
+    //                   accepts (its ctor is Noise(uint32_t seed); frequency is
+    //                   locked to 1 internally and interpolation is Quintic — we
+    //                   control zoom via freq{X,Y,Z} here, not in the engine).
+    //                   Distinct offsets -> independent fields; reuse one -> same field.
+    //   freq{X,Y,Z}   — per-axis noise zoom (smaller -> larger blobs along that
+    //                   axis; e.g. low freqY -> tall vertical structures).
+    //   weight        — relative contribution to the weighted-average blend.
+    //   metric, cell  — Voronoi only (ignored otherwise): distance function
+    //                   (Euclidean/Manhattan/Chebyshev) and which value to return
+    //                   (F1 nearest -> rounded cells, F2, or F2mF1 -> cell-edge cracks).
+    enum class NType { Perlin, Ridged, Billow, Voronoi, Fbm, RidgedFbm };
+    using Metric = vg::Noise::Metric;
+    using Cell   = vg::Noise::Cell;
+    struct Layer {
+        NType    type;       // which noise primitive to sample
+        uint32_t seedOffset; // + config_.seed -> this layer's independent field
+        float    freqX;      // coordinate scale on X applied before sampling
+        float    freqY;      // coordinate scale on Y (smaller -> taller features)
+        float    freqZ;      // coordinate scale on Z
+        float    weight;     // relative contribution to the blended [0,1] value
+        int      octaves;    // Fbm/RidgedFbm only: fractal octave count (ignored otherwise)
+        Metric   metric;     // Voronoi distance function (ignored by other types)
+        Cell     cell;       // Voronoi return mode      (ignored by other types)
+    };
+    constexpr Layer kLayers[] = {
+        // type          seedOffset  freqX   freqY   freqZ  weight oct  metric             cell
+        // A single low-frequency, ISOTROPIC Perlin field. Low frequency (0.02 = ~50-
+        // block features) carves large CONTIGUOUS solid/air masses, so greedy meshing
+        // finds big coplanar runs to merge instead of per-voxel speckle. The old
+        // anisotropic freqY=0.4 oscillated solid/air every ~2.5 blocks vertically =
+        // maximal exposed surface = the slow-load "speckle"; making the frequency
+        // isotropic and low cut triangles ~72% and mesh time ~60% (measured).
+        //   For more surface detail at low cost, switch type to NType::Fbm and raise
+        //   `oct` (octave count) — falling-amplitude octaves add roughness without
+        //   re-fragmenting the field; the gen cost (one Perlin call per octave) is
+        //   what the upcoming SIMD batch-sampling step (S2) is meant to absorb.
+        {NType::Perlin,        202u,  0.02f,  0.02f,  0.02f,  1.00f, 1,  Metric::Euclidean, Cell::F1},
+    };
+    constexpr float kThreshold = 0.5f; // [0,1] cutoff: >= solid, < air
 
-    // --- Per-call worldgen memos (REVIEW O1/O2) ----------------------------------
-    // The scatter passes below (trees, structures, features) each gather every nearby
-    // ROOT/ORIGIN column that can reach the current cell, so across the 256 cells of
-    // this chunk-column the SAME origin (ox,oz) is queried by up to dozens of covering
-    // cells. columnInfo() and especially surfaceY() (a full density-band scan) are the
-    // priciest worldgen calls. All three are pure functions of (seed, x, z), so caching
-    // them for the duration of this one generateColumnInto call is byte-identical output
-    // with the redundant re-evaluations removed (~50-80x dedup on the tree scatter;
-    // ~4x on the cliff-probe heights). The memos are call-local — no cross-call or
-    // cross-thread state — so worldgen stays a pure function and pregen stays safe.
-    std::unordered_map<int64_t, ColumnInfo> ciMemo;
-    std::unordered_map<int64_t, int>        surfMemo;
-    std::unordered_map<int64_t, int>        htMemo;
-    auto memoKey = [](int x, int z) -> int64_t {
-        return (static_cast<int64_t>(x) << 32) |
-               static_cast<int64_t>(static_cast<uint32_t>(z));
-    };
-    auto colInfoAt = [&](int x, int z) -> const ColumnInfo& {
-        const int64_t k = memoKey(x, z);
-        auto it = ciMemo.find(k);
-        if (it == ciMemo.end()) it = ciMemo.emplace(k, gen_.columnInfo(x, z)).first;
-        return it->second;
-    };
-    auto surfaceYAt = [&](int x, int z) -> int {
-        const int64_t k = memoKey(x, z);
-        auto it = surfMemo.find(k);
-        if (it == surfMemo.end()) it = surfMemo.emplace(k, gen_.surfaceY(x, z)).first;
-        return it->second;
-    };
-    auto heightAt = [&](int x, int z) -> int {
-        const int64_t k = memoKey(x, z);
-        auto it = htMemo.find(k);
-        if (it == htMemo.end()) it = htMemo.emplace(k, gen_.height(x, z)).first;
-        return it->second;
-    };
+    // Build one Perlin field per layer (seed is vg::Noise's sole parameter).
+    std::vector<vg::Noise> fields;
+    fields.reserve(std::size(kLayers));
+    float weightSum = 0.0f;
+    for (const Layer& L : kLayers) {
+        fields.emplace_back(config_.seed + L.seedOffset);
+        weightSum += L.weight;
+    }
 
     for (int lz = 0; lz < N; ++lz) {
         for (int lx = 0; lx < N; ++lx) {
-            const int wx = cx * N + lx;
+            const int wx = cx * N + lx; // world coordinates of this column
             const int wz = cz * N + lz;
-
-            // The expensive bit — computed ONCE for the whole vertical column (the
-            // surface height, biome, blocks and water level all come from this one
-            // call, instead of also calling columnHeight() separately).
-            const ColumnInfo ci = colInfoAt(wx, wz); // memoized; also seeds neighbour scans
-            const int h = ci.height; // heightmap base — drives the 3D density gradient
-            // The ACTUAL 3D ground surface (the density raises/lowers the land by up
-            // to `amplitude`, so h is NOT where the surface is). Features — trees,
-            // plants, lanterns, cairns — must sit on THIS, or they end up buried on
-            // raised terrain (the "trees don't spawn high up" bug) or float on lowered.
-            //
-            // The density stack is the most expensive noise in worldgen, so the cells
-            // it decides are evaluated ONCE into mainCol — the topmost set bit scanning
-            // down from the band top is exactly gen_.surfaceY(wx, wz) (same pure
-            // function, same scan), and the solid-mask fill below reuses the bits
-            // instead of re-evaluating the band a second time.
-            const int scanTop = gen_.surfaceScanTop(h);
-            std::vector<uint8_t> mainCol(static_cast<size_t>(scanTop) + 1, 0);
-            for (int wy = 0; wy <= scanTop; ++wy) {
-                mainCol[static_cast<size_t>(wy)] =
-                    gen_.mainTerrainSolid(h, wx, wy, wz) ? 1 : 0;
-            }
-            int colSurf = 1;
-            for (int wy = scanTop; wy >= 1; --wy) {
-                if (mainCol[static_cast<size_t>(wy)]) { colSurf = wy; break; }
-            }
-
-            // Biome-driven surface treatment (data-driven; see TerrainGenerator /
-            // assets/biomes.yaml): the biome picks the surface + filler blocks and
-            // snow. Submerged columns get an ocean/lake floor and grow nothing.
-            const uint16_t topId = ci.topId;
-            const uint16_t subId = ci.fillerId;
-            const int dirtDepth  = 4;                  // filler blocks under the surface
-            const int seaLevel   = gen_.seaLevel();
-
-            // Cliffs: a column whose real 3D surface drops sharply to a neighbour. The
-            // exposed face is (a) rendered as bare ROCK (a sand/grass skin down a vertical
-            // wall looks wrong) and (b) eroded geometrically in the fill loop below — the
-            // rock is carved away with a smooth 3D noise, more toward the base, so cliffs
-            // round off / undercut instead of standing as flat walls. Detected by asking
-            // whether a neighbour is AIR kCliffDrop blocks below our surface (cheap — one
-            // density eval, no full surface scan); only above the waterline so beaches keep
-            // their sand. The neighbour heightmap heights are cached for the carve.
-            constexpr int kCliffDrop = 6; // vertical drop per block across that counts as cliff
-            int  nhPX = 0, nhNX = 0, nhPZ = 0, nhNZ = 0; // neighbour heightmap heights (cliff only)
-            bool cliff = false;
-            if (colSurf - kCliffDrop > seaLevel) {
-                nhPX = heightAt(wx + 1, wz); nhNX = heightAt(wx - 1, wz);
-                nhPZ = heightAt(wx, wz + 1); nhNZ = heightAt(wx, wz - 1);
-                const int probe = colSurf - kCliffDrop;
-                cliff = !gen_.isSolid(nhPX, wx + 1, probe, wz) ||
-                        !gen_.isSolid(nhNX, wx - 1, probe, wz) ||
-                        !gen_.isSolid(nhPZ, wx, probe, wz + 1) ||
-                        !gen_.isSolid(nhNZ, wx, probe, wz - 1);
-            }
-
-            // Per-column water surface from the generator: sea level. Air at/below it
-            // over the terrain floods with ocean water; uplands stay dry.
-            const int waterLevel = ci.waterLevel;
-
-            // Fill the whole vertical column in one pass, routing each block into
-            // whichever chunk owns its Y (skipping chunks loaded from disk). This is
-            // identical output to the old per-chunk loop, just without recomputing
-            // the column shape for every chunk in the stack.
-            // Worldgen v2: 3D VOLUMETRIC fill. A cell is solid where the heightmap
-            // gradient + a 3D weighted-noise perturbation is positive (overhangs /
-            // cliffs / ledges), plus sparse floating islands above (gen_.isSolid). The
-            // fill extends past the heightmap surface to catch overhang/float tops.
-            const int top = std::min(std::max({h, waterLevel, h + gen_.overhangReach()}),
-                                     worldTop - 1);
-            // Precompute solidity so the surface layering can cheaply see the cells
-            // above (an overhang's TOP grasses over; its interior is filler/stone).
-            std::vector<uint8_t> solidCol(static_cast<size_t>(top) + 2, 0);
-            for (int wy = 0; wy <= top; ++wy) {
-                if (needNoise[static_cast<size_t>(wy / N)]) {
-                    // isSolid == mainTerrainSolid || floatSolid; the main-terrain bit
-                    // was precomputed into mainCol above (cells past scanTop are above
-                    // the density band, where mainTerrainSolid is a cheap early-out).
-                    const bool m = wy <= scanTop
-                                       ? mainCol[static_cast<size_t>(wy)] != 0
-                                       : gen_.mainTerrainSolid(h, wx, wy, wz);
-                    solidCol[static_cast<size_t>(wy)] =
-                        (m || gen_.floatSolid(h, wx, wy, wz)) ? 1 : 0;
-                }
-            }
-            // Open-water floor: ocean water fills DOWN from waterLevel only to the first
-            // solid cell below it (the seabed / terrain top). Genuinely-air cells below
-            // that solid are sealed under a rock roof and stay DRY rather than flooding.
-            int waterFloor = -1; // highest solid Y at/below waterLevel; -1 = open to floor
-            for (int wy = std::min(waterLevel, top); wy >= 0; --wy) {
-                if (solidCol[static_cast<size_t>(wy)]) { waterFloor = wy; break; }
-            }
-            for (int wy = 0; wy <= top; ++wy) {
+            for (int wy = 0; wy < worldTop; ++wy) {
                 const int cy = wy / N;
                 if (!needNoise[static_cast<size_t>(cy)]) { continue; }
-                uint16_t id = 0; // air
-                if (solidCol[static_cast<size_t>(wy)]) {
-                    // Depth below the LOCAL surface: solid cells above this one before
-                    // the first air (0 = a surface block). Bounded scan into the
-                    // precomputed column so overhang tops grass over correctly.
-                    int sd = 0;
-                    while (sd <= dirtDepth && wy + 1 + sd <= top &&
-                           solidCol[static_cast<size_t>(wy + 1 + sd)]) {
-                        ++sd;
+                // Weighted blend of every layer, each remapped [-1,1] -> [0,1].
+                float v = 0.0f;
+                for (size_t i = 0; i < fields.size(); ++i) {
+                    const Layer&     L  = kLayers[i];
+                    const vg::Noise& fn = fields[i];
+                    const float sx = static_cast<float>(wx) * L.freqX;
+                    const float sy = static_cast<float>(wy) * L.freqY;
+                    const float sz = static_cast<float>(wz) * L.freqZ;
+                    // Sample the chosen primitive as a raw ~[-1,1] value. Ridged/Billow
+                    // are the standard shape transforms of perlin (see NoiseStack::shape).
+                    float r;
+                    switch (L.type) {
+                        case NType::Ridged:    r = 1.0f - 2.0f * std::fabs(fn.perlin(sx, sy, sz)); break;
+                        case NType::Billow:    r = 2.0f * std::fabs(fn.perlin(sx, sy, sz)) - 1.0f; break;
+                        case NType::Voronoi:   r = fn.worley(sx, sy, sz, L.metric, L.cell);        break;
+                        case NType::Fbm:       r = fn.fbm(sx, sy, sz, L.octaves);                  break;
+                        case NType::RidgedFbm: r = 1.0f - 2.0f * std::fabs(fn.fbm(sx, sy, sz, L.octaves)); break;
+                        case NType::Perlin:
+                        default:               r = fn.perlin(sx, sy, sz);                          break;
                     }
-                    uint16_t mat;
-                    bool isStone = false;
-                    if (wy >= 1 && wy <= 2)      mat = lavaId_;  // deep lava floor (bedrock)
-                    else if (cliff)             { mat = stoneId_; isStone = true; } // cliff face -> bare rock
-                    else if (sd == 0)            mat = topId;     // surface block
-                    else if (sd <= dirtDepth)    mat = subId;     // filler under the surface
-                    else { mat = stoneId_; isStone = true; }
-
-                    if (isStone) {
-                        const uint16_t ore = oreAt(wx, wy, wz);
-                        id = ore != 0 ? ore : stoneId_;
-                    } else {
-                        id = mat;
-                    }
-                    // Geometric cliff erosion: carve exposed cliff faces back into a CURVED,
-                    // progressively-undercut profile instead of a dead-flat "|" wall. Two
-                    // ingredients: (1) a LOW-frequency smooth noise so carved regions are
-                    // large contiguous patches (the face curves organically, no pockmarks);
-                    // (2) a carve strength that grows on a CURVE with depth (down^1.4), so the
-                    // sharp top edge is barely touched while the face recedes more and more
-                    // toward the base — a concave, weathered "/"-leaning undercut. Only carves
-                    // cells exposed toward the drop, so the interior stays solid.
-                    if (cliff && id != 0 && id != waterId_ && id != lavaId_) {
-                        const int down = colSurf - wy; // 0 at the top edge, grows downward
-                        if (down >= 1) {
-                            const bool exposed =
-                                !gen_.isSolid(nhPX, wx + 1, wy, wz) ||
-                                !gen_.isSolid(nhNX, wx - 1, wy, wz) ||
-                                !gen_.isSolid(nhPZ, wx, wy, wz + 1) ||
-                                !gen_.isSolid(nhNZ, wx, wy, wz - 1);
-                            if (exposed) {
-                                // Capped at 1.0 so the base RECEDES into a curved undercut
-                                // but stays a coherent face (not fully eaten away).
-                                const float depthCurve =
-                                    std::min(1.0f, std::pow(static_cast<float>(down) / 26.0f, 1.3f));
-                                const float n = featureNoise_.fbm(wx * 0.045f, wy * 0.055f,
-                                                                  wz * 0.045f, 3); // smooth, ~[-1,1]
-                                if (n * 0.6f + depthCurve > 0.95f) id = 0; // carve -> receded face
-                            }
-                        }
-                    }
-                } else { // air: sea water fill
-                    if (wy > waterFloor && wy <= waterLevel) {
-                        id = waterId_;                             // ocean (open from above)
-                    }
+                    const float n = r * 0.5f + 0.5f; // [-1,1] -> [0,1]
+                    v += L.weight * n;
                 }
-                if (id != 0) {
-                    stack[static_cast<size_t>(cy)]->set(lx, wy % N, lz, Block{id, 0});
+                v /= weightSum; // normalise back to [0,1]
+                if (v >= kThreshold) {
+                    stack[static_cast<size_t>(cy)]->set(lx, wy % N, lz, Block{stoneId_, 0});
                 }
-            }
-
-            // NOTE: near-surface trees and ground plants used to be stamped here from
-            // the biome's tree/bush densities. That built-in path is gone — trees,
-            // bushes and ground cover are now authored as procedural features
-            // (assets/features/*.yaml, see the feature stamp below). The biome
-            // `trees:`/`tree:` data still drives the far-terrain LOD tree impostors
-            // (FarTerrainRenderer), but no longer places real near-chunk geometry.
-
-            // --- Structures: seam-safe stamp from nearby candidate origins -----
-            // Candidate origins live on a coarse grid; this column gathers every
-            // nearby origin whose footprint covers it and stamps that origin's
-            // voxel column. A pure function of world coords, so the structure comes
-            // out identical no matter which chunk streams in first (like trees).
-            if (!structures_.empty() && config_.structureDensity > 0.0f) {
-                const int S = std::max(8, config_.structureSpacing);
-                const int cellR = structures_.maxReachXZ() / S + 1;
-                auto placeForce = [&](int wy, uint16_t pid) {
-                    if (wy < 0 || wy >= worldTop) return;
-                    const int pcy = wy / N;
-                    if (!needNoise[static_cast<size_t>(pcy)]) return;
-                    stack[static_cast<size_t>(pcy)]->set(lx, wy % N, lz, Block{pid, 0});
-                };
-                const int gx = floordiv(wx, S), gz = floordiv(wz, S);
-                for (int cgz = gz - cellR; cgz <= gz + cellR; ++cgz) {
-                    for (int cgx = gx - cellR; cgx <= gx + cellR; ++cgx) {
-                        if (hash01(cgx, cgz, seed ^ 0x57b1u) >= config_.structureDensity) continue;
-                        const int si = structures_.pick(hash01(cgx, cgz, seed ^ 0x57b4u));
-                        if (si < 0) continue;
-                        const Structure& st = structures_.all()[static_cast<size_t>(si)];
-                        const int ox = cgx * S + static_cast<int>(hash01(cgx, cgz, seed ^ 0x57b2u) * (S - 1));
-                        const int oz = cgz * S + static_cast<int>(hash01(cgx, cgz, seed ^ 0x57b3u) * (S - 1));
-                        const int slx = (wx - ox) + st.anchor.x;
-                        const int slz = (wz - oz) + st.anchor.z;
-                        if (slx < 0 || slz < 0 || slx >= st.size.x || slz >= st.size.z) continue;
-                        const ColumnInfo oc = colInfoAt(ox, oz);
-                        if (st.surface && oc.height <= oc.waterLevel) continue; // not in water
-                        const int oh = surfaceYAt(ox, oz); // sit structures on the real surface
-                        for (int ly = 0; ly < st.size.y; ++ly) {
-                            const uint16_t bid = st.at(slx, ly, slz);
-                            if (bid != Structure::kSkip) placeForce(oh + (ly - st.anchor.y), bid);
-                        }
-                    }
-                }
-            }
-
-            // --- Procedural features: seam-safe stamp (assets/features/) -------
-            // Like structures, but each feature owns its own scatter grid and its
-            // voxels are EVALUATED procedurally (shape brushes + per-instance random
-            // + noise) by Feature::at — still a pure function of the origin cell +
-            // seed, so it comes out identical regardless of chunk load order.
-            if (!features_.empty()) {
-                // One shared scatter pass (Feature.h) — identical logic to the headless
-                // preview, so they can't drift. emit writes into the chunk stack (air-only
-                // unless the cell is forced), the gates/placement live in the function.
-                scatterFeaturesColumn(
-                    features_, wx, wz, seed, featureNoise_, colInfoAt, surfaceYAt,
-                    [&](int wy, uint16_t pid, bool force) {
-                        if (wy < 0 || wy >= worldTop) return;
-                        const int pcy = wy / N;
-                        if (!needNoise[static_cast<size_t>(pcy)]) return;
-                        Chunk& pc = *stack[static_cast<size_t>(pcy)];
-                        if (!force && pc.get(lx, wy % N, lz).id != 0) return; // air-only
-                        pc.set(lx, wy % N, lz, Block{pid, 0});
-                    });
             }
         }
     }
@@ -1135,21 +926,28 @@ std::vector<glm::ivec3> World::setBlock(int wx, int wy, int wz, Block b) {
                         mark(floordiv(x, N), floordiv(y, N), floordiv(z, N));
     };
 
-    // Sky descends a column, so an edit only changes sky from wy down to the first
-    // sky-blocker STRICTLY below it: breaking lights that band, placing darkens it
-    // (the darkened span reaches the OLD floor, which is exactly that same blocker —
-    // opacity below the edit is unchanged). Above wy the column is untouched, so the
-    // box needs only a flood margin (kLightRadius) on each open Y face. This keeps a
-    // surface edit's sky box a few chunks tall instead of the full world height.
-    int floorY = o.y;
-    for (int y = wy - 1; y >= o.y; --y) {
-        if (registry_.lightOpacity(blockAt(wx, y, wz).id) >= 15) { floorY = y; break; }
-    }
-    const int skyY0 = std::max(o.y, floorY - kLightRadius);
-    const int skyY1 = std::min(o.y + size.y - 1, wy + kLightRadius);
+    // Sky light travels DOWN a column losslessly and its value at any cell depends on
+    // the SURROUNDING terrain height, so a small wy±radius box is wrong over rolling
+    // terrain: a neighbour hill taller than wy+radius (whose shadow reaches into the
+    // box) or a deep open shaft below the edit both fall outside it — the classic
+    // box-too-small relight bug. Use the SAME bounds the recenter path (relightBox)
+    // proved correct: anchor the box BOTTOM at the window floor, and cap the TOP just
+    // above the highest sky-blocker / sub-15 cell anywhere in the box (a cheap top-
+    // down per-column scan that early-outs at the surface, so the open sky above costs
+    // little). Over flat terrain this is the few-chunks-tall box as before; over
+    // hills/shafts it grows to stay byte-identical to a full computeSkyLight.
+    int skyTop = o.y;
+    for (int z = z0; z <= z1; ++z)
+        for (int x = x0; x <= x1; ++x)
+            for (int y = o.y + size.y - 1; y > skyTop; --y) {
+                if (skyLightAt(x, y, z) < 15 ||
+                    registry_.lightOpacity(blockAt(x, y, z).id) > 0) { skyTop = y; break; }
+            }
+    const int skyY0 = o.y;
+    const int skyY1 = std::min(o.y + size.y - 1, skyTop + kLightRadius);
     const int blkY0 = std::max(o.y, wy - kLightRadius);
     const int blkY1 = std::min(o.y + size.y - 1, wy + kLightRadius);
-    relightAndMark(skyLight_, false, skyY0, skyY1); // sky: edit down to first blocker below
+    relightAndMark(skyLight_, false, skyY0, skyY1); // sky: full-depth, terrain-bounded top
     relightAndMark(blockLight_, true, blkY0, blkY1); // block: ±16 around the edit
 
     // The edited block always re-meshes its own chunk; a face-adjacent chunk only

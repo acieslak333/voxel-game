@@ -4,10 +4,8 @@
 #include "render/TextureArray.h"
 #include "render/VulkanContext.h"
 #include "world/ChunkMesher.h"
-#include "world/Landforms.h"
-#include "world/SurfaceNets.h"
-#include "world/TerrainGenerator.h"
 #include "world/World.h"
+#include "utilities/hash/Hash.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -80,14 +78,6 @@ bool aabbInFrustum(const std::array<glm::vec4, 6>& frustum, const glm::vec3& mn,
     return true;
 }
 
-// Floor-modulo (b > 0): maps an absolute chunk coord to its ring-buffer slot,
-// matching World's chunk store so a streamed-in chunk reuses the departed
-// chunk's mesh slot. Identity over [0, b).
-int floormod(int a, int b) {
-    const int r = a % b;
-    return (r < 0) ? r + b : r;
-}
-
 // One chunk's combined buffer holds, in order: opaque vertices, water vertices,
 // opaque indices, water indices. Both index ranges live in the same allocation;
 // the water draw passes firstWaterVertex as its vertexOffset (its indices are
@@ -136,21 +126,6 @@ WorldRenderer::WorldRenderer(VulkanContext& ctx, VkRenderPass renderPass,
                              uint32_t framesInFlight, const World& world,
                              const std::string& shaderDir, const std::string& textureDir)
     : ctx_(ctx), world_(world) {
-    if (const char* sn = std::getenv("VG_SURFACENETS"); sn && sn[0] == '1') {
-        surfaceNets_ = true;
-        std::printf("[mesh] VG_SURFACENETS=1: Surface Nets terrain mesher (experimental)\n");
-    }
-    // VG_LANDFORM=pillars|arch: replace the terrain density fed to Surface Nets with
-    // a signature landform (docs/WORLDGEN.md Layer 1.3) — the in-game validation of
-    // the noise+SDF toolkit. Implies the Surface Nets path.
-    if (const char* lf = std::getenv("VG_LANDFORM")) {
-        if (std::strcmp(lf, "pillars") == 0)   landformMode_ = 1;
-        else if (std::strcmp(lf, "arch") == 0) landformMode_ = 2;
-        if (landformMode_) {
-            surfaceNets_ = true;
-            std::printf("[mesh] VG_LANDFORM=%s: Surface Nets landform demo\n", lf);
-        }
-    }
     textures_ = std::make_unique<TextureArray>(ctx_, world_.registry().texturePaths(),
                                                textureDir);
     // GPU-driven (indirect) vertex shader: per-chunk translation comes from the
@@ -227,115 +202,12 @@ ChunkMesher::TintSampler WorldRenderer::makeTintSampler(int cx, int /*cy*/, int 
     };
 }
 
-namespace {
-// Surface-Nets face helpers — local equivalents of ChunkMesher's file-local
-// faceIndex/faceShade/faceUV (kept in sync). The SN normal is continuous; we
-// bucket it to the nearest of the 6 axis faces so the geometry reuses the
-// existing chunk shader unchanged (it decodes Vertex.normal as a face index).
-int   snFaceIndex(int axis, bool positive) { return axis * 2 + (positive ? 1 : 0); }
-float snFaceShade(int axis, bool positive) {
-    if (axis == 1) return positive ? 1.0f : 0.45f;
-    if (axis == 0) return 0.62f;
-    return 0.80f;
-}
-glm::vec2 snFaceUV(const glm::vec3& p, int axis) {
-    if (axis == 1) return glm::vec2(p.x, p.z);          // top/bottom: flat on X-Z
-    return glm::vec2(axis == 0 ? p.z : p.x, -p.y);      // sides: horizontal axis, V = -Y
-}
-uint32_t snVariant(int x, int y, int z) {
-    uint32_t h = static_cast<uint32_t>(x) * 73856093u ^
-                 static_cast<uint32_t>(y) * 19349663u ^ static_cast<uint32_t>(z) * 83492791u;
-    h ^= h >> 13; h *= 0x85ebca6bu; h ^= h >> 16;
-    return h;
-}
-} // namespace
-
 MeshData WorldRenderer::meshChunkData(int cx, int cy, int cz) const {
-    if (surfaceNets_) return buildSurfaceNetsMesh(cx, cy, cz);
     return ChunkMesher::greedyMesh(world_.chunk(cx, cy, cz), world_.registry(),
                                    makeSampler(cx, cy, cz), makeLightSampler(cx, cy, cz),
                                    /*smoothLighting=*/true,
                                    glm::ivec3(cx, cy, cz) * kChunkSize,
                                    makeTintSampler(cx, cy, cz));
-}
-
-MeshData WorldRenderer::buildSurfaceNetsMesh(int cx, int cy, int cz) const {
-    const TerrainGenerator& gen = world_.generator();
-    const BlockRegistry&    reg = world_.registry();
-    const int baseX = cx * kChunkSize, baseY = cy * kChunkSize, baseZ = cz * kChunkSize;
-
-    // The signed field Surface Nets meshes (negative = inside). Normally the
-    // terrain density (terrainDensity is positive = solid, so negate); under
-    // VG_LANDFORM it is instead a signature landform (Layer 1.3 in-game proof).
-    const float sea = static_cast<float>(gen.seaLevel());
-    static const Noise lfNoise(0x91110u); // fixed pillar layout (read-only, thread-safe)
-    std::function<float(int, int, int)> field;
-    if (landformMode_ == 1) { // Zhangjiajie pillar field, tiled across the world
-        const float pillarBase = sea + 2.0f, pillarTop = sea + 38.0f, freq = 0.045f;
-        field = [&, pillarBase, pillarTop, freq](int lx, int ly, int lz) {
-            return landform::pillars(
-                lfNoise, glm::vec3(baseX + lx, baseY + ly, baseZ + lz),
-                pillarBase, pillarTop, freq);
-        };
-    } else if (landformMode_ == 2) { // monolithic arch, tiled every `period` blocks
-        const float period = 96.0f, span = 40.0f, legH = 28.0f, thick = 4.0f, tube = 4.0f;
-        field = [&, period, span, legH, thick, tube](int lx, int ly, int lz) {
-            const glm::vec3 wp(baseX + lx, baseY + ly, baseZ + lz);
-            const float ox = std::round(wp.x / period) * period;
-            const float oz = std::round(wp.z / period) * period;
-            return landform::arch(wp, glm::vec3(ox, sea, oz), span, legH, thick, tube);
-        };
-    } else {
-        field = [&](int lx, int ly, int lz) {
-            return -gen.terrainDensity(baseX + lx, baseY + ly, baseZ + lz);
-        };
-    }
-    // Mesh one extra cell into the + neighbours: the field is analytic (samplable
-    // anywhere), so each chunk's overlap band covers the - side neighbour's seam,
-    // making chunk boundaries crack-free (the overlap is identical, harmless).
-    const int N = kChunkSize + 1;
-    const SurfaceMesh sm = surfaceNets(field, glm::ivec3(N), 1.0f, glm::vec3(0.0f));
-
-    MeshData mesh;
-    mesh.indices = sm.indices;
-    mesh.vertices.reserve(sm.positions.size());
-    const auto lightSampler = makeLightSampler(cx, cy, cz);
-    uint16_t fallback = 0;
-    try { fallback = reg.idByName("stone"); } catch (...) {}
-
-    for (size_t i = 0; i < sm.positions.size(); ++i) {
-        const glm::vec3 lp = sm.positions[i];                 // chunk-local position
-        const glm::vec3 wp = lp + glm::vec3(baseX, baseY, baseZ);
-        const int rx = static_cast<int>(std::lround(lp.x));
-        const int ry = static_cast<int>(std::lround(lp.y));
-        const int rz = static_cast<int>(std::lround(lp.z));
-
-        // Bucket the smooth normal to the dominant axis face.
-        const glm::vec3 n = sm.normals[i];
-        int axis = 0; float best = std::fabs(n.x);
-        if (std::fabs(n.y) > best) { axis = 1; best = std::fabs(n.y); }
-        if (std::fabs(n.z) > best) { axis = 2; best = std::fabs(n.z); }
-        const bool positive = n[axis] >= 0.0f;
-        const int  face = snFaceIndex(axis, positive);
-
-        // Surface block from the column: grass-type top on up-faces, filler else.
-        const ColumnInfo ci = gen.columnInfo(baseX + rx, baseZ + rz);
-        uint16_t blk = (axis == 1 && positive) ? ci.topId : ci.fillerId;
-        if (blk == 0) blk = ci.topId ? ci.topId : fallback;
-
-        const ChunkMesher::LightSample ls = lightSampler(rx, ry, rz);
-        Vertex v;
-        v.pos        = lp;
-        v.uv         = snFaceUV(wp, axis);
-        v.layer      = reg.faceLayer(blk, face, snVariant(baseX + rx, baseY + ry, baseZ + rz));
-        v.light      = glm::vec2(static_cast<float>(ls.sky) / 15.0f,
-                                 snFaceShade(axis, positive) * static_cast<float>(ls.block) / 15.0f);
-        v.normal     = static_cast<uint32_t>(face);
-        v.blockColor = packColorRGBA8(ls.blockColor);
-        v.tint       = 0xFFFFFFFFu;
-        mesh.vertices.push_back(v);
-    }
-    return mesh;
 }
 
 VkImageView WorldRenderer::blockTextureView() const { return textures_->view(); }

@@ -963,12 +963,6 @@ void App::buildMenu(Ui& ui, float px, float py, float pw, float ph) {
             window_.setFullscreen(!window_.isFullscreen());
             settings_.fullscreen = window_.isFullscreen();
         }
-        // LOD terrain: the distant low-poly shell + tree impostors past the loaded
-        // window (FarTerrainRenderer). Off = the world fades to haze at the edge.
-        if (toggle("LOD terrain: ", settings_.lod)) {
-            settings_.lod = !settings_.lod;
-            farTerrain_.setEnabled(settings_.lod);
-        }
         // Font (cycles the ari family).
         if (button("Font: " + fontLabel(settings_.font))) {
             cycleFont(+1);

@@ -11,8 +11,7 @@ A localhost page that launches the project's dev editors and browses game conten
   * BROWSE — Blocks (from blocks.yaml), Items (items.yaml) and Recipes (recipes.yaml),
              shown by their baked 16x16 icons. Read-only; edit via the tools.
 
-Ports: worldgen 5000 (merged shape+biome) · particles 5001 · recipes 5003 ·
-       features 5004 · liquid 5006 · structures 5007   (hub 5005)
+Ports: particles 5001 · recipes 5003 · features 5004 · structures 5007  (hub 5005)
 
 Run from the repo root:
     pip install flask pyyaml        # editors also want ruamel.yaml
@@ -50,15 +49,10 @@ HUB_PORT = 5005
 
 # The editors. `port` must match each tool's hard-coded app.run() port.
 TOOLS = [
-    {"id": "worldgen", "name": "Worldgen",      "script": "worldgen_tool.py", "port": 5000,
-     "desc": "Terrain shape + biome flora + caves/ores, live 2D/3D, seed & pan.",
-     "accent": "#6db4ff"},
     {"id": "recipe",   "name": "Recipes",       "script": "recipe_tool.py",   "port": 5003,
      "desc": "Build crafting recipes by picking blocks.",    "accent": "#f0b35b"},
     {"id": "feature",  "name": "Features",      "script": "feature_tool.py",  "port": 5004,
      "desc": "Procedural + hand-voxel objects (3D editor).", "accent": "#f0a35b"},
-    {"id": "liquid",   "name": "Liquid Pools",  "script": "liquid_tool.py",   "port": 5006,
-     "desc": "Tune cave lava / water pools.",                "accent": "#5bc0f0"},
     {"id": "particle", "name": "Particles",     "script": "particle_tool.py", "port": 5001,
      "desc": "Edit and preview particle effects.",           "accent": "#c79bf0"},
 ]

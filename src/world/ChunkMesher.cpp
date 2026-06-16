@@ -257,16 +257,41 @@ MeshData ChunkMesher::greedyMesh(const Chunk& chunk, const BlockRegistry& reg,
 
         std::vector<Mask> mask(static_cast<size_t>(N) * N);
 
+        // --- Binary occupancy columns (memoised fill) ------------------------
+        // fill() is sampled MANY times per chunk: twice per slice boundary for
+        // face detection, and again for every AO corner (occ). Precompute it ONCE
+        // per cell into per-(u,v) bit columns spanning d in [-1, N] (the sweep
+        // range plus both boundary cells), padded by one in u and v so AO's
+        // diagonal neighbours (cu±1, cv±1) stay in range. Bit i of
+        // colp[(cu+1)+(N+2)(cv+1)] is fill() at d = i-1. Detection and occ() then
+        // read a bit instead of re-walking the chunk store; the produced
+        // mask/merge is byte-identical (colp is purely a cache of fill()).
+        std::vector<uint32_t> colp(static_cast<size_t>(N + 2) * (N + 2), 0);
+        {
+            int c[3];
+            for (int cv = -1; cv <= N; ++cv)
+                for (int cu = -1; cu <= N; ++cu) {
+                    c[u] = cu;
+                    c[v] = cv;
+                    uint32_t bits = 0;
+                    for (int dd = -1; dd <= N; ++dd) {
+                        c[d] = dd;
+                        if (fill(c[0], c[1], c[2])) bits |= (1u << (dd + 1));
+                    }
+                    colp[static_cast<size_t>(cu + 1) + (N + 2) * (cv + 1)] = bits;
+                }
+        }
+        auto colBits = [&](int cu, int cv) -> uint32_t {
+            return colp[static_cast<size_t>(cu + 1) + (N + 2) * (cv + 1)];
+        };
+
         // --- Smooth lighting (ambient occlusion) helpers ---------------------
         // A face exposed to air at d-layer L, in-plane cell (cu,cv): each corner
         // is darkened by how many of the three opaque blocks hugging it (two edge
         // neighbours + the diagonal) are present, all sampled on the air side.
+        // Reads the memoised occupancy bit instead of re-calling fill().
         auto occ = [&](int L, int cu, int cv) -> int {
-            int c[3];
-            c[d] = L;
-            c[u] = cu;
-            c[v] = cv;
-            return fill(c[0], c[1], c[2]) ? 1 : 0;
+            return static_cast<int>((colBits(cu, cv) >> (L + 1)) & 1u);
         };
         auto cornerAo = [&](int L, int cu, int cv, int du, int dv) -> uint8_t {
             const int s1 = occ(L, cu + du, cv);
@@ -376,12 +401,15 @@ MeshData ChunkMesher::greedyMesh(const Chunk& chunk, const BlockRegistry& reg,
             int n = 0;
             for (x[v] = 0; x[v] < N; ++x[v]) {
                 for (x[u] = 0; x[u] < N; ++x[u], ++n) {
-                    // Compare the block on each side of the boundary. The sample
-                    // lambda reaches into the neighbouring chunk for the outermost
-                    // boundaries (x[d] == -1 or N-1), so a face between two solid
-                    // chunks is culled instead of emitted-and-hidden.
-                    const bool a = fill(x[0], x[1], x[2]);
-                    const bool b = fill(x[0] + q[0], x[1] + q[1], x[2] + q[2]);
+                    // Compare the block on each side of the boundary, read from the
+                    // memoised occupancy column (built from the same fill(), which
+                    // reaches into the neighbouring chunk at the outermost boundaries
+                    // x[d] == -1 or N, so a face between two solid chunks is culled
+                    // instead of emitted-and-hidden). Bit (x[d]+1) is d=x[d] ('a'),
+                    // bit (x[d]+2) is d=x[d]+1 ('b').
+                    const uint32_t cb = colBits(x[u], x[v]);
+                    const bool a = (cb >> (x[d] + 1)) & 1u;
+                    const bool b = (cb >> (x[d] + 2)) & 1u;
 
                     Mask m;
                     if (a == b) {

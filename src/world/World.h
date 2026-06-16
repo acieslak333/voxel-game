@@ -2,11 +2,7 @@
 
 #include "world/BlockRegistry.h"
 #include "world/Chunk.h"
-#include "world/Noise.h"
 #include "world/Shape.h"
-#include "world/Feature.h"
-#include "world/Structure.h"
-#include "world/TerrainGenerator.h"
 #include "world/WorldConfig.h"
 
 #include <glm/glm.hpp>
@@ -43,11 +39,7 @@ public:
     [[nodiscard]] glm::ivec3 chunkOrigin()  const { return originChunk_; }
     [[nodiscard]] glm::ivec3 sizeInBlocks() const { return counts_ * Chunk::kSize; }
     [[nodiscard]] const BlockRegistry& registry() const { return registry_; }
-    // The deterministic terrain generator (pure fn of seed + world coord). The far-
-    // terrain LOD shell samples it directly to mesh ground beyond the loaded window.
-    [[nodiscard]] const TerrainGenerator& generator() const { return gen_; }
-    // World seed (for deterministic feature scatter — e.g. far-terrain impostors
-    // replicate the tree gate hash so distant trees match the real voxel trees).
+    // World seed (kept for save-path naming and any deterministic per-world hashing).
     [[nodiscard]] uint32_t seed() const { return config_.seed; }
     // The full generation/streaming config (assets/world.yaml). The renderer and app
     // read the streaming/liquid tuning knobs from here (REVIEW R7).
@@ -268,13 +260,9 @@ private:
 
     [[nodiscard]] int lightIndex(int wx, int wy, int wz) const;
 
-    // Topmost solid block's Y at a world column (island-shaped, domain-warped).
+    // Topmost solid block's Y at a world column (scans the actual voxels, so it
+    // reflects edits; the flat world's base surface is grass at Y=16).
     [[nodiscard]] int columnHeight(int wx, int wz) const;
-
-    // Ore that replaces stone at world (wx,wy,wz), or 0 to leave it stone. The
-    // rarest qualifying ore wins; each rolls a hash shared across a 2x2x2 cell
-    // (little veins) and is gated by its max depth. See assets/world.yaml `ores`.
-    [[nodiscard]] uint16_t oreAt(int wx, int wy, int wz) const;
 
     [[nodiscard]] int  chunkIndex(int cx, int cy, int cz) const;
     [[nodiscard]] bool inChunkBounds(int cx, int cy, int cz) const;
@@ -293,10 +281,6 @@ private:
     // are reworked into a windowed relight in that stage.
     glm::ivec3    originChunk_{0, 0, 0};
     BlockRegistry registry_;
-    TerrainGenerator gen_;        // data-driven shape + biome pipeline (assets/biomes.yaml)
-    StructureSet     structures_; // hand-authored templates stamped on land (assets/structures/)
-    Noise            featureNoise_; // 3D noise for procedural-feature noise/shell fills
-    FeatureSet       features_;   // procedural scatter objects (assets/features/)
     std::vector<Chunk>   chunks_;     // flat ring buffer, indexed by chunkIndex()
     std::vector<uint8_t> skyLight_;   // per-block sky light, indexed by lightIndex()
     std::vector<uint8_t> blockLight_; // per-block emitted light, same indexing
@@ -313,26 +297,12 @@ private:
     std::vector<uint8_t> chunkDirty_; // per ring slot: edited since gen/load (needs saving)
     std::string          savePath_;   // <config.saveDir>/<seed>; empty = persistence off
 
-    // Block ids the terrain generator places, resolved by name from the
-    // registry once at construction so generateColumn() stays a cheap loop.
+    // Block ids the flat generator places, resolved by name from the registry
+    // once at construction so generateColumn() stays a cheap loop.
     uint16_t grassId_;
     uint16_t dirtId_;
     uint16_t stoneId_;
-    uint16_t sandId_;
-    uint16_t gravelId_; // pebbly shores
-    uint16_t cobbleId_; // cairns
-    uint16_t logId_;    // lantern-tree stalks
-    uint16_t glowId_;   // lantern caps + buried geodes
-    uint16_t trunkId_;  // oak tree trunk (thin model block)
-    uint16_t leavesId_; // oak tree canopy (cross block)
-    // Other tree species (trunk + leafcube canopy each).
-    uint16_t birchTrunkId_, birchLeavesId_, pineTrunkId_, pineLeavesId_;
-    uint16_t bushId_;   // ground shrub (cross block)
-    // Extra ground plants, scattered by biome `plant:` theme.
-    uint16_t tallGrassId_, fernId_, flowerRedId_, flowerYellowId_, redMushroomId_;
-    uint16_t waterId_;  // sea-level liquid fill
-    uint16_t lavaId_;   // deep lava
-    uint16_t ironId_;   // the only ore (replaces stone in veins; world.yaml `ores`)
+    uint16_t cobbleId_;
 };
 
 } // namespace vg

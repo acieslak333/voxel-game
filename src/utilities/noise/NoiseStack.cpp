@@ -1,4 +1,4 @@
-#include "world/NoiseStack.h"
+#include "utilities/noise/NoiseStack.h"
 
 #include <algorithm>
 #include <cmath>
