@@ -229,7 +229,57 @@ void WorldRenderer::buildLightBlock(int cx, int cy, int cz, unsigned char* out) 
             }
 }
 
+namespace {
+// Downsample a chunk to `step`-blocky content: each step³ group becomes its
+// most-common block (a cheap majority vote, so a mostly-air group reads air and a
+// mostly-solid group reads solid). The result is still a 16³ chunk, but its uniform
+// step³ groups let the EXISTING greedy mesher merge them into ~1/step² the quads —
+// LOD without a resolution-aware mesher rewrite. Per-pixel atlas lighting (S7) works
+// unchanged on the larger quads.
+Chunk downsampleChunk(const Chunk& src, int step) {
+    constexpr int N = Chunk::kSize;
+    Chunk dst;
+    for (int z = 0; z < N; z += step)
+        for (int y = 0; y < N; y += step)
+            for (int x = 0; x < N; x += step) {
+                // Cheap majority: solid iff at least half the group is non-air; the
+                // representative id is the first solid found (close enough at LOD
+                // distance). O(step³) per group, vs the O(step⁶) of a full vote.
+                int solid = 0, total = 0;
+                Block firstSolid{};
+                for (int az = 0; az < step && z + az < N; ++az)
+                    for (int ay = 0; ay < step && y + ay < N; ++ay)
+                        for (int ax = 0; ax < step && x + ax < N; ++ax) {
+                            ++total;
+                            const Block c = src.get(x + ax, y + ay, z + az);
+                            if (c.id != 0) { ++solid; if (firstSolid.id == 0) firstSolid = c; }
+                        }
+                const Block best = (solid * 2 >= total) ? firstSolid : Block{};
+                for (int az = 0; az < step && z + az < N; ++az)
+                    for (int ay = 0; ay < step && y + ay < N; ++ay)
+                        for (int ax = 0; ax < step && x + ax < N; ++ax)
+                            dst.set(x + ax, y + ay, z + az, best);
+            }
+    return dst;
+}
+} // namespace
+
 MeshData WorldRenderer::meshChunkData(int cx, int cy, int cz) const {
+    // VG_LOD=N (2 or 4): mesh an N-blocky downsampled copy of every chunk — coarser
+    // geometry that greedy-meshes to far fewer triangles. Proof-of-concept gate; the
+    // distance-based LOD selection + cross-LOD seam handling are the next steps.
+    static const int kLod = [] {
+        const char* e = std::getenv("VG_LOD");
+        const int v = e ? std::atoi(e) : 1;
+        return v >= 1 ? v : 1;
+    }();
+    if (kLod > 1) {
+        const Chunk ds = downsampleChunk(world_.chunk(cx, cy, cz), kLod);
+        return ChunkMesher::greedyMesh(ds, world_.registry(), makeSampler(cx, cy, cz),
+                                       makeLightSampler(cx, cy, cz), /*smoothLighting=*/true,
+                                       glm::ivec3(cx, cy, cz) * kChunkSize,
+                                       makeTintSampler(cx, cy, cz));
+    }
     return ChunkMesher::greedyMesh(world_.chunk(cx, cy, cz), world_.registry(),
                                    makeSampler(cx, cy, cz), makeLightSampler(cx, cy, cz),
                                    /*smoothLighting=*/true,
