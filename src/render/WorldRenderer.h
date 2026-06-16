@@ -245,6 +245,9 @@ private:
     [[nodiscard]] MeshData meshChunkData(int cx, int cy, int cz) const;
 
     [[nodiscard]] int chunkIndex(int cx, int cy, int cz) const;
+    // S11: the LOD step (1 = full res, 2/4 = downsampled) for a chunk, by its
+    // horizontal chunk-distance from the LOD centre (the camera). 1 when LOD is off.
+    [[nodiscard]] int lodFor(int cx, int cy, int cz) const;
     void createUniformBuffers(uint32_t n);
     void createDescriptorSets(uint32_t n);
     // Per-frame GPU-driven draw resources: the chunk draw-data SSBO (binding 2) and
@@ -284,6 +287,15 @@ private:
     bool                    startupMelt_ = false;
     std::deque<glm::ivec3> pendingRemesh_;    // streaming remesh backlog (drained per frame)
     glm::ivec3             counts_{0};        // chunk grid dimensions
+    // S11 distance-based LOD. lodLevel_[slot] is the step a chunk's geometry is
+    // (being) meshed at; meshChunkData reads it on the worker, record() rewrites it
+    // on the main thread when the camera crosses a chunk boundary and queues the
+    // changed chunks for remesh. A single int read/write is atomic on the target, and
+    // a stale read just re-meshes at a slightly-off LOD that the next pass corrects —
+    // it is a render hint, not world data, so it sits outside the world-read barrier.
+    bool                   lodEnabled_ = false;
+    glm::ivec3             lodCenterChunk_{1 << 29}; // camera chunk; forces a first eval
+    std::vector<int>       lodLevel_;          // per-slot LOD step (1/2/4)
     std::size_t            drawnChunks_    = 0; // slots with geometry
     std::size_t            totalTriangles_ = 0;
     // Per-frame culling telemetry, recomputed each record(). Not part of the draw

@@ -264,17 +264,24 @@ Chunk downsampleChunk(const Chunk& src, int step) {
 }
 } // namespace
 
+int WorldRenderer::lodFor(int cx, int /*cy*/, int cz) const {
+    if (!lodEnabled_) return 1;
+    // Horizontal chunk-distance from the camera's chunk → coarser rings outward.
+    const int d = std::max(std::abs(cx - lodCenterChunk_.x), std::abs(cz - lodCenterChunk_.z));
+    if (d <= 5)  return 1;  // full detail near the player
+    if (d <= 10) return 2;  // half resolution
+    return 4;               // quarter resolution far out
+}
+
 MeshData WorldRenderer::meshChunkData(int cx, int cy, int cz) const {
-    // VG_LOD=N (2 or 4): mesh an N-blocky downsampled copy of every chunk — coarser
-    // geometry that greedy-meshes to far fewer triangles. Proof-of-concept gate; the
-    // distance-based LOD selection + cross-LOD seam handling are the next steps.
-    static const int kLod = [] {
-        const char* e = std::getenv("VG_LOD");
-        const int v = e ? std::atoi(e) : 1;
-        return v >= 1 ? v : 1;
-    }();
-    if (kLod > 1) {
-        const Chunk ds = downsampleChunk(world_.chunk(cx, cy, cz), kLod);
+    // S11: mesh at this chunk's current LOD step (set by the record() LOD eval; the
+    // worker reads it here). step 1 = full detail; 2/4 mesh a downsampled copy that
+    // greedy-merges to far fewer triangles. Per-pixel atlas lighting is unaffected.
+    const int step = lodLevel_.empty()
+                         ? 1
+                         : lodLevel_[static_cast<size_t>(chunkIndex(cx, cy, cz))];
+    if (step > 1) {
+        const Chunk ds = downsampleChunk(world_.chunk(cx, cy, cz), step);
         return ChunkMesher::greedyMesh(ds, world_.registry(), makeSampler(cx, cy, cz),
                                        makeLightSampler(cx, cy, cz), /*smoothLighting=*/true,
                                        glm::ivec3(cx, cy, cz) * kChunkSize,
@@ -542,6 +549,18 @@ void WorldRenderer::buildMeshes() {
     const size_t numSlots = static_cast<size_t>(counts_.x) * counts_.y * counts_.z;
     meshes_.resize(numSlots);
     drawDataCpu_.assign(numSlots, glm::vec4(0.0f)); // per-slot world pos for the SSBO
+    lodLevel_.assign(numSlots, 1);                  // S11: per-slot LOD step (1 = full res)
+    lodEnabled_ = std::getenv("VG_LOD") != nullptr; // distance-based LOD opt-in
+    if (lodEnabled_) {
+        // The player spawns at the window centre, so seed the LOD centre there and
+        // pre-fill each slot's level — chunks then mesh at their final LOD up front
+        // instead of meshing full-res and being re-meshed coarse on the first frame.
+        lodCenterChunk_ = counts_ / 2;
+        for (int cz = 0; cz < counts_.z; ++cz)
+            for (int cy = 0; cy < counts_.y; ++cy)
+                for (int cx = 0; cx < counts_.x; ++cx)
+                    lodLevel_[static_cast<size_t>(chunkIndex(cx, cy, cz))] = lodFor(cx, cy, cz);
+    }
 
     // Size the shared arena from the slot count. The per-slot budget is the one OOM
     // risk of the GPU-driven path: allocate() throws if a window's live geometry
@@ -1040,6 +1059,31 @@ void WorldRenderer::record(VkCommandBuffer cmd, uint32_t frameIndex, VkExtent2D 
                            const glm::vec4& heldLight, const glm::vec4& heldLightCol) {
     tickRetired();           // reap deferred buffer frees whose in-flight frames completed
     if (lightAtlas_) lightAtlas_->tick(); // recycle retired light slots + staging (S7)
+
+    // S11: when the camera moves into a new chunk, re-evaluate per-chunk LOD and
+    // queue any chunk whose ring changed for remesh (spread by the streaming pump).
+    if (lodEnabled_) {
+        const glm::vec3 camPos = glm::vec3(glm::inverse(view)[3]);
+        const glm::ivec3 camChunk(static_cast<int>(std::floor(camPos.x / Chunk::kSize)),
+                                  static_cast<int>(std::floor(camPos.y / Chunk::kSize)),
+                                  static_cast<int>(std::floor(camPos.z / Chunk::kSize)));
+        if (camChunk != lodCenterChunk_) {
+            lodCenterChunk_ = camChunk;
+            std::vector<glm::ivec3> changed;
+            for (const uint32_t slot : drawList_) {
+                const glm::vec3 wp = meshes_[slot].worldPos; // exact multiple of kSize
+                const glm::ivec3 cc(static_cast<int>(wp.x) / Chunk::kSize,
+                                    static_cast<int>(wp.y) / Chunk::kSize,
+                                    static_cast<int>(wp.z) / Chunk::kSize);
+                const int desired = lodFor(cc.x, cc.y, cc.z);
+                if (desired != lodLevel_[slot]) {
+                    lodLevel_[slot] = desired; // worker reads this when it remeshes
+                    changed.push_back(cc);
+                }
+            }
+            if (!changed.empty()) streamRemesh(changed);
+        }
+    }
 
     // Advance the animation clock one frame (~60fps). Used by the vertex shader for
     // foliage sway + water waves; wrapped so the float stays small over long sessions.
