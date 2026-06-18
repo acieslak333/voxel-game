@@ -45,7 +45,7 @@ inline glm::vec3 unpackLightColor(uint32_t p) {
 // seed, so they are never written). Format: magic + version + edge length, then
 // id(u16)+metadata(u8) per voxel in the chunk's storage order. See docs/STREAMING.md.
 constexpr uint32_t kChunkMagic   = 0x4B4E4843u; // 'CHNK'
-constexpr uint32_t kChunkVersion = 17u; // bump: coherent low-freq fBm field (S1, replaces anisotropic speckle)
+constexpr uint32_t kChunkVersion = 23u; // bump: sparse height-varied islands + noise-jittered material bands
 
 std::string chunkPath(const std::string& dir, int cx, int cy, int cz) {
     return dir + "/c." + std::to_string(cx) + '.' + std::to_string(cy) + '.' +
@@ -114,6 +114,9 @@ World::World(const WorldConfig& config, const std::string& blocksFile)
     dirtId_   = registry_.idByName("dirt");
     stoneId_  = registry_.idByName("stone");
     cobbleId_ = registry_.idByName("cobblestone");
+    sandId_   = registry_.idByName("sand");
+    waterId_  = registry_.idByName("water");
+    snowId_   = registry_.idByName("snow");
 
     buildLightColorPalette();
 
@@ -250,6 +253,351 @@ void World::generateColumnInto(int cx, int cz, Chunk* const* stack,
         return; // the whole column was loaded from disk
     }
 
+    // ===========================================================================
+    //  Terrain generator — SELECTABLE (switch). The Minecraft Beta 1.7.3-style
+    //  generator (GenMode::Beta173) is the ACTIVE one; the older multi-layer
+    //  3D-Perlin density blend (GenMode::Layered3DPerlin) is kept here for
+    //  comparison/fallback. Flip kGenMode to switch back.
+    //
+    //  The Beta branch is a faithful STRUCTURAL port of the Beta 1.7.3 overworld
+    //  (ChunkProviderGenerate.generateTerrain + initializeNoiseField +
+    //  replaceBlocksForBiome): a coarse 3D density lattice (every 4 blocks in X/Z,
+    //  8 in Y) trilinearly interpolated into the block volume, shaped by 2D
+    //  depth/scale fields + a height gradient, then skinned grass/dirt/stone.
+    //  It is NOT bit-exact (our FastNoise permutation/seeding differs from Beta's
+    //  and our fbm() is normalised to ~[-1,1], so the magic constants are retuned
+    //  to that range) — it reproduces the Beta SHAPE/LOOK, not its exact bytes.
+    //
+    //  Block mapping: Beta STONE -> stone, ocean fill (non-solid below sea level) ->
+    //  water (translucent), surface cap -> grass on land / sand on shores+seabed,
+    //  filler -> dirt or sand, bare alpine peaks -> stone, bottom -> stone (no bedrock
+    //  block). Biomes/caves/decoration (trees, ores, lakes) are intentionally NOT
+    //  ported — only the terrain shape, water, and surface skin.
+    enum class GenMode { Beta173, Layered3DPerlin };
+    constexpr GenMode kGenMode = GenMode::Beta173;
+
+    switch (kGenMode) {
+    // =======================================================================
+    case GenMode::Beta173: {
+        // --- Tunables (per-block frequencies & density amplitudes) ----------
+        // Frequencies are multipliers applied to WORLD block coords before the
+        // noise sample, so adjacent chunks share lattice points on their seam and
+        // terrain is seamless/streaming-safe. Lower freq => larger features.
+        constexpr int    kSeaLevel    = 64;      // sea level = where water fills non-solid cells
+        constexpr int    latX         = 4;       // density lattice spacing, X (blocks)
+        constexpr int    latZ         = 4;       // density lattice spacing, Z (blocks)
+        constexpr int    latY         = 8;       // density lattice spacing, Y (blocks)
+        // The world is a true 3D density field (solid where density>0). It is the SUM
+        // of a 2D macro height gradient (continent + hills + masked mountains -> base
+        // surface) and 3D noise that perturbs it (stony overhangs/cliffs), MAXed with
+        // a separate threshold-windowed field that injects floating islands in a sky
+        // band. Several noises, each with its own frequency/octaves and (for the
+        // mountain & island fields) a value WINDOW, so the terrain is layered, not flat.
+
+        // ---- 2D macro: continent (sea vs land), hills, mountain mask ----------
+        constexpr double kContFreq    = 0.0016;  // continent field: BIG seas vs landmasses
+        constexpr int    kContOct     = 4;       // low octaves -> full swing (deep seas form)
+        constexpr double kBaseY       = 64.0;    // continent-zero level == sea level
+        constexpr double kSeaSpan     = 52.0;    // continent=-1 -> ~y12 (deep ocean floor)
+        constexpr double kLandSpan    = 26.0;    // continent=+1 -> ~y90 (high land base)
+        constexpr double kHillFreq    = 0.0090;  // rolling hills (on land)
+        constexpr int    kHillOct     = 4;
+        constexpr double kHillRelief  = 22.0;    // hill height added on land (0..this)
+        constexpr double kMtnFreq     = 0.0042;  // mountain MASK (big, infrequent massifs)
+        constexpr int    kMtnOct      = 4;       // LOW octaves so the mask swings full
+        constexpr double kMtnLo       = 0.42;    // mask WINDOW: below -> no mountain here
+        constexpr double kMtnHi       = 0.74;    // mask WINDOW: above -> full mountain
+        constexpr double kMtnRelief   = 115.0;   // mountain height added — peaks tower up to the
+                                                 // floating-island band (taper-capped ~y168)
+        constexpr double kRidgeFreq   = 0.0150;  // sharp alpine ridgelines carved into peaks
+        constexpr int    kRidgeOct    = 4;
+        constexpr double kRidgeBias   = 0.40;    // base ridge multiplier (lower -> spikier crests)
+
+        // ---- 3D detail: overhangs / stony cliffs (Beta look) ------------------
+        constexpr double kGrad        = 1.0;     // density per block of the height gradient
+        constexpr double kBaseDetail  = 6.0;     // gentle 3D wobble on hills (soft ledges)
+        constexpr double kMtnDetail   = 30.0;    // BIG 3D swing in mountains (stony overhangs/cliffs)
+        constexpr double kMainFreqXZ  = 0.0130;  // 3D: min<->max density selector
+        constexpr double kMainFreqY   = 0.0065;
+        constexpr double kDetailFreqXZ= 0.0340;  // 3D: min/max detail density
+        constexpr double kDetailFreqY = 0.0170;  // half of XZ -> vertical stretch (Beta look)
+        constexpr int    kMainOct     = 6;
+        constexpr int    kDetailOct   = 5;
+
+        // ---- Floating islands: sparse 2D mask + per-region altitude + 3D shape -
+        // A 2D mask (thresholded -> sparse) says WHERE an island is; a 2D altitude
+        // field puts each at its OWN random height; a 3D shape noise makes it a blobby
+        // slab. Solidified INDEPENDENTLY of the ground (MAXed in) -> detached islands.
+        // Two 2D fields drive WHERE an island is and at WHAT altitude (so each one
+        // floats at its own random height), a 3D field gives it an irregular blobby
+        // shape. A high mask threshold keeps them SPARSE.
+        constexpr double kIslMaskFreq = 0.0090;  // 2D: where islands are (per region)
+        constexpr int    kIslMaskOct  = 3;
+        constexpr double kIslThresh   = 0.62;    // mask onset (higher -> FEWER islands)
+        constexpr double kIslAltFreq  = 0.0130;  // 2D: per-region island altitude (random heights)
+        constexpr int    kIslAltOct   = 3;
+        constexpr int    kIslLow      = 88;      // island altitudes span these Y...
+        constexpr int    kIslHigh     = 172;     //   ...bounds (random within)
+        constexpr double kIslThick    = 16.0;    // half-thickness of an island slab (blocks)
+        constexpr double kIslShapeFreqXZ = 0.022;// 3D: irregular island shape
+        constexpr double kIslShapeFreqY  = 0.040;
+        constexpr int    kIslShapeOct = 3;
+        constexpr double kIslSolid    = 40.0;    // island solidity scale
+        constexpr double kIslCut      = 16.0;    // subtracted -> only dense cores solidify
+
+        // ---- Surface skin bands + misc ---------------------------------------
+        // The material lines are PERTURBED per-column by noise so the grass/stone/snow
+        // boundaries wiggle (grass climbs higher in places, rock & snow dip lower) —
+        // natural blended transitions instead of straight horizontal contour cutoffs.
+        constexpr int    kStoneLine   = 96;      // base: surface above -> bare stone (below = grass)
+        constexpr int    kSnowLine    = 134;     // base: surface above -> snow cap
+        constexpr double kBandFreq    = 0.022;   // smooth large-scale line wander
+        constexpr double kBandFreq2   = 0.090;   // finer grain so the edge breaks up
+        constexpr double kBandJitter  = 16.0;    // ± blocks the smooth term moves a line
+        constexpr double kBandGrain   = 6.0;     // ± blocks the fine term adds
+        constexpr double kSurfFreq    = 0.0625;  // surface skin-depth jitter (Beta noiseGen4, 1/16)
+        constexpr int    kSurfOct     = 4;
+        constexpr double kTaperAir    = -200.0;  // top lattice layers forced to air
+
+        const int gx = N / latX + 1;          // 5 lattice columns across a 16-wide chunk
+        const int gz = N / latZ + 1;          // 5
+        const int gy = worldTop / latY + 1;   // 17 for a 128-tall world (ys in Beta)
+        const int baseX = cx * N;
+        const int baseZ = cz * N;
+
+        // Independent noise fields (distinct seed offsets -> independent generators,
+        // matching Beta's separate NoiseGeneratorOctaves per role).
+        vg::Noise contNoise  (config_.seed + 8008u); // continent (sea vs land)
+        vg::Noise hillNoise  (config_.seed + 4001u);
+        vg::Noise ridgeNoise (config_.seed + 5002u);
+        vg::Noise mtnNoise   (config_.seed + 7007u); // mountain mask
+        vg::Noise mainNoise  (config_.seed + 3003u);
+        vg::Noise minNoise   (config_.seed + 1004u);
+        vg::Noise maxNoise   (config_.seed + 2005u);
+        vg::Noise islMaskNoise (config_.seed + 9009u); // island placement (where)
+        vg::Noise islAltNoise  (config_.seed + 9100u); // island altitude (random height)
+        vg::Noise islShapeNoise(config_.seed + 9200u); // island 3D blobby shape
+        vg::Noise bandNoise    (config_.seed + 9300u); // surface-band line jitter
+        vg::Noise surfNoise  (config_.seed + 6006u);
+
+        // --- initializeNoiseField: build the coarse density lattice -----------
+        std::vector<double> dens(static_cast<size_t>(gx) * gz * gy);
+        const auto dAt = [&](int ix, int iz, int iy) -> double& {
+            return dens[(static_cast<size_t>(iz) * gx + ix) * gy + iy];
+        };
+        for (int ix = 0; ix < gx; ++ix) {
+            for (int iz = 0; iz < gz; ++iz) {
+                const double wxL = baseX + ix * latX;
+                const double wzL = baseZ + iz * latZ;
+
+                // 2D macro fields (our fbm is ~[-1,1]).
+                const double contN  = contNoise.fbm(static_cast<float>(wxL * kContFreq),
+                                                    static_cast<float>(wzL * kContFreq), kContOct);
+                const double hillN  = hillNoise.fbm(static_cast<float>(wxL * kHillFreq),
+                                                    static_cast<float>(wzL * kHillFreq), kHillOct);
+                const double mtnN   = mtnNoise.fbm(static_cast<float>(wxL * kMtnFreq),
+                                                   static_cast<float>(wzL * kMtnFreq), kMtnOct);
+                const double ridgeN = ridgeNoise.fbm(static_cast<float>(wxL * kRidgeFreq),
+                                                     static_cast<float>(wzL * kRidgeFreq), kRidgeOct);
+
+                // Continent: big seas (contN<0, dips well below sea level) vs landmasses
+                // (contN>0, rises). `land` (0 in deep sea -> 1 on high land) gates the
+                // hills+mountains so the ocean stays low and open.
+                const double contH = kBaseY + contN * (contN < 0.0 ? kSeaSpan : kLandSpan);
+                double land = contN * 0.5 + 0.5;
+                land = land < 0.0 ? 0.0 : (land > 1.0 ? 1.0 : land);
+
+                // Rolling hills (mild).
+                const double hill = hillN * 0.5 + 0.5;       // [0,1]
+                const double hillHeight = hill * kHillRelief;
+
+                // Mountain mask WINDOW -> smoothstep weight mw in [0,1]; ridged so the
+                // massifs are jagged. mw also drives how violent the 3D detail is here
+                // (gentle on hills, big stony overhangs on mountains).
+                double mw = (mtnN * 0.5 + 0.5 - kMtnLo) / (kMtnHi - kMtnLo);
+                mw = mw < 0.0 ? 0.0 : (mw > 1.0 ? 1.0 : mw);
+                mw = mw * mw * (3.0 - 2.0 * mw);             // smoothstep
+                const double ridge = 1.0 - std::fabs(ridgeN);                       // [0,1] crests
+                const double mtnHeight = mw * (kRidgeBias + (1.0 - kRidgeBias) * ridge) * kMtnRelief;
+
+                const double baseHeightBlocks = contH + (hillHeight + mtnHeight) * land;
+                const double detailAmp = kBaseDetail + mw * kMtnDetail;
+
+                // Floating islands (per column): a SPARSE 2D mask decides whether this
+                // region has one; a 2D altitude field places it at a RANDOM height. The
+                // per-voxel slab below is built around these.
+                double islStrength = 0.0;   // 0 = no island in this column
+                double islCenterY  = 0.0;   // island altitude (blocks)
+                {
+                    const double mk = islMaskNoise.fbm(static_cast<float>(wxL * kIslMaskFreq),
+                                                       static_cast<float>(wzL * kIslMaskFreq),
+                                                       kIslMaskOct) * 0.5 + 0.5;
+                    if (mk > kIslThresh) {
+                        islStrength = (mk - kIslThresh) / (1.0 - kIslThresh); // 0..1 (edge -> thin)
+                        const double alt = islAltNoise.fbm(static_cast<float>(wxL * kIslAltFreq),
+                                                           static_cast<float>(wzL * kIslAltFreq),
+                                                           kIslAltOct) * 0.5 + 0.5;
+                        islCenterY = kIslLow + alt * (kIslHigh - kIslLow);
+                    }
+                }
+
+                for (int iy = 0; iy < gy; ++iy) {
+                    const double yB = static_cast<double>(iy) * latY; // world Y of this lattice row
+
+                    // 3D detail (Beta min/max blend, selector-mixed) -> [-1,1].
+                    const double mainV = mainNoise.fbm(static_cast<float>(wxL * kMainFreqXZ),
+                                                       static_cast<float>(yB * kMainFreqY),
+                                                       static_cast<float>(wzL * kMainFreqXZ), kMainOct);
+                    const double mn = minNoise.fbm(static_cast<float>(wxL * kDetailFreqXZ),
+                                                   static_cast<float>(yB * kDetailFreqY),
+                                                   static_cast<float>(wzL * kDetailFreqXZ), kDetailOct);
+                    const double mx = maxNoise.fbm(static_cast<float>(wxL * kDetailFreqXZ),
+                                                   static_cast<float>(yB * kDetailFreqY),
+                                                   static_cast<float>(wzL * kDetailFreqXZ), kDetailOct);
+                    const double sel = (mainV + 1.0) * 0.5;          // [0,1]
+                    const double nd  = mn + (mx - mn) * (sel < 0.0 ? 0.0 : (sel > 1.0 ? 1.0 : sel));
+
+                    // Terrain density: positive below the surface, perturbed by the 3D
+                    // detail (so the surface gains ledges/overhangs, big in mountains).
+                    double out = (baseHeightBlocks - yB) * kGrad + nd * detailAmp;
+
+                    // Floating islands: a slab centred on islCenterY, made irregular by a
+                    // 3D shape noise and solidified INDEPENDENTLY of the ground (MAXed in)
+                    // so it floats detached. Each column's island sits at its own height.
+                    if (islStrength > 0.0) {
+                        const double shape = islShapeNoise.fbm(static_cast<float>(wxL * kIslShapeFreqXZ),
+                                                               static_cast<float>(yB  * kIslShapeFreqY),
+                                                               static_cast<float>(wzL * kIslShapeFreqXZ),
+                                                               kIslShapeOct);
+                        const double vert = 1.0 - std::fabs(yB - islCenterY) / kIslThick; // >0 within slab
+                        if (vert > 0.0) {
+                            const double island = (vert + shape * 0.5) * kIslSolid * islStrength - kIslCut;
+                            if (island > out) out = island;
+                        }
+                    }
+
+                    if (iy > gy - 4) {             // taper the top 3 lattice layers toward air
+                        const double t = static_cast<double>(iy - (gy - 4)) / 3.0;
+                        out = out * (1.0 - t) + kTaperAir * t;
+                    }
+                    dAt(ix, iz, iy) = out;
+                }
+            }
+        }
+
+        // --- generateTerrain: trilinearly interpolate the lattice into blocks --
+        // density > 0 => stone; otherwise water if below sea level (Beta fills every
+        // non-solid cell under sea level with water — that IS how oceans/lakes form),
+        // else air. The water is drawn translucent by the mesher (it keys off the
+        // "water" block name).
+        for (int ix = 0; ix < gx - 1; ++ix) {
+            for (int iz = 0; iz < gz - 1; ++iz) {
+                for (int iy = 0; iy < gy - 1; ++iy) {
+                    const double c000 = dAt(ix,     iz,     iy);
+                    const double c001 = dAt(ix,     iz,     iy + 1);
+                    const double c100 = dAt(ix + 1, iz,     iy);
+                    const double c101 = dAt(ix + 1, iz,     iy + 1);
+                    const double c010 = dAt(ix,     iz + 1, iy);
+                    const double c011 = dAt(ix,     iz + 1, iy + 1);
+                    const double c110 = dAt(ix + 1, iz + 1, iy);
+                    const double c111 = dAt(ix + 1, iz + 1, iy + 1);
+                    for (int sy = 0; sy < latY; ++sy) {
+                        const double ty = static_cast<double>(sy) / latY;
+                        const double e00 = c000 + (c001 - c000) * ty; // lerp along Y, 4 edges
+                        const double e10 = c100 + (c101 - c100) * ty;
+                        const double e01 = c010 + (c011 - c010) * ty;
+                        const double e11 = c110 + (c111 - c110) * ty;
+                        const int wy = iy * latY + sy;
+                        const int chunkCy = wy / N;
+                        if (!needNoise[static_cast<size_t>(chunkCy)]) { continue; }
+                        Chunk* dstChunk = stack[static_cast<size_t>(chunkCy)];
+                        const int ly = wy % N;
+                        for (int sx = 0; sx < latX; ++sx) {
+                            const double tx = static_cast<double>(sx) / latX;
+                            const double f0 = e00 + (e10 - e00) * tx; // lerp along X
+                            const double f1 = e01 + (e11 - e01) * tx;
+                            const int lx = ix * latX + sx;
+                            for (int sz = 0; sz < latZ; ++sz) {
+                                const double tz = static_cast<double>(sz) / latZ;
+                                const double density = f0 + (f1 - f0) * tz; // lerp along Z
+                                if (density > 0.0) {
+                                    dstChunk->set(lx, ly, iz * latZ + sz, Block{stoneId_, 0});
+                                } else if (wy < kSeaLevel) {
+                                    dstChunk->set(lx, ly, iz * latZ + sz, Block{waterId_, 0});
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // --- replaceBlocksForBiome: surface skin (elevation-banded) ------------
+        // Walk each column top-down (water counts as "above" so the seabed STONE is
+        // the surface, matching Beta): the first solid hit gets a cap over a few
+        // blocks of filler, then stone below. The cap material is chosen by elevation:
+        //   <= kBeachTop ...... SAND  (beaches + seabed)
+        //   <  kStoneLine ..... GRASS over DIRT (rolling hills)
+        //   <  kSnowLine ...... bare STONE (mountain cliffs)
+        //   >= kSnowLine ...... SNOW cap over DIRT (high peaks)
+        // A too-thin surface (steep face) is always left as bare stone regardless of
+        // band -> rocky cliffs. The bottom layer stays stone (no bedrock block).
+        constexpr int kBeachTop = kSeaLevel + 2; // surfaces at/under this -> sandy
+        for (int lx = 0; lx < N; ++lx) {
+            for (int lz = 0; lz < N; ++lz) {
+                const int wx = baseX + lx;
+                const int wz = baseZ + lz;
+                const double surf = surfNoise.fbm(static_cast<float>(wx * kSurfFreq),
+                                                  static_cast<float>(wz * kSurfFreq), kSurfOct);
+                const int dirtDepth = static_cast<int>(surf * 2.0 + 3.0); // ~1..5 blocks of skin
+                // Per-column jitter of the material-band lines: a smooth wander + a fine
+                // grain, so the grass/stone/snow boundaries wiggle and interleave (grass
+                // climbs higher in spots, rock & snow dip lower) instead of cutting off
+                // at a straight Y. The two lines share the smooth term so they move
+                // together (a region that lifts grass also lifts the snow line).
+                const double bj  = bandNoise.fbm(static_cast<float>(wx * kBandFreq),
+                                                 static_cast<float>(wz * kBandFreq), 4);
+                const double bjg = bandNoise.fbm(static_cast<float>(wx * kBandFreq2),
+                                                 static_cast<float>(wz * kBandFreq2), 2);
+                const int stoneLine = kStoneLine + static_cast<int>(bj * kBandJitter + bjg * kBandGrain);
+                const int snowLine  = kSnowLine  + static_cast<int>(bj * kBandJitter * 1.3 + bjg * kBandGrain);
+                const int beachTop  = kBeachTop  + static_cast<int>(bjg * 2.0);
+                int remaining = -1;   // -1 = above surface; >=0 = laying filler
+                uint16_t fillBlock = dirtId_;
+                for (int wy = worldTop - 1; wy >= 0; --wy) {
+                    const int chunkCy = wy / N;
+                    const int ly = wy % N;
+                    const Block here = stack[static_cast<size_t>(chunkCy)]->get(lx, ly, lz);
+                    const bool writable = needNoise[static_cast<size_t>(chunkCy)] != 0;
+                    if (here.isAir() || here.id == waterId_) {
+                        remaining = -1;            // air / water column -> still above the surface
+                    } else if (here.id == stoneId_) {
+                        if (remaining == -1) {     // first solid block = the surface
+                            // Pick the cap/filler by elevation band.
+                            uint16_t topBlock;
+                            if (wy <= beachTop)         { topBlock = sandId_;  fillBlock = sandId_; }
+                            else if (wy < stoneLine)    { topBlock = grassId_; fillBlock = dirtId_; }
+                            else if (wy < snowLine)     { topBlock = stoneId_; fillBlock = stoneId_; }
+                            else                        { topBlock = snowId_;  fillBlock = dirtId_; }
+                            remaining = dirtDepth;
+                            if (dirtDepth > 0 && writable) {
+                                stack[static_cast<size_t>(chunkCy)]->set(lx, ly, lz, Block{topBlock, 0});
+                            }
+                            // dirtDepth <= 0 -> leave bare stone (steep/alpine face)
+                        } else if (remaining > 0) {
+                            --remaining;
+                            if (writable) {
+                                stack[static_cast<size_t>(chunkCy)]->set(lx, ly, lz, Block{fillBlock, 0});
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        break;
+    }
+    // =======================================================================
+    case GenMode::Layered3DPerlin: {
     // --- 3D Perlin solid/air (multi-layer) ---------------------------------------
     // The world IS a blend of several 3D Perlin fields. Each layer samples its own
     // independently-seeded Perlin at the voxel's world position, remapped from
@@ -290,20 +638,61 @@ void World::generateColumnInto(int cx, int cz, Chunk* const* stack,
         Cell     cell;       // Voronoi return mode      (ignored by other types)
     };
     constexpr Layer kLayers[] = {
-        // type          seedOffset  freqX   freqY   freqZ  weight oct  metric             cell
-        // A single low-frequency, ISOTROPIC Perlin field. Low frequency (0.02 = ~50-
-        // block features) carves large CONTIGUOUS solid/air masses, so greedy meshing
-        // finds big coplanar runs to merge instead of per-voxel speckle. The old
-        // anisotropic freqY=0.4 oscillated solid/air every ~2.5 blocks vertically =
-        // maximal exposed surface = the slow-load "speckle"; making the frequency
-        // isotropic and low cut triangles ~72% and mesh time ~60% (measured).
-        //   For more surface detail at low cost, switch type to NType::Fbm and raise
-        //   `oct` (octave count) — falling-amplitude octaves add roughness without
-        //   re-fragmenting the field; the gen cost (one Perlin call per octave) is
-        //   what the upcoming SIMD batch-sampling step (S2) is meant to absorb.
-        {NType::Perlin,        202u,  0.02f,  0.02f,  0.02f,  1.00f, 1,  Metric::Euclidean, Cell::F1},
+        // type          seedOffset  freqX    freqY    freqZ   weight oct  metric             cell
+        // Minecraft Beta 1.7.3-STYLE density (approximation in this layer+spline model).
+        // The defining Beta traits we reproduce here:
+        //   * 128-tall world, sea level 64 -> surface forms around normalised h=0.5
+        //     (set world.yaml height_chunks: 8 so 8*16 = 128).
+        //   * VERTICALLY-STRETCHED 3D density: Beta samples the main density noise with
+        //     yScale half of xScale, so features lean/stretch upward and you get the
+        //     famous overhangs & floating islands. We mirror that with freqY = freqX/2.
+        //   * MULTI-OCTAVE fractal density (Beta blends 16-octave fields) -> Fbm here.
+        // What we DON'T reproduce: Beta's exact 5x5x17 interpolated min/max-limit field
+        // selected by an 8-octave noise, plus 2D depth/scale noise. This is a visual
+        // approximation of the same shape, tuned via the spline below — not bit-exact.
+        // Main density: low-frequency, vertically stretched -> big rolling hills + overhangs.
+        {NType::Fbm,           303u,  0.000125f, 0.001f, 0.000125f, 1.00f, 6,  Metric::Euclidean, Cell::F1},
+        {NType::Fbm,           101u,  0.0125f, 0.00625f, 0.0125f, 0.70f, 6,  Metric::Euclidean, Cell::F1},
+        // Detail: higher-frequency roughness on top (also y-stretched), lighter weight.
+        {NType::Fbm,           202u,  0.035f,  0.0175f,  0.035f,  0.35f, 4,  Metric::Euclidean, Cell::F1},
     };
-    constexpr float kThreshold = 0.5f; // [0,1] cutoff: >= solid, < air
+    // Height-varying solidity threshold -------------------------------------------
+    // The [0,1] cutoff is no longer constant: it's a function of NORMALISED world
+    // height h in [0,1] (0 = world floor, 1 = world ceiling), so the same profile
+    // works at any world size. It's a small piecewise-LINEAR spline of (h, threshold)
+    // control points — find the two bracketing h and lerp between them; outside the
+    // authored range it clamps to the nearest endpoint. Points MUST stay sorted by h
+    // ascending. Edit/add points freely to sculpt the profile. To get curved blends
+    // later, swap the lerp below for smoothstep / Catmull-Rom — the call site below is
+    // unchanged. `static` gives the array static storage so the lambda needs no capture.
+    struct ThresholdPoint { float h; float threshold; };
+    static constexpr ThresholdPoint kThresholdSpline[] = {
+        //     h    threshold     (h=0 floor .. h=1 ceiling; h~0.5 == Beta sea level y64)
+        // Beta-style vertical density bias: solid floor, a surface band crossing the
+        // noise mean (0.5) right at sea level, thinning to air toward the sky. The slope
+        // is deliberately gentle through the middle so the 3D noise can punch out the
+        // overhangs / floating islands Beta is known for; steepen it for tamer terrain.
+        {   0.00f,  0.05f}, // bedrock floor: almost always solid
+        {   0.30f,  0.1f}, // underground: still mostly solid
+        {   0.50f,  0.50f}, // sea level (y~64): surface forms here (noise mean)
+        {   0.70f,  0.65f}, // hills / mountains thin out
+        {   1.00f,  0.92f}, // sky: almost always air
+    };
+    const auto thresholdAt = [](float h) -> float {
+        constexpr size_t count = std::size(kThresholdSpline);
+        if (h <= kThresholdSpline[0].h)         { return kThresholdSpline[0].threshold; }
+        if (h >= kThresholdSpline[count - 1].h) { return kThresholdSpline[count - 1].threshold; }
+        for (size_t i = 1; i < count; ++i) {
+            const ThresholdPoint& b = kThresholdSpline[i];
+            if (h <= b.h) {
+                const ThresholdPoint& a = kThresholdSpline[i - 1];
+                const float t = (h - a.h) / (b.h - a.h); // 0..1 within this segment
+                return a.threshold + t * (b.threshold - a.threshold);
+            }
+        }
+        return kThresholdSpline[count - 1].threshold; // unreachable (clamped above)
+    };
+    const float invWorldTop = worldTop > 1 ? 1.0f / static_cast<float>(worldTop - 1) : 0.0f;
 
     // Build one Perlin field per layer (seed is vg::Noise's sole parameter).
     std::vector<vg::Noise> fields;
@@ -345,12 +734,16 @@ void World::generateColumnInto(int cx, int cz, Chunk* const* stack,
                     v += L.weight * n;
                 }
                 v /= weightSum; // normalise back to [0,1]
-                if (v >= kThreshold) {
+                if (v >= thresholdAt(static_cast<float>(wy) * invWorldTop)) {
                     stack[static_cast<size_t>(cy)]->set(lx, wy % N, lz, Block{stoneId_, 0});
                 }
             }
         }
     }
+        break;
+    }
+    } // switch (kGenMode)
+
     for (int cy = 0; cy < counts_.y; ++cy) {
         if (needNoise[static_cast<size_t>(cy)]) {
             *dirtyFlags[static_cast<size_t>(cy)] = 0; // fresh from noise == clean
@@ -863,6 +1256,11 @@ bool World::setLightFalloff(int skyFalloff, int blockFalloff) {
     computeSkyLight();
     computeBlockLight();
     return true;
+}
+
+void World::recomputeLight() {
+    computeSkyLight();
+    computeBlockLight();
 }
 
 std::vector<glm::ivec3> World::setBlock(int wx, int wy, int wz, Block b) {

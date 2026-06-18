@@ -268,8 +268,16 @@ App::App()
                            static_cast<float>(world_.surfaceHeight(cx, cz)) + 2.0f,
                            static_cast<float>(cz));
     // Recentre the streamed window onto the spawn so the eastern coast is loaded from
-    // frame 0. A jump this large takes recenter()'s synchronous full-regen path (it
-    // also recomputes sky/block light); we then rebuild the window's meshes (melt-in).
+    // frame 0. The window is generated at origin {0,0,0} with the spawn chunk at its
+    // CORNER, so this recenter shifts it viewRadius chunks in both X and Z. That shift
+    // is SMALLER than the window width, so recenter() takes the incremental shiftColumn
+    // path (NOT the teleport full-regen path): it generates the entering columns but
+    // DEFERS their relight to relightBoxes(), recording boxes in intermediate-origin
+    // coordinates (X columns recorded before the Z shifts moved the origin). Replaying
+    // those boxes against the final window is wrong, so we just recompute both light
+    // fields from scratch here — a one-time startup cost. Without this, the entering
+    // columns keep the stale light of the chunks that previously held their ring slots,
+    // baking dark/incorrect lighting into the atlas until those chunks next stream in.
     // streamBarrier first so no mesh worker reads the world mid-regen (invariant #1).
     if (world_.streaming()) {
         constexpr int N = Chunk::kSize;
@@ -278,6 +286,7 @@ App::App()
         worldRenderer_.streamBarrier();
         std::vector<glm::ivec4> boxes;
         world_.recenter(scx, scz, boxes);
+        world_.recomputeLight(); // entering columns' deferred relight, done correctly
         worldRenderer_.remeshAll();
     }
     player_.teleport(spawnFeet_);

@@ -68,7 +68,13 @@ view_radius: 4
 # roughly HALVES that cost (the biggest streaming-lag lever) — but check the island
 # /mountains still look right, and halve biomes.yaml's sea_level + spline y-values +
 # snow_line + the ores max_y to match.
-height_chunks: 16
+# 12 * 16 = 192 blocks tall. Beta is 128 (sea level 64), but the mountainous
+# generator needs vertical headroom so its stony-cliff peaks (snow-capped) can
+# tower ~3x above the rolling hills — sea level stays 64, hills top out ~y88, and
+# mountains reach ~y168. Raising this is the dominant streaming cost (each entering
+# column is height_chunks chunks to generate/relight/remesh); drop back to 8 for a
+# flatter, cheaper Beta-classic world.
+height_chunks: 12
 
 # -----------------------------------------------------------------------------
 #  stream_tuning: per-machine performance knobs for the chunk-streaming pipeline

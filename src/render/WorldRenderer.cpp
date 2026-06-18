@@ -1274,7 +1274,7 @@ void WorldRenderer::record(VkCommandBuffer cmd, uint32_t frameIndex, VkExtent2D 
             vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, waterPipeline_->handle());
             vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, waterPipeline_->layout(),
                                     0, 1, &descriptorSets_[frameIndex], 0, nullptr);
-            PushConstants pc{}; pc.params.x = 0.7f; // ~70% opacity — see the seabed through it
+            PushConstants pc{}; pc.params.x = 0.82f; // ~82% opacity — slightly translucent, seabed faintly shows
             vkCmdPushConstants(cmd, waterPipeline_->layout(), VK_SHADER_STAGE_VERTEX_BIT, 0,
                                Pipeline::kPushConstantSize, &pc);
             vkCmdDrawIndexedIndirect(cmd, waterIndirect_[frameIndex].handle(), 0,

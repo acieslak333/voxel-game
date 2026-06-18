@@ -30,6 +30,7 @@ Settings Settings::load(const std::string& path) {
     get("skyFalloff", s.skyFalloff);
     get("blockFalloff", s.blockFalloff);
     get("renderDistance", s.renderDistance);
+    get("arenaVertsPerSlot", s.arenaVertsPerSlot);
     get("darkNoise", s.darkNoise);
     get("retroAffine", s.retroAffine);
     get("retroColorBits", s.retroColorBits);
@@ -55,6 +56,7 @@ void Settings::save(const std::string& path) const {
     root["skyFalloff"]     = skyFalloff;
     root["blockFalloff"]   = blockFalloff;
     root["renderDistance"] = renderDistance;
+    root["arenaVertsPerSlot"] = arenaVertsPerSlot;
     root["darkNoise"]      = darkNoise;
     root["retroAffine"]    = retroAffine;
     root["retroColorBits"] = retroColorBits;

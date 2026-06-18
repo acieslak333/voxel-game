@@ -98,6 +98,37 @@
   textures:
     all: cobblestone.block.png
 
+- name: sand
+  hardness: 0.5
+  solid: true
+  opaque: true
+  textures:
+    all: sand.block.png
+
+# Water: a non-solid, non-opaque liquid. The mesher recognises it by NAME (see
+# ChunkMesher.cpp): source cells (metadata 0, e.g. the ocean) are greedy-meshed
+# into a SEPARATE translucent batch that the renderer alpha-blends over the
+# terrain behind it (the seabed shows through). opaque:false so it neither culls
+# neighbour faces nor blocks the seabed in the opaque sweep; light_opacity dims
+# light with depth so deep water reads darker. Placed by the worldgen below sea
+# level (see World::generateColumnInto).
+- name: water
+  solid: false
+  opaque: false
+  render: cube
+  light_opacity: 3
+  textures:
+    all: water.block.png
+
+# Snow: caps the highest mountain peaks (placed by the worldgen above the snow
+# line). A plain opaque solid cube using the snow texture.
+- name: snow
+  hardness: 0.2
+  solid: true
+  opaque: true
+  textures:
+    all: snow.block.png
+
 - name: planks
   hardness: 2.0
   solid: true

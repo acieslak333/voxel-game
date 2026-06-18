@@ -120,6 +120,15 @@ public:
     // lighting is baked into the vertex data.
     bool setLightFalloff(int skyFalloff, int blockFalloff);
 
+    // Recompute BOTH light fields from scratch over the whole current window.
+    // recenter()'s incremental shiftColumn path defers its relight to relightBoxes()
+    // and records boxes in intermediate-origin coords; a startup recenter that steps
+    // multiple columns in X then Z can't have those boxes replayed correctly against
+    // the final window, so the caller does a single full recompute instead (one-time
+    // startup cost). The caller must streamBarrier() first and remesh afterwards,
+    // since lighting is sampled per-pixel from the per-chunk light atlas.
+    void recomputeLight();
+
     // Recenter the loaded window so chunk column (centerChunkX, centerChunkZ) is in
     // the middle, streaming new chunks in and old ones out. Returns the chunk
     // coordinates whose meshes must be (re)built — newly generated columns plus any
@@ -303,6 +312,9 @@ private:
     uint16_t dirtId_;
     uint16_t stoneId_;
     uint16_t cobbleId_;
+    uint16_t sandId_;
+    uint16_t waterId_;
+    uint16_t snowId_;
 };
 
 } // namespace vg

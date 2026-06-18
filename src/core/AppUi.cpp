@@ -949,7 +949,7 @@ void App::buildMenu(Ui& ui, float px, float py, float pw, float ph) {
         // a change only persists here and takes effect on the next launch.
         const int rd = static_cast<int>(std::lround(
             sliderRow("Render dist (restart)", static_cast<float>(settings_.renderDistance),
-                      4.0f, 16.0f, 12, -1)));
+                      4.0f, 48.0f, 44, -1)));
         if (rd != settings_.renderDistance) {
             settings_.renderDistance = rd;
         }
