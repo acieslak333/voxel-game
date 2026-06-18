@@ -45,7 +45,7 @@ inline glm::vec3 unpackLightColor(uint32_t p) {
 // seed, so they are never written). Format: magic + version + edge length, then
 // id(u16)+metadata(u8) per voxel in the chunk's storage order. See docs/STREAMING.md.
 constexpr uint32_t kChunkMagic   = 0x4B4E4843u; // 'CHNK'
-constexpr uint32_t kChunkVersion = 42u; // bump: + voronoi coastal cliffs (no-float trees, cave shift, big ravines)
+constexpr uint32_t kChunkVersion = 43u; // bump: longer varied-floor ravines + multi-size tunnels (noodle/mid/big)
 
 std::string chunkPath(const std::string& dir, int cx, int cy, int cz) {
     return dir + "/c." + std::to_string(cx) + '.' + std::to_string(cy) + '.' +
@@ -473,11 +473,13 @@ void World::generateColumnInto(int cx, int cz, Chunk* const* stack,
         constexpr double kVorFreq     = 0.014;   // voronoi cell size
         constexpr double kVorShift    = 22.0;    // ± blocks the cave coords are shifted along cells
         // Ravines: occasional, narrow, tall, surface-cutting vertical canyons.
-        constexpr double kRavMaskFreq = 0.0040;  // ravine region size
+        constexpr double kRavMaskFreq = 0.0030;  // ravine region size (lower -> bigger -> LONGER ravines)
         constexpr double kRavThresh   = 0.62;    // region mask onset (lower -> MANY more ravines)
-        constexpr double kRavLineFreq = 0.0095;  // canyon centreline wander
-        constexpr double kRavWidth    = 0.150;   // canyon half-width band (MUCH wider gorges)
-        constexpr int    kRavDepth    = 100;     // how far below the surface a ravine cuts (MUCH deeper)
+        constexpr double kRavLineFreq = 0.0052;  // canyon centreline wander (lower -> LONGER, straighter canyons)
+        constexpr double kRavWidth    = 0.150;   // canyon half-width band (wide gorges)
+        constexpr double kRavFloorFreq= 0.012;   // ravine floor-depth variation frequency
+        constexpr int    kRavDepthMin = 26;      // min cut below surface (ravines need NOT reach bedrock)
+        constexpr int    kRavDepthVar = 54;      // + up to this, varied per column -> uneven, non-flat floor
         // Perched lakes: sparse, size-varied; fill carved air below a per-region level.
         constexpr double kLakeMaskFreq= 0.0050;  // lake region size (fbm -> varied patch sizes)
         constexpr double kLakeThresh  = 0.66;    // region onset (higher -> fewer lakes)
@@ -513,6 +515,9 @@ void World::generateColumnInto(int cx, int cz, Chunk* const* stack,
         vg::Noise forestNoise  (config_.seed + 5260u); // forest-DENSITY variation (sparse/normal/dense regions)
         vg::Noise caveNoiseA   (config_.seed + 6100u); // spaghetti cave field A (tunnel where A & B both ~0)
         vg::Noise caveNoiseB   (config_.seed + 6200u); // spaghetti cave field B
+        vg::Noise caveNoiseC   (config_.seed + 6150u); // noodle (fine) tunnel field C
+        vg::Noise caveNoiseD   (config_.seed + 6250u); // noodle (fine) tunnel field D
+        vg::Noise ravFloorNoise(config_.seed + 6550u); // ravine floor-depth variation (uneven bottom)
         vg::Noise caveSelNoise (config_.seed + 6300u); // 3D DENSITY selector (how cavey here, varies x/y/z)
         vg::Noise caveCheese   (config_.seed + 6400u); // 3D cavern field (big open rooms where high)
         vg::Noise ravMaskNoise (config_.seed + 6500u); // ravine region mask (occasional)
@@ -921,6 +926,7 @@ void World::generateColumnInto(int cx, int cz, Chunk* const* stack,
         // tunnel/cavern/selector fields are sampled per-voxel in the carve below.
         std::vector<int>   caveSurf(static_cast<size_t>(N) * N);   // surface Y estimate (for depth)
         std::vector<float> ravW(static_cast<size_t>(N) * N);       // ravine half-width here (0 = none)
+        std::vector<int>   ravFloor(static_cast<size_t>(N) * N);   // ravine floor Y (varied; carve down to here)
         std::vector<int>   lakeY(static_cast<size_t>(N) * N, -1);  // perched-lake level (-1 = no lake)
         std::vector<float> giantB(static_cast<size_t>(N) * N);     // giant-chamber threshold boost (2D)
         std::vector<float> pillarV(static_cast<size_t>(N) * N);    // pillar field 0..1 (2D)
@@ -942,13 +948,21 @@ void World::generateColumnInto(int cx, int cz, Chunk* const* stack,
                 const double rm = ravMaskNoise.fbm(static_cast<float>(wx * kRavMaskFreq),
                                                    static_cast<float>(wz * kRavMaskFreq), kRavOct) * 0.5 + 0.5;
                 float rw = 0.0f;
+                int rfloor = worldTop;   // sentinel: no ravine here
                 if (rm > kRavThresh) {
                     const double rl = ravLineNoise.fbm(static_cast<float>(wx * kRavLineFreq),
                                                        static_cast<float>(wz * kRavLineFreq), kRavOct);
                     const double band = (rm - kRavThresh) / (1.0 - kRavThresh) * kRavWidth; // wider in core
-                    if (std::fabs(rl) < band) rw = static_cast<float>(band - std::fabs(rl)); // >0 inside canyon
+                    if (std::fabs(rl) < band) {
+                        rw = static_cast<float>(band - std::fabs(rl)); // >0 inside canyon
+                        // Varied (uneven) floor that need NOT reach the bottom.
+                        const double fv = ravFloorNoise.fbm(static_cast<float>(wx * kRavFloorFreq),
+                                                            static_cast<float>(wz * kRavFloorFreq), 2) * 0.5 + 0.5;
+                        rfloor = caveSurf[col] - (kRavDepthMin + static_cast<int>(fv * kRavDepthVar));
+                    }
                 }
                 ravW[col] = rw;
+                ravFloor[col] = rfloor;
                 // Perched-lake region (sparse, fbm -> size-varied) + per-region water level.
                 const double lm = lakeMaskNoise.fbm(static_cast<float>(wx * kLakeMaskFreq),
                                                     static_cast<float>(wz * kLakeMaskFreq), kLakeOct) * 0.5 + 0.5;
@@ -1096,8 +1110,8 @@ void World::generateColumnInto(int cx, int cz, Chunk* const* stack,
                     if (here.isAir() || here.id == waterId_) { continue; } // only carve solids
                     const int depth = surf - wy;
                     bool cave = false;
-                    // Ravine: surface-cutting narrow vertical slot.
-                    if (ravW[col] > 0.0f && depth >= 0 && wy >= surf - kRavDepth) { cave = true; }
+                    // Ravine: surface-cutting vertical gorge, carved down to its varied floor.
+                    if (ravW[col] > 0.0f && depth >= 0 && wy >= ravFloor[col] && wy >= kCaveFloor) { cave = true; }
                     // Tunnels + caverns below the solid crust (3D selector + depth driven).
                     if (!cave && depth > kCrust) {
                         double crustF = static_cast<double>(depth - kCrust) / kCrustFade;
@@ -1117,14 +1131,37 @@ void World::generateColumnInto(int cx, int cz, Chunk* const* stack,
                                                                vg::Noise::Metric::Euclidean, vg::Noise::Cell::F2mF1);
                         const double cwx = wx + vor * kVorShift;
                         const double cwz = wz - vor * kVorShift;
-                        const double tw = kCaveThr * (0.45 + sel) * crustF;
+                        // MID tunnels — width varies a lot by region (the selector).
+                        const double tw = kCaveThr * (0.5 + sel * 1.2) * crustF;
                         const double c1 = caveNoiseA.fbm(static_cast<float>(cwx * kCaveFreqXZ),
                                                          static_cast<float>(wy * kCaveFreqY),
                                                          static_cast<float>(cwz * kCaveFreqXZ), kCaveOct);
                         const double c2 = caveNoiseB.fbm(static_cast<float>(cwx * kCaveFreqXZ),
                                                          static_cast<float>(wy * kCaveFreqY),
                                                          static_cast<float>(cwz * kCaveFreqXZ), kCaveOct);
-                        const bool tunnel = std::fabs(c1) < tw && std::fabs(c2) < tw;
+                        bool tunnel = std::fabs(c1) < tw && std::fabs(c2) < tw;
+                        // NOODLE tunnels — a finer, narrower second network (more, smaller tunnels).
+                        if (!tunnel) {
+                            const double nw = kCaveThr * 0.6 * crustF;
+                            const double c3 = caveNoiseC.fbm(static_cast<float>(cwx * kCaveFreqXZ * 2.4),
+                                                             static_cast<float>(wy * kCaveFreqY * 2.4),
+                                                             static_cast<float>(cwz * kCaveFreqXZ * 2.4), kCaveOct);
+                            const double c4 = caveNoiseD.fbm(static_cast<float>(cwx * kCaveFreqXZ * 2.4),
+                                                             static_cast<float>(wy * kCaveFreqY * 2.4),
+                                                             static_cast<float>(cwz * kCaveFreqXZ * 2.4), kCaveOct);
+                            tunnel = std::fabs(c3) < nw && std::fabs(c4) < nw;
+                        }
+                        // BIG passages — a coarser, WIDE network (large halls/corridors).
+                        if (!tunnel) {
+                            const double bw = kCaveThr * 1.5 * crustF;
+                            const double c5 = caveNoiseA.fbm(static_cast<float>(cwx * kCaveFreqXZ * 0.5),
+                                                             static_cast<float>(wy * kCaveFreqY * 0.5),
+                                                             static_cast<float>(cwz * kCaveFreqXZ * 0.5), kCaveOct);
+                            const double c6 = caveNoiseB.fbm(static_cast<float>(cwx * kCaveFreqXZ * 0.5),
+                                                             static_cast<float>(wy * kCaveFreqY * 0.5),
+                                                             static_cast<float>(cwz * kCaveFreqXZ * 0.5), kCaveOct);
+                            tunnel = std::fabs(c5) < bw && std::fabs(c6) < bw;
+                        }
                         bool cavern = false;
                         if (crustF >= 1.0) {
                             // THEME (3D, varies x/y/z): remixes which cavern features dominate
