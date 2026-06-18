@@ -45,7 +45,7 @@ inline glm::vec3 unpackLightColor(uint32_t p) {
 // seed, so they are never written). Format: magic + version + edge length, then
 // id(u16)+metadata(u8) per voxel in the chunk's storage order. See docs/STREAMING.md.
 constexpr uint32_t kChunkMagic   = 0x4B4E4843u; // 'CHNK'
-constexpr uint32_t kChunkVersion = 43u; // bump: longer varied-floor ravines + multi-size tunnels (noodle/mid/big)
+constexpr uint32_t kChunkVersion = 44u; // bump: more plains/hills (softer relief gain + wider mid bands)
 
 std::string chunkPath(const std::string& dir, int cx, int cy, int cz) {
     return dir + "/c." + std::to_string(cx) + '.' + std::to_string(cy) + '.' +
@@ -335,12 +335,11 @@ void World::generateColumnInto(int cx, int cz, Chunk* const* stack,
         // reliefHeight()/reliefRough() splines below; edit them to reshape the world.
         constexpr double kReliefFreq  = 0.0040;  // size of plains/hills/mountain regions
         constexpr int    kReliefOct   = 4;
-        constexpr double kReliefGain  = 1.9;     // CONTRAST on the relief value: fbm rarely reaches its
-                                                 // ±1 extremes, so without this t hugs the mid "hills"
-                                                 // range and you never get true plains OR mountains.
-                                                 // >1 stretches t toward both ends (real variety); the
-                                                 // result is clamped to [0,1]. THE key knob for how
-                                                 // often flat plains and tall peaks appear.
+        constexpr double kReliefGain  = 1.40;    // CONTRAST on the relief value. Higher pushes t to the plains/
+                                                 // mountain extremes (abrupt: plains jump straight to peaks);
+                                                 // LOWER spreads t across the middle so you walk plains -> hills
+                                                 // -> foothills -> mountains gradually. Tuned down from 1.9 to
+                                                 // restore the hill/plain middle ground between coast and peaks.
         constexpr double kPeakRelief  = 118.0;   // broad mountain-mass height — kept BELOW the world-top taper
                                                  // (~y168) so peaks don't shear flat; sharp spikes add the height
         constexpr double kHillFreq    = 0.0095;  // medium rolling-hill modulation (× roughness)
@@ -556,17 +555,19 @@ void World::generateColumnInto(int cx, int cz, Chunk* const* stack,
         // the land base) and a roughness in [0,1]. Piecewise-linear control points — these
         // two curves ARE the world's plains/hills/mountains character; tweak freely. Used by
         // both the density lattice and the surface-skin pass (so they agree on region type).
+        // Wide plains + hills bands, mountains pushed to high t (rarer, with foothills below
+        // them) — so the world ramps coast -> plains -> hills -> foothills -> peaks.
         const auto reliefHeight = [&](double t) -> double {
-            if (t < 0.30) return (t / 0.30) * 6.0;                       // plains    0 -> 6
-            if (t < 0.55) return 6.0  + ((t - 0.30) / 0.25) * 20.0;      // hills     6 -> 26
-            if (t < 0.72) return 26.0 + ((t - 0.55) / 0.17) * 42.0;      // foothills 26 -> 68
-            return 68.0 + ((t - 0.72) / 0.28) * (kPeakRelief - 68.0);    // mountains 68 -> kPeakRelief
+            if (t < 0.34) return (t / 0.34) * 7.0;                       // plains    0 -> 7
+            if (t < 0.62) return 7.0  + ((t - 0.34) / 0.28) * 24.0;      // hills     7 -> 31
+            if (t < 0.82) return 31.0 + ((t - 0.62) / 0.20) * 43.0;      // foothills 31 -> 74
+            return 74.0 + ((t - 0.82) / 0.18) * (kPeakRelief - 74.0);    // mountains 74 -> kPeakRelief
         };
         const auto reliefRough = [](double t) -> double {
-            if (t < 0.30) return 0.03 + (t / 0.30) * 0.09;              // plains: ~flat
-            if (t < 0.55) return 0.12 + ((t - 0.30) / 0.25) * 0.23;     // hills
-            if (t < 0.72) return 0.35 + ((t - 0.55) / 0.17) * 0.38;     // foothills
-            return 0.73 + ((t - 0.72) / 0.28) * 0.27;                  // mountains -> ~1
+            if (t < 0.34) return 0.03 + (t / 0.34) * 0.09;              // plains: ~flat
+            if (t < 0.62) return 0.12 + ((t - 0.34) / 0.28) * 0.23;     // hills
+            if (t < 0.82) return 0.35 + ((t - 0.62) / 0.20) * 0.38;     // foothills
+            return 0.73 + ((t - 0.82) / 0.18) * 0.27;                  // mountains -> ~1
         };
 
         // ---- PLATES (env-gated test): MULTI-SCALE tectonic tilted Voronoi cells -----
