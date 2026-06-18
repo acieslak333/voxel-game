@@ -45,7 +45,7 @@ inline glm::vec3 unpackLightColor(uint32_t p) {
 // seed, so they are never written). Format: magic + version + edge length, then
 // id(u16)+metadata(u8) per voxel in the chunk's storage order. See docs/STREAMING.md.
 constexpr uint32_t kChunkMagic   = 0x4B4E4843u; // 'CHNK'
-constexpr uint32_t kChunkVersion = 35u; // bump: 3-tier forest density variation (sparse/normal/dense regions)
+constexpr uint32_t kChunkVersion = 42u; // bump: + voronoi coastal cliffs (no-float trees, cave shift, big ravines)
 
 std::string chunkPath(const std::string& dir, int cx, int cy, int cz) {
     return dir + "/c." + std::to_string(cx) + '.' + std::to_string(cy) + '.' +
@@ -312,6 +312,10 @@ void World::generateColumnInto(int cx, int cz, Chunk* const* stack,
         constexpr double kCoastFlatRange = 14.0; // blocks of continental rise over which relief/plate lift ramps
                                                  // IN from the shore -> gentle, wide, smooth sandy beaches (no
                                                  // cliffs into the sea); bigger = wider flatter coasts
+        // Coastal cliffs: a worley cell-edge field UN-flattens some shore segments so they
+        // rise as sharp cliffs straight from the water; the rest stay smooth sandy beaches.
+        constexpr double kCoastCliffFreq = 0.010;// cliff/beach segment size along the coast
+        constexpr double kCliffThr       = 0.45; // cell-edge value above this -> cliff (lower = more cliffs)
         constexpr double kContGain    = 1.7;     // CONTRAST on continentalness (fbm rarely hits ±1) so real
                                                  // deep SEAS and high continents both form; clamped to [-1,1]
         constexpr double kContBias    = 0.10;    // LAND bias: a bit more continent than sea, oceans still large
@@ -419,6 +423,68 @@ void World::generateColumnInto(int cx, int cz, Chunk* const* stack,
         constexpr int    kSurfOct     = 4;
         constexpr double kTaperAir    = -200.0;  // top lattice layers forced to air
 
+        // ---- Caves: ravines + tunnels + caverns, 3D density-selected, perched lakes ----
+        // Applies the surface lessons in 3D. A cell (solid) carves to air where any of:
+        //   * TUNNEL  — two 3D Perlin fields both ~0 (their intersection = a winding tube);
+        //   * CAVERN  — a 3D "cheese" field is high (big open rooms);
+        //   * RAVINE  — inside a narrow surface-cutting vertical canyon footprint.
+        // A gain-stretched 3D SELECTOR (the kReliefGain trick, now volumetric) modulates how
+        // much carves where — varying in x/y/z. DEPTH (surface-relative) is the cave analog of
+        // the grass/stone/snow bands: a solid CRUST near the surface, caverns growing with depth.
+        // Perched LAKES fill carved air below a per-region water level in sparse lake regions.
+        constexpr int    kCaveFloor   = 4;       // keep solid layers at the world bottom
+        constexpr int    kCaveCeil    = 150;     // no caves above this (bounds cost; high peaks stay solid)
+        // Every cave field is MULTI-OCTAVE fbm (like the surface noises) -> detail at several
+        // scales: branchy tunnels, irregular cavern walls, wandering ravines.
+        constexpr int    kCaveOct     = 3;       // octaves for the 3D cave fields (tunnels/cavern/selector)
+        constexpr int    kRavOct      = 3;       // ravine fields
+        constexpr int    kLakeOct     = 2;       // lake fields
+        constexpr int    kCrust       = 5;       // solid blocks under the surface before caves fade in
+        constexpr int    kCrustFade   = 7;       // depth over which cave probability ramps to full (entrances)
+        // Tunnels (spaghetti).
+        constexpr double kCaveFreqXZ  = 0.016;   // tunnel sample frequency (lower -> longer, smoother)
+        constexpr double kCaveFreqY   = 0.020;   // higher Y freq -> tunnels weave up/down
+        constexpr double kCaveThr     = 0.072;   // base tunnel half-width (× selector × crust)
+        // 3D density selector (gain-stretched -> reaches both extremes, like kReliefGain).
+        constexpr double kSelFreq     = 0.0060;  // selector region size (x/z)
+        constexpr double kSelFreqY    = 0.0060;  // ...and y -> 3D variation
+        constexpr double kSelGain     = 1.8;     // contrast so some regions are solid, others honeycomb
+        // Caverns (cheese): big rooms where the field exceeds a threshold eased by sel + depth.
+        constexpr double kCavFreq     = 0.0115;  // mid cavern (room) size
+        constexpr double kCavFreqY    = 0.0135;
+        constexpr double kCavFreqBig  = 0.0055;  // GIANT cavern (cathedral) scale — blended with the room field
+        constexpr double kCavThrBase  = 0.62;    // cv>thr -> room; eased down by sel/depth/giant -> bigger
+        constexpr int    kDeepStart   = 24;      // depth where caverns start growing
+        constexpr int    kDeepRange   = 52;      // ...reaching full size this much deeper
+        // Crazy-cavern feature set (variance / remix). A 3D THEME noise chooses the feature
+        // mix per region; domain warp + a giant-chamber mask + pillars + clutter do the rest.
+        constexpr double kCavWarpFreq = 0.013;   // organic wall-warp frequency
+        constexpr double kCavWarpAmp  = 16.0;    // ± blocks the cavern sample is displaced
+        constexpr double kThemeFreq   = 0.0040;  // cavern-theme region size (3D, varies x/y/z)
+        constexpr double kGiantFreq   = 0.0034;  // ENORMOUS-chamber region size
+        constexpr double kGiantThr    = 0.72;    // region onset (higher -> rarer giant halls)
+        constexpr double kGiantBoost  = 0.30;    // how much it lowers the cavern threshold (-> huge)
+        constexpr double kPillarFreq  = 0.045;   // stone-pillar spacing in pillar-forest themes
+        constexpr double kPillarThr   = 0.74;    // pillar onset (higher -> fewer, thinner pillars)
+        constexpr double kClutterFreq = 0.060;   // stalactite/blob clutter frequency
+        constexpr double kClutterThr  = 0.34;    // keep-stone clutter onset in clutter themes
+        // Voronoi/ridged SHIFT: a worley cell-edge field displaces the cave sample coords ->
+        // tunnels & chambers bend along voronoi walls = faceted, ridged, more dramatic networks.
+        constexpr double kVorFreq     = 0.014;   // voronoi cell size
+        constexpr double kVorShift    = 22.0;    // ± blocks the cave coords are shifted along cells
+        // Ravines: occasional, narrow, tall, surface-cutting vertical canyons.
+        constexpr double kRavMaskFreq = 0.0040;  // ravine region size
+        constexpr double kRavThresh   = 0.62;    // region mask onset (lower -> MANY more ravines)
+        constexpr double kRavLineFreq = 0.0095;  // canyon centreline wander
+        constexpr double kRavWidth    = 0.150;   // canyon half-width band (MUCH wider gorges)
+        constexpr int    kRavDepth    = 100;     // how far below the surface a ravine cuts (MUCH deeper)
+        // Perched lakes: sparse, size-varied; fill carved air below a per-region level.
+        constexpr double kLakeMaskFreq= 0.0050;  // lake region size (fbm -> varied patch sizes)
+        constexpr double kLakeThresh  = 0.66;    // region onset (higher -> fewer lakes)
+        constexpr double kLakeLvlFreq = 0.010;   // per-region water-level variation
+        constexpr int    kLakeDepth   = 16;      // lakes sit ~this far below the surface
+        constexpr int    kLakeRange   = 16;      // + this much level variation between regions
+
         const int gx = N / latX + 1;          // 5 lattice columns across a 16-wide chunk
         const int gz = N / latZ + 1;          // 5
         const int gy = worldTop / latY + 1;   // 17 for a 128-tall world (ys in Beta)
@@ -442,8 +508,25 @@ void World::generateColumnInto(int cx, int cz, Chunk* const* stack,
         vg::Noise warpNoise    (config_.seed + 1234u); // domain warp (organic coastlines/ranges)
         vg::Noise cliff3DNoise (config_.seed + 1357u); // 3D worley crack carving (mountain cliffs)
         vg::Noise cliffSurfNoise(config_.seed + 1470u);// 2D worley rocky-outcrop scatter (skin)
+        vg::Noise coastCliffNoise(config_.seed + 1580u);// voronoi COASTAL CLIFFS (un-flatten some shore)
         vg::Noise biomeNoise   (config_.seed + 5150u); // low-freq biome-variety selector (forest/mountain style)
         vg::Noise forestNoise  (config_.seed + 5260u); // forest-DENSITY variation (sparse/normal/dense regions)
+        vg::Noise caveNoiseA   (config_.seed + 6100u); // spaghetti cave field A (tunnel where A & B both ~0)
+        vg::Noise caveNoiseB   (config_.seed + 6200u); // spaghetti cave field B
+        vg::Noise caveSelNoise (config_.seed + 6300u); // 3D DENSITY selector (how cavey here, varies x/y/z)
+        vg::Noise caveCheese   (config_.seed + 6400u); // 3D cavern field (big open rooms where high)
+        vg::Noise ravMaskNoise (config_.seed + 6500u); // ravine region mask (occasional)
+        vg::Noise ravLineNoise (config_.seed + 6600u); // ravine centreline (narrow canyon footprint)
+        vg::Noise lakeMaskNoise(config_.seed + 6700u); // perched-lake region mask (sparse, size-varied)
+        vg::Noise lakeLvlNoise (config_.seed + 6800u); // perched-lake water level variation
+        // Crazy-cavern fields (multi-scale shapes + per-region feature themes).
+        vg::Noise cavBigNoise  (config_.seed + 6900u); // GIANT-scale cavern field (cathedral halls)
+        vg::Noise cavThemeNoise(config_.seed + 7000u); // 3D cavern THEME (remix: pillars / clutter / halls / shafts)
+        vg::Noise cavWarpNoise (config_.seed + 7100u); // domain warp for organic cavern walls
+        vg::Noise giantMaskNoise(config_.seed + 7200u);// occasional ENORMOUS chamber regions
+        vg::Noise pillarNoise  (config_.seed + 7300u); // floor-to-ceiling stone pillars in caverns
+        vg::Noise clutterNoise (config_.seed + 7400u); // stalactite / hanging-blob clutter
+        vg::Noise caveVorNoise (config_.seed + 7500u); // voronoi/ridged SHIFT of the cave network
 
         // ---- "frequencies with frequencies" (baked in, gently) -------------------
         // A low-freq modulator noise scales the terrain-TEXTURE sample frequency (hill /
@@ -573,6 +656,15 @@ void World::generateColumnInto(int cx, int cz, Chunk* const* stack,
             double coastF = (contH - kSeaLevel) / kCoastFlatRange;
             coastF = coastF < 0.0 ? 0.0 : (coastF > 1.0 ? 1.0 : coastF);
             coastF = coastF * coastF * (3.0 - 2.0 * coastF);
+            if (coastF < 1.0) {                                 // coastal cliffs (match the lattice)
+                const double cliffV = coastCliffNoise.worley(static_cast<float>(mwx * kCoastCliffFreq),
+                                                             static_cast<float>(mwz * kCoastCliffFreq),
+                                                             vg::Noise::Metric::Euclidean,
+                                                             vg::Noise::Cell::F2mF1) * 0.5 + 0.5;
+                if (cliffV > kCliffThr) {
+                    coastF += (1.0 - coastF) * ((cliffV - kCliffThr) / (1.0 - kCliffThr));
+                }
+            }
             const double lift = land * coastF;
             double broad = contH + (profileH + hillMod + plateH) * lift;
             if (broad > kBroadCap - kBroadSoft) {
@@ -593,7 +685,18 @@ void World::generateColumnInto(int cx, int cz, Chunk* const* stack,
                                            static_cast<float>(dwz * kDetailFreqXZ * fmul), kDetailOct);
             double sel = (mainV + 1.0) * 0.5; sel = sel < 0.0 ? 0.0 : (sel > 1.0 ? 1.0 : sel);
             const double nd = mn + (mx - mn) * sel;
-            return static_cast<int>(std::floor(base + nd * detailAmp));
+            // Include the 3D cliff-crack carve (same term the lattice subtracts in rugged
+            // terrain) so the surface estimate is ACCURATE on grassy mountains — otherwise it
+            // sits too high and the pines rooted there float. Evaluated at y≈base.
+            double carve = 0.0;
+            if (rough > 0.30) {
+                const double crack = cliff3DNoise.worley(static_cast<float>(dwx * kCliff3DFreq),
+                                                         static_cast<float>(base * kCliff3DFreq),
+                                                         static_cast<float>(dwz * kCliff3DFreq),
+                                                         vg::Noise::Metric::Euclidean, vg::Noise::Cell::F2mF1);
+                carve = (crack * 0.5 + 0.5) * kCliff3DAmp * rough;
+            }
+            return static_cast<int>(std::floor(base + nd * detailAmp - carve));
         };
 
         // --- Biomes -------------------------------------------------------------
@@ -699,6 +802,17 @@ void World::generateColumnInto(int cx, int cz, Chunk* const* stack,
                 double coastF = (contH - kSeaLevel) / kCoastFlatRange;
                 coastF = coastF < 0.0 ? 0.0 : (coastF > 1.0 ? 1.0 : coastF);
                 coastF = coastF * coastF * (3.0 - 2.0 * coastF);        // smoothstep
+                // Coastal cliffs: where a worley cell-edge crosses the shore, push coastF -> 1
+                // so the land rises sharply from the water (a cliff) instead of flattening.
+                if (coastF < 1.0) {
+                    const double cliffV = coastCliffNoise.worley(static_cast<float>(mwxL * kCoastCliffFreq),
+                                                                 static_cast<float>(mwzL * kCoastCliffFreq),
+                                                                 vg::Noise::Metric::Euclidean,
+                                                                 vg::Noise::Cell::F2mF1) * 0.5 + 0.5;
+                    if (cliffV > kCliffThr) {
+                        coastF += (1.0 - coastF) * ((cliffV - kCliffThr) / (1.0 - kCliffThr));
+                    }
+                }
                 const double lift = land * coastF;
                 // Broad massif (continent + relief + hills + plate, NO spikes), soft-capped
                 // below the world-top taper so MASSIVE ranges don't shear into flat plateaus.
@@ -802,11 +916,55 @@ void World::generateColumnInto(int cx, int cz, Chunk* const* stack,
             }
         }
 
+        // Per-column cave precompute (the 2D parts: surface estimate for depth/crust,
+        // ravine footprint, lake region + level) — done once per column so only the 3D
+        // tunnel/cavern/selector fields are sampled per-voxel in the carve below.
+        std::vector<int>   caveSurf(static_cast<size_t>(N) * N);   // surface Y estimate (for depth)
+        std::vector<float> ravW(static_cast<size_t>(N) * N);       // ravine half-width here (0 = none)
+        std::vector<int>   lakeY(static_cast<size_t>(N) * N, -1);  // perched-lake level (-1 = no lake)
+        std::vector<float> giantB(static_cast<size_t>(N) * N);     // giant-chamber threshold boost (2D)
+        std::vector<float> pillarV(static_cast<size_t>(N) * N);    // pillar field 0..1 (2D)
+        for (int lx = 0; lx < N; ++lx) {
+            for (int lz = 0; lz < N; ++lz) {
+                const int wx = baseX + lx, wz = baseZ + lz;
+                const size_t col = static_cast<size_t>(lx) * N + lz;
+                double rg = 0.0;
+                caveSurf[col] = treeColumn(wx, wz, rg);
+                // Giant-chamber regions (occasional) -> a threshold boost = enormous caverns.
+                const double gm = giantMaskNoise.fbm(static_cast<float>(wx * kGiantFreq),
+                                                     static_cast<float>(wz * kGiantFreq), 2) * 0.5 + 0.5;
+                giantB[col] = gm > kGiantThr ? static_cast<float>(kGiantBoost
+                                  * (gm - kGiantThr) / (1.0 - kGiantThr)) : 0.0f;
+                // Pillar field (2D): high values mark floor-to-ceiling stone columns.
+                pillarV[col] = static_cast<float>(pillarNoise.fbm(static_cast<float>(wx * kPillarFreq),
+                                                  static_cast<float>(wz * kPillarFreq), 2) * 0.5 + 0.5);
+                // Ravine footprint: occasional region (mask) ∩ narrow wandering centreline.
+                const double rm = ravMaskNoise.fbm(static_cast<float>(wx * kRavMaskFreq),
+                                                   static_cast<float>(wz * kRavMaskFreq), kRavOct) * 0.5 + 0.5;
+                float rw = 0.0f;
+                if (rm > kRavThresh) {
+                    const double rl = ravLineNoise.fbm(static_cast<float>(wx * kRavLineFreq),
+                                                       static_cast<float>(wz * kRavLineFreq), kRavOct);
+                    const double band = (rm - kRavThresh) / (1.0 - kRavThresh) * kRavWidth; // wider in core
+                    if (std::fabs(rl) < band) rw = static_cast<float>(band - std::fabs(rl)); // >0 inside canyon
+                }
+                ravW[col] = rw;
+                // Perched-lake region (sparse, fbm -> size-varied) + per-region water level.
+                const double lm = lakeMaskNoise.fbm(static_cast<float>(wx * kLakeMaskFreq),
+                                                    static_cast<float>(wz * kLakeMaskFreq), kLakeOct) * 0.5 + 0.5;
+                if (lm > kLakeThresh) {
+                    const double lv = lakeLvlNoise.fbm(static_cast<float>(wx * kLakeLvlFreq),
+                                                       static_cast<float>(wz * kLakeLvlFreq), kLakeOct) * 0.5 + 0.5;
+                    lakeY[col] = caveSurf[col] - kLakeDepth - static_cast<int>(lv * kLakeRange);
+                }
+            }
+        }
+
         // --- generateTerrain: trilinearly interpolate the lattice into blocks --
         // density > 0 => stone; otherwise water if below sea level (Beta fills every
         // non-solid cell under sea level with water — that IS how oceans/lakes form),
         // else air. The water is drawn translucent by the mesher (it keys off the
-        // "water" block name).
+        // "water" block name). Solid cells may then be carved to caves (see below).
         for (int ix = 0; ix < gx - 1; ++ix) {
             for (int iz = 0; iz < gz - 1; ++iz) {
                 for (int iy = 0; iy < gy - 1; ++iy) {
@@ -842,6 +1000,7 @@ void World::generateColumnInto(int cx, int cz, Chunk* const* stack,
                                 } else if (wy < kSeaLevel) {
                                     dstChunk->set(lx, ly, iz * latZ + sz, Block{waterId_, 0});
                                 }
+                                // (caves are carved AFTER the skin pass so their walls are stone)
                             }
                         }
                     }
@@ -916,6 +1075,113 @@ void World::generateColumnInto(int cx, int cz, Chunk* const* stack,
             }
         }
 
+        // --- Caves: carved AFTER the skin pass so walls are STONE (not grass/dirt) -----
+        // Operating on the finished column means the skin pass already capped every real
+        // open-air surface (incl. overhang/island undersides); here we only turn SOLID cells
+        // into air (or perched-lake water). Tunnels + caverns sit below the crust; ravines
+        // cut from the surface down (their slot removes the skin, leaving stone walls).
+        for (int lx = 0; lx < N; ++lx) {
+            for (int lz = 0; lz < N; ++lz) {
+                const int wx = baseX + lx, wz = baseZ + lz;
+                const size_t col = static_cast<size_t>(lx) * N + lz;
+                const int surf = caveSurf[col];
+                int yTop = surf < kCaveCeil ? surf : kCaveCeil;
+                if (yTop > worldTop - 1) yTop = worldTop - 1;
+                for (int wy = yTop; wy >= kCaveFloor; --wy) {
+                    const int chunkCy = wy / N;
+                    if (!needNoise[static_cast<size_t>(chunkCy)]) { continue; }
+                    Chunk* c = stack[static_cast<size_t>(chunkCy)];
+                    const int ly = wy % N;
+                    const Block here = c->get(lx, ly, lz);
+                    if (here.isAir() || here.id == waterId_) { continue; } // only carve solids
+                    const int depth = surf - wy;
+                    bool cave = false;
+                    // Ravine: surface-cutting narrow vertical slot.
+                    if (ravW[col] > 0.0f && depth >= 0 && wy >= surf - kRavDepth) { cave = true; }
+                    // Tunnels + caverns below the solid crust (3D selector + depth driven).
+                    if (!cave && depth > kCrust) {
+                        double crustF = static_cast<double>(depth - kCrust) / kCrustFade;
+                        crustF = crustF > 1.0 ? 1.0 : crustF;
+                        double sel = caveSelNoise.fbm(static_cast<float>(wx * kSelFreq),
+                                                      static_cast<float>(wy * kSelFreqY),
+                                                      static_cast<float>(wz * kSelFreq), kCaveOct)
+                                     * kSelGain * 0.5 + 0.5;
+                        sel = sel < 0.0 ? 0.0 : (sel > 1.0 ? 1.0 : sel);
+                        double depthF = static_cast<double>(depth - kDeepStart) / kDeepRange;
+                        depthF = depthF < 0.0 ? 0.0 : (depthF > 1.0 ? 1.0 : depthF);
+                        // Voronoi/ridged shift: displace the whole cave network along worley
+                        // cell walls -> faceted, ridged tunnels & chambers (not smooth blobs).
+                        const double vor = caveVorNoise.worley(static_cast<float>(wx * kVorFreq),
+                                                               static_cast<float>(wy * kVorFreq),
+                                                               static_cast<float>(wz * kVorFreq),
+                                                               vg::Noise::Metric::Euclidean, vg::Noise::Cell::F2mF1);
+                        const double cwx = wx + vor * kVorShift;
+                        const double cwz = wz - vor * kVorShift;
+                        const double tw = kCaveThr * (0.45 + sel) * crustF;
+                        const double c1 = caveNoiseA.fbm(static_cast<float>(cwx * kCaveFreqXZ),
+                                                         static_cast<float>(wy * kCaveFreqY),
+                                                         static_cast<float>(cwz * kCaveFreqXZ), kCaveOct);
+                        const double c2 = caveNoiseB.fbm(static_cast<float>(cwx * kCaveFreqXZ),
+                                                         static_cast<float>(wy * kCaveFreqY),
+                                                         static_cast<float>(cwz * kCaveFreqXZ), kCaveOct);
+                        const bool tunnel = std::fabs(c1) < tw && std::fabs(c2) < tw;
+                        bool cavern = false;
+                        if (crustF >= 1.0) {
+                            // THEME (3D, varies x/y/z): remixes which cavern features dominate
+                            // this region. 0..1: low -> pillar forests, mid -> smooth halls,
+                            // high -> stalactite/blob clutter chaos.
+                            const double theme = cavThemeNoise.fbm(static_cast<float>(wx * kThemeFreq),
+                                                                   static_cast<float>(wy * kThemeFreq),
+                                                                   static_cast<float>(wz * kThemeFreq), 2) * 0.5 + 0.5;
+                            // Domain-warp the (already voronoi-shifted) sample position -> organic walls.
+                            const double wxo = cwx + cavWarpNoise.fbm(static_cast<float>(wx * kCavWarpFreq),
+                                                                      static_cast<float>(wy * kCavWarpFreq),
+                                                                      static_cast<float>(wz * kCavWarpFreq), 2) * kCavWarpAmp;
+                            const double wzo = cwz + cavWarpNoise.fbm(static_cast<float>(wx * kCavWarpFreq + 11.3),
+                                                                      static_cast<float>(wz * kCavWarpFreq - 7.1),
+                                                                      static_cast<float>(wy * kCavWarpFreq), 2) * kCavWarpAmp;
+                            // SHAPE: the selector morphs caverns from flat wide halls (low) to
+                            // tall vertical shafts (high) by stretching the Y sample frequency.
+                            const double yStretch = 0.5 + sel * 1.7;
+                            // MULTI-SCALE: blend a giant 'cathedral' field with the room field.
+                            const double cvBig = cavBigNoise.fbm(static_cast<float>(wxo * kCavFreqBig),
+                                                                 static_cast<float>(wy  * kCavFreqBig * yStretch),
+                                                                 static_cast<float>(wzo * kCavFreqBig), kCaveOct);
+                            const double cvMid = caveCheese.fbm(static_cast<float>(wxo * kCavFreq),
+                                                                static_cast<float>(wy  * kCavFreqY * yStretch),
+                                                                static_cast<float>(wzo * kCavFreq), kCaveOct);
+                            const double cv = cvBig * 0.6 + cvMid * 0.4;
+                            const double cavThr = kCavThrBase - sel * 0.22 - depthF * 0.18 - giantB[col];
+                            cavern = cv > cavThr;
+                            if (cavern) {
+                                // PILLARS (pillar-forest themes): keep floor-to-ceiling stone
+                                // columns standing in the void.
+                                if (theme < 0.42 && pillarV[col] > kPillarThr) {
+                                    cavern = false;
+                                }
+                                // CLUTTER (clutter themes): a high-freq field keeps stone blobs
+                                // -> stalactites, hanging chunks, floor lumps.
+                                if (cavern && theme > 0.58) {
+                                    const double cl = clutterNoise.fbm(static_cast<float>(wx * kClutterFreq),
+                                                                       static_cast<float>(wy * kClutterFreq),
+                                                                       static_cast<float>(wz * kClutterFreq), 2);
+                                    if (cl > kClutterThr) cavern = false;
+                                }
+                            }
+                        }
+                        cave = tunnel || cavern;
+                    }
+                    if (cave) {
+                        if (lakeY[col] >= 0 && wy < lakeY[col]) {
+                            c->set(lx, ly, lz, Block{waterId_, 0});   // perched-lake water
+                        } else {
+                            c->set(lx, ly, lz, Block{0, 0});          // air
+                        }
+                    }
+                }
+            }
+        }
+
         // --- Trees (seam-safe biome scatter) -----------------------------------
         // Roots live on a jittered grid; every chunk stamps ALL trees whose canopy reaches
         // its columns. Root position, presence, species and shape are pure functions of the
@@ -970,14 +1236,17 @@ void World::generateColumnInto(int cx, int cz, Chunk* const* stack,
                         const double nz = static_cast<double>(dz) / rH;
                         if (nx * nx + ny * ny + nz * nz <= 1.08) setCell(rx + dx, cy + dy, rz + dz, leafId, false);
                     }
-                } else {                                              // oak: low, rounded crown (short)
-                    const int r = 3;
+                } else {                                              // oak: rounded crown CAPPING the trunk top
                     const int cy = topY - 1;
-                    for (int dy = -2; dy <= 1; ++dy)                  // flatter than before -> shorter oaks
-                    for (int dz = -r; dz <= r; ++dz)
-                    for (int dx = -r; dx <= r; ++dx) {
-                        const double d2 = dx * dx + dy * dy * 1.9 + dz * dz;
-                        if (d2 <= r * r + 1) setCell(rx + dx, cy + dy, rz + dz, leafId, false);
+                    // Per-layer radius, bottom -> top. The last two entries are two extra
+                    // narrowing layers ABOVE the trunk top (topY+1, topY+2) so the tip is
+                    // capped instead of bald.
+                    static const int rByDy[6] = { 2, 3, 3, 3, 2, 1 }; // dy = -2 .. +3
+                    for (int dy = -2; dy <= 3; ++dy) {
+                        const int r = rByDy[dy + 2];
+                        for (int dz = -r; dz <= r; ++dz)
+                        for (int dx = -r; dx <= r; ++dx)
+                            if (dx * dx + dz * dz <= r * r + 1) setCell(rx + dx, cy + dy, rz + dz, leafId, false);
                     }
                 }
             };
