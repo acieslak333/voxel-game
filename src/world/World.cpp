@@ -45,7 +45,7 @@ inline glm::vec3 unpackLightColor(uint32_t p) {
 // seed, so they are never written). Format: magic + version + edge length, then
 // id(u16)+metadata(u8) per voxel in the chunk's storage order. See docs/STREAMING.md.
 constexpr uint32_t kChunkMagic   = 0x4B4E4843u; // 'CHNK'
-constexpr uint32_t kChunkVersion = 23u; // bump: sparse height-varied islands + noise-jittered material bands
+constexpr uint32_t kChunkVersion = 27u; // bump: bigger contiguous open seas (lower cont freq + lighter land bias)
 
 std::string chunkPath(const std::string& dir, int cx, int cy, int cz) {
     return dir + "/c." + std::to_string(cx) + '.' + std::to_string(cy) + '.' +
@@ -283,7 +283,7 @@ void World::generateColumnInto(int cx, int cz, Chunk* const* stack,
         // Frequencies are multipliers applied to WORLD block coords before the
         // noise sample, so adjacent chunks share lattice points on their seam and
         // terrain is seamless/streaming-safe. Lower freq => larger features.
-        constexpr int    kSeaLevel    = 64;      // sea level = where water fills non-solid cells
+        constexpr int    kSeaLevel    = 32;      // LOW sea (halved) so mountains tower far above it
         constexpr int    latX         = 4;       // density lattice spacing, X (blocks)
         constexpr int    latZ         = 4;       // density lattice spacing, Z (blocks)
         constexpr int    latY         = 8;       // density lattice spacing, Y (blocks)
@@ -295,34 +295,73 @@ void World::generateColumnInto(int cx, int cz, Chunk* const* stack,
         // mountain & island fields) a value WINDOW, so the terrain is layered, not flat.
 
         // ---- 2D macro: continent (sea vs land), hills, mountain mask ----------
-        constexpr double kContFreq    = 0.0016;  // continent field: BIG seas vs landmasses
+        constexpr double kContFreq    = 0.0021;  // continent field: BIG contiguous seas/landmasses (lower = bigger,
+                                                 // more connected oceans — reads as open sea, not scattered lakes)
         constexpr int    kContOct     = 4;       // low octaves -> full swing (deep seas form)
-        constexpr double kBaseY       = 64.0;    // continent-zero level == sea level
-        constexpr double kSeaSpan     = 52.0;    // continent=-1 -> ~y12 (deep ocean floor)
-        constexpr double kLandSpan    = 26.0;    // continent=+1 -> ~y90 (high land base)
-        constexpr double kHillFreq    = 0.0090;  // rolling hills (on land)
+        constexpr double kBaseY       = 33.0;    // continent zero ≈ sea level (low sea = 32)
+        constexpr double kSeaSpan     = 36.0;    // continent=-1 -> deep ocean floor (well below sea)
+        constexpr double kLandSpan    = 12.0;    // continent=+1 -> coastal land lift (relief adds the rest)
+        constexpr double kContGain    = 1.7;     // CONTRAST on continentalness (fbm rarely hits ±1) so real
+                                                 // deep SEAS and high continents both form; clamped to [-1,1]
+        constexpr double kContBias    = 0.10;    // mild LAND bias: a touch more land than sea, but oceans stay
+                                                 // large & open (raise -> smaller seas; 0 = balanced sea/land)
+        constexpr double kCoastLo     = 0.30;    // land gate: below this (deep ocean) NO terrain lift -> open water
+        constexpr double kCoastHi     = 0.60;    // land gate: above this -> full continental land
+
+        // ---- Terrain SELECTOR: a relief control noise picks a profile per region --
+        // The core variety lever. Rather than additively summing hills + a mountain mask
+        // (one uniform lumpy field), a single low-freq `relief` value is mapped through a
+        // spline to a (height, roughness) pair, so each region is a DISTINCT type:
+        //   relief ~0.00-0.30  flat green PLAINS    (low, smooth)
+        //   relief ~0.30-0.55  rolling HILLS
+        //   relief ~0.55-0.72  FOOTHILLS            (steeper, rockier)
+        //   relief ~0.72-1.00  tall SPIKY MOUNTAINS (snow-capped needles)
+        // Continentalness (contN) still gates land vs ocean independently. See the
+        // reliefHeight()/reliefRough() splines below; edit them to reshape the world.
+        constexpr double kReliefFreq  = 0.0040;  // size of plains/hills/mountain regions
+        constexpr int    kReliefOct   = 4;
+        constexpr double kReliefGain  = 1.9;     // CONTRAST on the relief value: fbm rarely reaches its
+                                                 // ±1 extremes, so without this t hugs the mid "hills"
+                                                 // range and you never get true plains OR mountains.
+                                                 // >1 stretches t toward both ends (real variety); the
+                                                 // result is clamped to [0,1]. THE key knob for how
+                                                 // often flat plains and tall peaks appear.
+        constexpr double kPeakRelief  = 152.0;   // base height a full-mountain region targets (taper-capped)
+        constexpr double kHillFreq    = 0.0095;  // medium rolling-hill modulation (× roughness)
         constexpr int    kHillOct     = 4;
-        constexpr double kHillRelief  = 22.0;    // hill height added on land (0..this)
-        constexpr double kMtnFreq     = 0.0042;  // mountain MASK (big, infrequent massifs)
-        constexpr int    kMtnOct      = 4;       // LOW octaves so the mask swings full
-        constexpr double kMtnLo       = 0.42;    // mask WINDOW: below -> no mountain here
-        constexpr double kMtnHi       = 0.74;    // mask WINDOW: above -> full mountain
-        constexpr double kMtnRelief   = 115.0;   // mountain height added — peaks tower up to the
-                                                 // floating-island band (taper-capped ~y168)
-        constexpr double kRidgeFreq   = 0.0150;  // sharp alpine ridgelines carved into peaks
-        constexpr int    kRidgeOct    = 4;
-        constexpr double kRidgeBias   = 0.40;    // base ridge multiplier (lower -> spikier crests)
+        constexpr double kHillRelief  = 30.0;
+        constexpr double kRidgeFreq   = 0.0220;  // SPIKY alpine ridgelines (higher freq -> more, sharper needles)
+        constexpr int    kRidgeOct    = 5;
+        constexpr double kSpikeAmp    = 66.0;    // extra height from sharp ridged spikes (× roughness)
+        constexpr double kSpikePow    = 3.0;     // ridge sharpness exponent (higher -> needle peaks)
 
         // ---- 3D detail: overhangs / stony cliffs (Beta look) ------------------
         constexpr double kGrad        = 1.0;     // density per block of the height gradient
-        constexpr double kBaseDetail  = 6.0;     // gentle 3D wobble on hills (soft ledges)
-        constexpr double kMtnDetail   = 30.0;    // BIG 3D swing in mountains (stony overhangs/cliffs)
+        constexpr double kBaseDetail  = 5.0;     // min 3D wobble (plains stay smooth & green)
+        constexpr double kMtnDetail   = 48.0;    // added 3D swing at full roughness (overhangs/cliffs/spikes)
         constexpr double kMainFreqXZ  = 0.0130;  // 3D: min<->max density selector
         constexpr double kMainFreqY   = 0.0065;
         constexpr double kDetailFreqXZ= 0.0340;  // 3D: min/max detail density
         constexpr double kDetailFreqY = 0.0170;  // half of XZ -> vertical stretch (Beta look)
         constexpr int    kMainOct     = 6;
         constexpr int    kDetailOct   = 5;
+
+        // ---- Domain warp + Worley cliffs (extra, DIFFERENT noise fields) ------
+        // Domain warp: offset the macro sampling coords by a low-freq noise so the
+        // continent coastlines and mountain ranges WANDER organically instead of
+        // forming smooth rounded blobs (warps cont/mtn/ridge together for coherence).
+        constexpr double kWarpFreq    = 0.0045;
+        constexpr int    kWarpOct     = 3;
+        constexpr double kWarpAmp     = 55.0;    // ± blocks the macro fields are displaced
+        // Worley cell-edge (F2-F1) fields = SHARP fluting, not smooth fbm. A 3D field
+        // carves vertical cracks into mountain density (fluted crags / cliff faces); a
+        // 2D field scatters bare-rock outcrops that punch through the grass/snow skin.
+        constexpr double kCliff3DFreq = 0.020;   // 3D crack carving (mountains only)
+        constexpr double kCliff3DAmp  = 28.0;    // density carved at a cell wall (× mtn weight)
+        constexpr double kCliffSurfFreq = 0.013; // 2D rocky-outcrop scatter
+        constexpr double kCliffSurfThr  = 0.72;  // cell-edge value above this -> bare stone
+                                                 // (high -> only sharp cell walls = crags/cliff
+                                                 //  lines poke through; grass keeps the lowland)
 
         // ---- Floating islands: sparse 2D mask + per-region altitude + 3D shape -
         // A 2D mask (thresholded -> sparse) says WHERE an island is; a 2D altitude
@@ -333,12 +372,17 @@ void World::generateColumnInto(int cx, int cz, Chunk* const* stack,
         // shape. A high mask threshold keeps them SPARSE.
         constexpr double kIslMaskFreq = 0.0090;  // 2D: where islands are (per region)
         constexpr int    kIslMaskOct  = 3;
-        constexpr double kIslThresh   = 0.62;    // mask onset (higher -> FEWER islands)
+        constexpr double kIslThresh   = 0.56;    // mask onset (higher -> FEWER islands)
         constexpr double kIslAltFreq  = 0.0130;  // 2D: per-region island altitude (random heights)
         constexpr int    kIslAltOct   = 3;
         constexpr int    kIslLow      = 88;      // island altitudes span these Y...
         constexpr int    kIslHigh     = 172;     //   ...bounds (random within)
-        constexpr double kIslThick    = 16.0;    // half-thickness of an island slab (blocks)
+        // Islands have an ASYMMETRIC vertical profile: a flat-ish cap above the center
+        // and a much longer, noise-broken tapering rocky underside below -> the classic
+        // floating-island silhouette (rounded green top, pointed dripping rock bottom).
+        // Both reaches scale with islStrength so islands vary in size across a region.
+        constexpr double kIslCap      = 9.0;     // half-thickness ABOVE center (the cap)
+        constexpr double kIslDrop     = 34.0;    // taper length BELOW center (long underside)
         constexpr double kIslShapeFreqXZ = 0.022;// 3D: irregular island shape
         constexpr double kIslShapeFreqY  = 0.040;
         constexpr int    kIslShapeOct = 3;
@@ -349,8 +393,8 @@ void World::generateColumnInto(int cx, int cz, Chunk* const* stack,
         // The material lines are PERTURBED per-column by noise so the grass/stone/snow
         // boundaries wiggle (grass climbs higher in places, rock & snow dip lower) —
         // natural blended transitions instead of straight horizontal contour cutoffs.
-        constexpr int    kStoneLine   = 96;      // base: surface above -> bare stone (below = grass)
-        constexpr int    kSnowLine    = 134;     // base: surface above -> snow cap
+        constexpr int    kStoneLine   = 78;      // surface above this -> bare rock (mountain flanks); below = grass
+        constexpr int    kSnowLine    = 110;     // surface above this -> snow cap (spiky white peaks)
         constexpr double kBandFreq    = 0.022;   // smooth large-scale line wander
         constexpr double kBandFreq2   = 0.090;   // finer grain so the edge breaks up
         constexpr double kBandJitter  = 16.0;    // ± blocks the smooth term moves a line
@@ -370,7 +414,7 @@ void World::generateColumnInto(int cx, int cz, Chunk* const* stack,
         vg::Noise contNoise  (config_.seed + 8008u); // continent (sea vs land)
         vg::Noise hillNoise  (config_.seed + 4001u);
         vg::Noise ridgeNoise (config_.seed + 5002u);
-        vg::Noise mtnNoise   (config_.seed + 7007u); // mountain mask
+        vg::Noise reliefNoise(config_.seed + 7007u); // terrain-type selector (plains/hills/mountains)
         vg::Noise mainNoise  (config_.seed + 3003u);
         vg::Noise minNoise   (config_.seed + 1004u);
         vg::Noise maxNoise   (config_.seed + 2005u);
@@ -379,49 +423,164 @@ void World::generateColumnInto(int cx, int cz, Chunk* const* stack,
         vg::Noise islShapeNoise(config_.seed + 9200u); // island 3D blobby shape
         vg::Noise bandNoise    (config_.seed + 9300u); // surface-band line jitter
         vg::Noise surfNoise  (config_.seed + 6006u);
+        vg::Noise warpNoise    (config_.seed + 1234u); // domain warp (organic coastlines/ranges)
+        vg::Noise cliff3DNoise (config_.seed + 1357u); // 3D worley crack carving (mountain cliffs)
+        vg::Noise cliffSurfNoise(config_.seed + 1470u);// 2D worley rocky-outcrop scatter (skin)
+
+        // ---- "frequencies with frequencies" (baked in, gently) -------------------
+        // A low-freq modulator noise scales the terrain-TEXTURE sample frequency (hill /
+        // ridge / 3D-detail) per region (fmul below), so some areas get tighter, busier,
+        // small-scale terrain and others broad, stretched swells — different geological
+        // "scale provinces". Baked in at a gentle 0.5 (subtle variety, layout unchanged).
+        // VG_FREQMOD=<amp> overrides for experiments: 0 disables it, ~0.3-0.8 is natural,
+        // 3+ is chaos. The macro layout (seas, region types) is left unmodulated, so only
+        // surface texture scale varies.
+        const char* fmEnv = std::getenv("VG_FREQMOD");
+        const double kFreqModAmp = fmEnv ? std::atof(fmEnv) : 0.5; // baked-in gentle default
+        constexpr double kFreqModFreq = 0.0016;        // size of the scale-provinces
+        vg::Noise freqModNoise(config_.seed + 7777u);
 
         // --- initializeNoiseField: build the coarse density lattice -----------
         std::vector<double> dens(static_cast<size_t>(gx) * gz * gy);
         const auto dAt = [&](int ix, int iz, int iy) -> double& {
             return dens[(static_cast<size_t>(iz) * gx + ix) * gy + iy];
         };
+
+        // Relief splines: map the control value t in [0,1] to a base height (blocks above
+        // the land base) and a roughness in [0,1]. Piecewise-linear control points — these
+        // two curves ARE the world's plains/hills/mountains character; tweak freely. Used by
+        // both the density lattice and the surface-skin pass (so they agree on region type).
+        const auto reliefHeight = [&](double t) -> double {
+            if (t < 0.30) return (t / 0.30) * 6.0;                       // plains    0 -> 6
+            if (t < 0.55) return 6.0  + ((t - 0.30) / 0.25) * 20.0;      // hills     6 -> 26
+            if (t < 0.72) return 26.0 + ((t - 0.55) / 0.17) * 42.0;      // foothills 26 -> 68
+            return 68.0 + ((t - 0.72) / 0.28) * (kPeakRelief - 68.0);    // mountains 68 -> kPeakRelief
+        };
+        const auto reliefRough = [](double t) -> double {
+            if (t < 0.30) return 0.03 + (t / 0.30) * 0.09;              // plains: ~flat
+            if (t < 0.55) return 0.12 + ((t - 0.30) / 0.25) * 0.23;     // hills
+            if (t < 0.72) return 0.35 + ((t - 0.55) / 0.17) * 0.38;     // foothills
+            return 0.73 + ((t - 0.72) / 0.28) * 0.27;                  // mountains -> ~1
+        };
+
+        // ---- PLATES (env-gated test): MULTI-SCALE tectonic tilted Voronoi cells -----
+        // VG_PLATES=<master> partitions the world into tilted Voronoi "plates" at THREE
+        // nested scales — continental, regional, local — summed together. Each plate (a
+        // jittered-grid Voronoi cell, rolled here since vg::Noise.worley returns only
+        // distances, not the cell center/id we need) gets a random gradient DIRECTION and
+        // is tilted into a sloped plane: height += dot(dir, pos - center) * tilt. Adjacent
+        // plates tilt differently, so their borders become fault SCARPS/ridges; nesting the
+        // scales gives continents that lean, with regional sub-blocks and local faulting.
+        // Baked in at master 1.2 (the approved dramatic tectonic look). VG_PLATES=<master>
+        // overrides: 0 disables plates entirely, ~0.6 = subtle tectonic flavour, 1.6 = wilder.
+        const char* plEnv = std::getenv("VG_PLATES");
+        const double kPlateMaster = plEnv ? std::atof(plEnv) : 1.2;
+        // One tilted-Voronoi layer: cell `size`, point `jitter`, slope `tilt` (rise/run),
+        // independent cells per `salt`. Returns the signed height contribution at (wx,wz).
+        const auto plateLayer = [](double wx, double wz, double size, double jitter,
+                                   double tilt, uint32_t salt) -> double {
+            const auto h2 = [](int X, int Z, uint32_t s) -> uint32_t {
+                uint32_t h = static_cast<uint32_t>(X) * 374761393u
+                           + static_cast<uint32_t>(Z) * 668265263u + s * 362437u;
+                h = (h ^ (h >> 13)) * 1274126177u;
+                return h ^ (h >> 16);
+            };
+            const int cgx = static_cast<int>(std::floor(wx / size));
+            const int cgz = static_cast<int>(std::floor(wz / size));
+            double bestD2 = 1e30, pcx = 0.0, pcz = 0.0; uint32_t pcell = 0u;
+            for (int dz = -1; dz <= 1; ++dz)        // nearest feature point in the 3x3 neighbourhood
+            for (int dx = -1; dx <= 1; ++dx) {
+                const int cx2 = cgx + dx, cz2 = cgz + dz;
+                const double jx = (h2(cx2, cz2, salt + 1u) / 4294967295.0 - 0.5) * jitter;
+                const double jz = (h2(cx2, cz2, salt + 2u) / 4294967295.0 - 0.5) * jitter;
+                const double fx = (cx2 + 0.5 + jx) * size;
+                const double fz = (cz2 + 0.5 + jz) * size;
+                const double d2 = (wx - fx) * (wx - fx) + (wz - fz) * (wz - fz);
+                if (d2 < bestD2) { bestD2 = d2; pcx = fx; pcz = fz; pcell = h2(cx2, cz2, salt + 3u); }
+            }
+            const double ang = (pcell / 4294967295.0) * 6.28318530718;      // random plate direction
+            const double mag = 0.5 + (h2(0, 0, pcell) / 4294967295.0) * 0.5; // per-plate tilt 0.5..1
+            return (std::cos(ang) * (wx - pcx) + std::sin(ang) * (wz - pcz)) * tilt * mag;
+        };
+        // Nested scales (size, jitter, tilt, salt): continental lean + regional blocks +
+        // local faulting. Tilts are strong; the master (VG_PLATES) scales the whole stack.
+        const auto plateLift = [&](double wx, double wz) -> double {
+            if (kPlateMaster == 0.0) return 0.0;
+            const double h = plateLayer(wx, wz, 1500.0, 0.65, 0.085, 100u)  // continental (huge, big swing)
+                           + plateLayer(wx, wz,  470.0, 0.80, 0.150, 200u)  // regional sub-blocks
+                           + plateLayer(wx, wz,  150.0, 0.90, 0.230, 300u); // local fault ridges
+            return h * kPlateMaster;
+        };
         for (int ix = 0; ix < gx; ++ix) {
             for (int iz = 0; iz < gz; ++iz) {
                 const double wxL = baseX + ix * latX;
                 const double wzL = baseZ + iz * latZ;
 
-                // 2D macro fields (our fbm is ~[-1,1]).
-                const double contN  = contNoise.fbm(static_cast<float>(wxL * kContFreq),
-                                                    static_cast<float>(wzL * kContFreq), kContOct);
-                const double hillN  = hillNoise.fbm(static_cast<float>(wxL * kHillFreq),
-                                                    static_cast<float>(wzL * kHillFreq), kHillOct);
-                const double mtnN   = mtnNoise.fbm(static_cast<float>(wxL * kMtnFreq),
-                                                   static_cast<float>(wzL * kMtnFreq), kMtnOct);
-                const double ridgeN = ridgeNoise.fbm(static_cast<float>(wxL * kRidgeFreq),
-                                                     static_cast<float>(wzL * kRidgeFreq), kRidgeOct);
+                // Domain warp: wander the macro sampling position by a low-freq noise so
+                // coastlines/ranges are organic, not smooth blobs. cont/mtn/ridge share
+                // the same offset (coherent); hills stay unwarped to keep their roll.
+                const double wOffX = warpNoise.fbm(static_cast<float>(wxL * kWarpFreq),
+                                                   static_cast<float>(wzL * kWarpFreq), kWarpOct);
+                const double wOffZ = warpNoise.fbm(static_cast<float>(wxL * kWarpFreq + 53.3),
+                                                   static_cast<float>(wzL * kWarpFreq - 19.1), kWarpOct);
+                const double mwxL = wxL + wOffX * kWarpAmp; // warped coords for macro fields
+                const double mwzL = wzL + wOffZ * kWarpAmp;
 
-                // Continent: big seas (contN<0, dips well below sea level) vs landmasses
-                // (contN>0, rises). `land` (0 in deep sea -> 1 on high land) gates the
-                // hills+mountains so the ocean stays low and open.
+                // Frequency modulation (VG_FREQMOD experiment): a low-freq field scales the
+                // texture sampling frequency per region. fmul == 1 when the experiment is
+                // off, so the default world is unchanged.
+                const double fmN = freqModNoise.fbm(static_cast<float>(wxL * kFreqModFreq),
+                                                    static_cast<float>(wzL * kFreqModFreq), 2);
+                const double fmul = 1.0 + kFreqModAmp * fmN;
+
+                // 2D macro fields (our fbm is ~[-1,1]). Continentalness gets a contrast
+                // gain so real deep seas and high land both form (fbm alone hugs the middle).
+                double contN = contNoise.fbm(static_cast<float>(mwxL * kContFreq),
+                                             static_cast<float>(mwzL * kContFreq), kContOct) * kContGain
+                             + kContBias;                               // land bias -> smaller oceans
+                contN = contN < -1.0 ? -1.0 : (contN > 1.0 ? 1.0 : contN);
+                const double hillN  = hillNoise.fbm(static_cast<float>(wxL * kHillFreq * fmul),
+                                                    static_cast<float>(wzL * kHillFreq * fmul), kHillOct);
+                // Relief selector — UNWARPED coords so the surface-skin pass below can
+                // recompute the same region type cheaply without redoing the domain warp.
+                const double reliefN = reliefNoise.fbm(static_cast<float>(wxL * kReliefFreq),
+                                                       static_cast<float>(wzL * kReliefFreq), kReliefOct);
+                const double ridgeN = ridgeNoise.fbm(static_cast<float>(mwxL * kRidgeFreq * fmul),
+                                                     static_cast<float>(mwzL * kRidgeFreq * fmul), kRidgeOct);
+
+                // Continent: deep seas (contN<0) vs landmasses (contN>0). `land` is a
+                // smoothstep coast gate (0 over deep ocean -> 1 on the continent) so the
+                // relief lift applies ONLY on land — ocean basins stay genuinely below sea
+                // and fill with water instead of plains-height filling them in.
                 const double contH = kBaseY + contN * (contN < 0.0 ? kSeaSpan : kLandSpan);
-                double land = contN * 0.5 + 0.5;
+                const double landN = contN * 0.5 + 0.5;                 // [0,1]
+                double land = (landN - kCoastLo) / (kCoastHi - kCoastLo);
                 land = land < 0.0 ? 0.0 : (land > 1.0 ? 1.0 : land);
+                land = land * land * (3.0 - 2.0 * land);                // smoothstep
 
-                // Rolling hills (mild).
-                const double hill = hillN * 0.5 + 0.5;       // [0,1]
-                const double hillHeight = hill * kHillRelief;
+                // Terrain selector: map relief -> (target height, roughness). `rough` is
+                // the master "how rugged is this region" weight; it scales the hill
+                // modulation, the spiky ridge term and the 3D detail amplitude, so plains
+                // stay flat & smooth while mountains rise tall, jagged and overhung.
+                double t = reliefN * (0.5 * kReliefGain) + 0.5;        // contrast -> reach both extremes
+                t = t < 0.0 ? 0.0 : (t > 1.0 ? 1.0 : t);
+                const double rough    = reliefRough(t);
+                const double profileH = reliefHeight(t);
 
-                // Mountain mask WINDOW -> smoothstep weight mw in [0,1]; ridged so the
-                // massifs are jagged. mw also drives how violent the 3D detail is here
-                // (gentle on hills, big stony overhangs on mountains).
-                double mw = (mtnN * 0.5 + 0.5 - kMtnLo) / (kMtnHi - kMtnLo);
-                mw = mw < 0.0 ? 0.0 : (mw > 1.0 ? 1.0 : mw);
-                mw = mw * mw * (3.0 - 2.0 * mw);             // smoothstep
-                const double ridge = 1.0 - std::fabs(ridgeN);                       // [0,1] crests
-                const double mtnHeight = mw * (kRidgeBias + (1.0 - kRidgeBias) * ridge) * kMtnRelief;
+                // Rolling-hill modulation (signed -> hills both rise and dip), faded out on
+                // plains by roughness.
+                const double hillMod = hillN * kHillRelief * rough;
 
-                const double baseHeightBlocks = contH + (hillHeight + mtnHeight) * land;
-                const double detailAmp = kBaseDetail + mw * kMtnDetail;
+                // Spiky peaks: a SHARP ridged term (1-|ridge| raised to a power -> needles)
+                // that only matters where roughness is high -> alpine spires on mountains.
+                const double ridge = std::pow(1.0 - std::fabs(ridgeN), kSpikePow); // [0,1]
+                const double spike = ridge * kSpikeAmp * rough;
+
+                // Plate tilt (VG_PLATES): adds a per-plate sloped plane on land -> tilted
+                // tectonic blocks with fault scarps at their borders. 0 when the test is off.
+                const double plateH = plateLift(wxL, wzL);
+                const double baseHeightBlocks = contH + (profileH + hillMod + spike + plateH) * land;
+                const double detailAmp = kBaseDetail + rough * kMtnDetail;
 
                 // Floating islands (per column): a SPARSE 2D mask decides whether this
                 // region has one; a 2D altitude field places it at a RANDOM height. The
@@ -444,22 +603,38 @@ void World::generateColumnInto(int cx, int cz, Chunk* const* stack,
                 for (int iy = 0; iy < gy; ++iy) {
                     const double yB = static_cast<double>(iy) * latY; // world Y of this lattice row
 
-                    // 3D detail (Beta min/max blend, selector-mixed) -> [-1,1].
-                    const double mainV = mainNoise.fbm(static_cast<float>(wxL * kMainFreqXZ),
-                                                       static_cast<float>(yB * kMainFreqY),
-                                                       static_cast<float>(wzL * kMainFreqXZ), kMainOct);
-                    const double mn = minNoise.fbm(static_cast<float>(wxL * kDetailFreqXZ),
-                                                   static_cast<float>(yB * kDetailFreqY),
-                                                   static_cast<float>(wzL * kDetailFreqXZ), kDetailOct);
-                    const double mx = maxNoise.fbm(static_cast<float>(wxL * kDetailFreqXZ),
-                                                   static_cast<float>(yB * kDetailFreqY),
-                                                   static_cast<float>(wzL * kDetailFreqXZ), kDetailOct);
+                    // 3D detail (Beta min/max blend, selector-mixed) -> [-1,1]. The XZ/Y
+                    // sample frequencies are scaled by fmul (VG_FREQMOD) so the overhang/
+                    // ledge texture is fine & busy in some provinces, broad in others.
+                    const double mainV = mainNoise.fbm(static_cast<float>(wxL * kMainFreqXZ * fmul),
+                                                       static_cast<float>(yB * kMainFreqY * fmul),
+                                                       static_cast<float>(wzL * kMainFreqXZ * fmul), kMainOct);
+                    const double mn = minNoise.fbm(static_cast<float>(wxL * kDetailFreqXZ * fmul),
+                                                   static_cast<float>(yB * kDetailFreqY * fmul),
+                                                   static_cast<float>(wzL * kDetailFreqXZ * fmul), kDetailOct);
+                    const double mx = maxNoise.fbm(static_cast<float>(wxL * kDetailFreqXZ * fmul),
+                                                   static_cast<float>(yB * kDetailFreqY * fmul),
+                                                   static_cast<float>(wzL * kDetailFreqXZ * fmul), kDetailOct);
                     const double sel = (mainV + 1.0) * 0.5;          // [0,1]
                     const double nd  = mn + (mx - mn) * (sel < 0.0 ? 0.0 : (sel > 1.0 ? 1.0 : sel));
 
                     // Terrain density: positive below the surface, perturbed by the 3D
                     // detail (so the surface gains ledges/overhangs, big in mountains).
                     double out = (baseHeightBlocks - yB) * kGrad + nd * detailAmp;
+
+                    // Sharp vertical cliff cracks: a 3D Worley cell-edge (F2-F1) field
+                    // subtracts density at cell WALLS, only in rugged terrain (scaled by
+                    // rough), so foothills/peaks gain fluted crags and vertical cliff faces
+                    // instead of smoothly rounded slopes. F2mF1 is remapped ~[-1,1], high
+                    // at walls.
+                    if (rough > 0.30) {
+                        const double crack = cliff3DNoise.worley(
+                            static_cast<float>(wxL * kCliff3DFreq),
+                            static_cast<float>(yB  * kCliff3DFreq),
+                            static_cast<float>(wzL * kCliff3DFreq),
+                            vg::Noise::Metric::Euclidean, vg::Noise::Cell::F2mF1);
+                        out -= (crack * 0.5 + 0.5) * kCliff3DAmp * rough;
+                    }
 
                     // Floating islands: a slab centred on islCenterY, made irregular by a
                     // 3D shape noise and solidified INDEPENDENTLY of the ground (MAXed in)
@@ -469,7 +644,19 @@ void World::generateColumnInto(int cx, int cz, Chunk* const* stack,
                                                                static_cast<float>(yB  * kIslShapeFreqY),
                                                                static_cast<float>(wzL * kIslShapeFreqXZ),
                                                                kIslShapeOct);
-                        const double vert = 1.0 - std::fabs(yB - islCenterY) / kIslThick; // >0 within slab
+                        // Asymmetric profile: a flat-ish cap above the center, a much
+                        // longer noise-broken tapering rocky underside below (classic
+                        // floating-island look). Both reaches scale with islStrength so
+                        // islands across a region come in varied sizes.
+                        const double above = yB - islCenterY;          // + above the center
+                        double vert;
+                        if (above >= 0.0) {
+                            vert = 1.0 - above / (kIslCap * (0.6 + 0.8 * islStrength));
+                        } else {
+                            const double drop = kIslDrop * (0.5 + 0.9 * islStrength);
+                            vert = 1.0 + above / drop;                 // shrinks going down
+                            vert += shape * 0.30;                      // ragged dripping stalactites
+                        }
                         if (vert > 0.0) {
                             const double island = (vert + shape * 0.5) * kIslSolid * islStrength - kIslCut;
                             if (island > out) out = island;
@@ -477,8 +664,8 @@ void World::generateColumnInto(int cx, int cz, Chunk* const* stack,
                     }
 
                     if (iy > gy - 4) {             // taper the top 3 lattice layers toward air
-                        const double t = static_cast<double>(iy - (gy - 4)) / 3.0;
-                        out = out * (1.0 - t) + kTaperAir * t;
+                        const double tt = static_cast<double>(iy - (gy - 4)) / 3.0;
+                        out = out * (1.0 - tt) + kTaperAir * tt;
                     }
                     dAt(ix, iz, iy) = out;
                 }
@@ -562,6 +749,20 @@ void World::generateColumnInto(int cx, int cz, Chunk* const* stack,
                 const int stoneLine = kStoneLine + static_cast<int>(bj * kBandJitter + bjg * kBandGrain);
                 const int snowLine  = kSnowLine  + static_cast<int>(bj * kBandJitter * 1.3 + bjg * kBandGrain);
                 const int beachTop  = kBeachTop  + static_cast<int>(bjg * 2.0);
+                // Rocky outcrops: a 2D Worley cell-edge field punches bare stone through
+                // the grass skin along cell walls -> exposed crags & cliff faces — but only
+                // in RUGGED regions (recompute the relief roughness here, unwarped to match
+                // the lattice), so green plains & hills keep their grass.
+                double tS = reliefNoise.fbm(static_cast<float>(wx * kReliefFreq),
+                                            static_cast<float>(wz * kReliefFreq), kReliefOct)
+                            * (0.5 * kReliefGain) + 0.5;
+                tS = tS < 0.0 ? 0.0 : (tS > 1.0 ? 1.0 : tS);
+                const double roughS = reliefRough(tS);
+                const double rockN = cliffSurfNoise.worley(static_cast<float>(wx * kCliffSurfFreq),
+                                                           static_cast<float>(wz * kCliffSurfFreq),
+                                                           vg::Noise::Metric::Euclidean,
+                                                           vg::Noise::Cell::F2mF1);
+                const bool bareRock = roughS > 0.40 && (rockN * 0.5 + 0.5) > kCliffSurfThr;
                 int remaining = -1;   // -1 = above surface; >=0 = laying filler
                 uint16_t fillBlock = dirtId_;
                 for (int wy = worldTop - 1; wy >= 0; --wy) {
@@ -576,6 +777,7 @@ void World::generateColumnInto(int cx, int cz, Chunk* const* stack,
                             // Pick the cap/filler by elevation band.
                             uint16_t topBlock;
                             if (wy <= beachTop)         { topBlock = sandId_;  fillBlock = sandId_; }
+                            else if (bareRock)          { topBlock = stoneId_; fillBlock = stoneId_; }
                             else if (wy < stoneLine)    { topBlock = grassId_; fillBlock = dirtId_; }
                             else if (wy < snowLine)     { topBlock = stoneId_; fillBlock = stoneId_; }
                             else                        { topBlock = snowId_;  fillBlock = dirtId_; }
