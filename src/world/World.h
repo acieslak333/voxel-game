@@ -315,6 +315,11 @@ private:
     uint16_t sandId_;
     uint16_t waterId_;
     uint16_t snowId_;
+    // Tree species (trunk = centred Model post, leaves = LeafCube canopy), placed by
+    // the biome pass in generateColumnInto.
+    uint16_t oakTrunkId_, oakLeavesId_;
+    uint16_t birchTrunkId_, birchLeavesId_;
+    uint16_t pineTrunkId_, pineLeavesId_;
 };
 
 } // namespace vg

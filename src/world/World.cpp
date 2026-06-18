@@ -45,7 +45,7 @@ inline glm::vec3 unpackLightColor(uint32_t p) {
 // seed, so they are never written). Format: magic + version + edge length, then
 // id(u16)+metadata(u8) per voxel in the chunk's storage order. See docs/STREAMING.md.
 constexpr uint32_t kChunkMagic   = 0x4B4E4843u; // 'CHNK'
-constexpr uint32_t kChunkVersion = 27u; // bump: bigger contiguous open seas (lower cont freq + lighter land bias)
+constexpr uint32_t kChunkVersion = 35u; // bump: 3-tier forest density variation (sparse/normal/dense regions)
 
 std::string chunkPath(const std::string& dir, int cx, int cy, int cz) {
     return dir + "/c." + std::to_string(cx) + '.' + std::to_string(cy) + '.' +
@@ -117,6 +117,12 @@ World::World(const WorldConfig& config, const std::string& blocksFile)
     sandId_   = registry_.idByName("sand");
     waterId_  = registry_.idByName("water");
     snowId_   = registry_.idByName("snow");
+    oakTrunkId_   = registry_.idByName("oak_trunk");
+    oakLeavesId_  = registry_.idByName("oak_leaves");
+    birchTrunkId_ = registry_.idByName("birch_trunk");
+    birchLeavesId_= registry_.idByName("birch_leaves");
+    pineTrunkId_  = registry_.idByName("pine_trunk");
+    pineLeavesId_ = registry_.idByName("pine_leaves");
 
     buildLightColorPalette();
 
@@ -295,16 +301,21 @@ void World::generateColumnInto(int cx, int cz, Chunk* const* stack,
         // mountain & island fields) a value WINDOW, so the terrain is layered, not flat.
 
         // ---- 2D macro: continent (sea vs land), hills, mountain mask ----------
-        constexpr double kContFreq    = 0.0021;  // continent field: BIG contiguous seas/landmasses (lower = bigger,
-                                                 // more connected oceans — reads as open sea, not scattered lakes)
+        constexpr double kContFreq    = 0.0013;  // continent field: BIG contiguous continents/seas (lower = bigger,
+                                                 // more continental landmasses with open oceans between them)
         constexpr int    kContOct     = 4;       // low octaves -> full swing (deep seas form)
         constexpr double kBaseY       = 33.0;    // continent zero ≈ sea level (low sea = 32)
-        constexpr double kSeaSpan     = 36.0;    // continent=-1 -> deep ocean floor (well below sea)
-        constexpr double kLandSpan    = 12.0;    // continent=+1 -> coastal land lift (relief adds the rest)
+        constexpr double kSeaSpan     = 42.0;    // continent=-1 -> deep ocean floor (deeper -> larger water basins)
+        constexpr double kLandSpan    = 32.0;    // continent=+1 -> high continental interior (~y65), well above the
+                                                 // coast-flatten zone so real elevated CONTINENTS rise from the sea
+                                                 // (low values make land sit at sea level = sandy shoals, not land)
+        constexpr double kCoastFlatRange = 14.0; // blocks of continental rise over which relief/plate lift ramps
+                                                 // IN from the shore -> gentle, wide, smooth sandy beaches (no
+                                                 // cliffs into the sea); bigger = wider flatter coasts
         constexpr double kContGain    = 1.7;     // CONTRAST on continentalness (fbm rarely hits ±1) so real
                                                  // deep SEAS and high continents both form; clamped to [-1,1]
-        constexpr double kContBias    = 0.10;    // mild LAND bias: a touch more land than sea, but oceans stay
-                                                 // large & open (raise -> smaller seas; 0 = balanced sea/land)
+        constexpr double kContBias    = 0.10;    // LAND bias: a bit more continent than sea, oceans still large
+                                                 // (raise -> more land/smaller seas; 0 = balanced sea/land)
         constexpr double kCoastLo     = 0.30;    // land gate: below this (deep ocean) NO terrain lift -> open water
         constexpr double kCoastHi     = 0.60;    // land gate: above this -> full continental land
 
@@ -326,14 +337,19 @@ void World::generateColumnInto(int cx, int cz, Chunk* const* stack,
                                                  // >1 stretches t toward both ends (real variety); the
                                                  // result is clamped to [0,1]. THE key knob for how
                                                  // often flat plains and tall peaks appear.
-        constexpr double kPeakRelief  = 152.0;   // base height a full-mountain region targets (taper-capped)
+        constexpr double kPeakRelief  = 118.0;   // broad mountain-mass height — kept BELOW the world-top taper
+                                                 // (~y168) so peaks don't shear flat; sharp spikes add the height
         constexpr double kHillFreq    = 0.0095;  // medium rolling-hill modulation (× roughness)
         constexpr int    kHillOct     = 4;
         constexpr double kHillRelief  = 30.0;
         constexpr double kRidgeFreq   = 0.0220;  // SPIKY alpine ridgelines (higher freq -> more, sharper needles)
         constexpr int    kRidgeOct    = 5;
-        constexpr double kSpikeAmp    = 66.0;    // extra height from sharp ridged spikes (× roughness)
-        constexpr double kSpikePow    = 3.0;     // ridge sharpness exponent (higher -> needle peaks)
+        constexpr double kSpikeAmp    = 82.0;    // extra height from sharp ridged spikes (× roughness) -> pointy tops
+        constexpr double kSpikePow    = 3.4;     // ridge sharpness exponent (higher -> sharper needle peaks)
+        constexpr double kBroadCap    = 138.0;   // soft ceiling for the BROAD massif (continent+relief+plate, sans
+        constexpr double kBroadSoft   = 26.0;    // spikes): keeps massive ranges BELOW the world-top taper so they
+                                                 // don't shear into flat plateaus — only narrow spikes reach up,
+                                                 // and the taper sharpens those into needle peaks
 
         // ---- 3D detail: overhangs / stony cliffs (Beta look) ------------------
         constexpr double kGrad        = 1.0;     // density per block of the height gradient
@@ -426,6 +442,8 @@ void World::generateColumnInto(int cx, int cz, Chunk* const* stack,
         vg::Noise warpNoise    (config_.seed + 1234u); // domain warp (organic coastlines/ranges)
         vg::Noise cliff3DNoise (config_.seed + 1357u); // 3D worley crack carving (mountain cliffs)
         vg::Noise cliffSurfNoise(config_.seed + 1470u);// 2D worley rocky-outcrop scatter (skin)
+        vg::Noise biomeNoise   (config_.seed + 5150u); // low-freq biome-variety selector (forest/mountain style)
+        vg::Noise forestNoise  (config_.seed + 5260u); // forest-DENSITY variation (sparse/normal/dense regions)
 
         // ---- "frequencies with frequencies" (baked in, gently) -------------------
         // A low-freq modulator noise scales the terrain-TEXTURE sample frequency (hill /
@@ -511,6 +529,102 @@ void World::generateColumnInto(int cx, int cz, Chunk* const* stack,
                            + plateLayer(wx, wz,  150.0, 0.90, 0.230, 300u); // local fault ridges
             return h * kPlateMaster;
         };
+
+        // --- Tree-root surface estimate (for the seam-safe biome scatter) ---------
+        // Trees are decoration whose canopies cross chunk borders, so each chunk must
+        // re-derive them from a PURE function of world coords. That needs the surface Y at
+        // an arbitrary column — this mirrors the macro height math in the lattice loop
+        // (base + the 3D-detail offset evaluated once at that base). It's an ESTIMATE
+        // (≈ the lattice's trilerped surface within a block or two); the tree trunk is sunk
+        // a few blocks so any small mismatch stays underground. Also returns the region
+        // roughness via roughOut. KEEP IN SYNC with the lattice macro above.
+        const auto treeColumn = [&](int wx, int wz, double& roughOut) -> int {
+            const double dwx = wx, dwz = wz;
+            const double fmN = freqModNoise.fbm(static_cast<float>(dwx * kFreqModFreq),
+                                                static_cast<float>(dwz * kFreqModFreq), 2);
+            const double fmul = 1.0 + kFreqModAmp * fmN;
+            const double wOffX = warpNoise.fbm(static_cast<float>(dwx * kWarpFreq),
+                                               static_cast<float>(dwz * kWarpFreq), kWarpOct);
+            const double wOffZ = warpNoise.fbm(static_cast<float>(dwx * kWarpFreq + 53.3),
+                                               static_cast<float>(dwz * kWarpFreq - 19.1), kWarpOct);
+            const double mwx = dwx + wOffX * kWarpAmp, mwz = dwz + wOffZ * kWarpAmp;
+            double contN = contNoise.fbm(static_cast<float>(mwx * kContFreq),
+                                         static_cast<float>(mwz * kContFreq), kContOct) * kContGain + kContBias;
+            contN = contN < -1.0 ? -1.0 : (contN > 1.0 ? 1.0 : contN);
+            const double contH = kBaseY + contN * (contN < 0.0 ? kSeaSpan : kLandSpan);
+            const double landN = contN * 0.5 + 0.5;
+            double land = (landN - kCoastLo) / (kCoastHi - kCoastLo);
+            land = land < 0.0 ? 0.0 : (land > 1.0 ? 1.0 : land);
+            land = land * land * (3.0 - 2.0 * land);
+            const double hillN = hillNoise.fbm(static_cast<float>(dwx * kHillFreq * fmul),
+                                               static_cast<float>(dwz * kHillFreq * fmul), kHillOct);
+            const double reliefN = reliefNoise.fbm(static_cast<float>(dwx * kReliefFreq),
+                                                   static_cast<float>(dwz * kReliefFreq), kReliefOct);
+            const double ridgeN = ridgeNoise.fbm(static_cast<float>(mwx * kRidgeFreq * fmul),
+                                                 static_cast<float>(mwz * kRidgeFreq * fmul), kRidgeOct);
+            double t = reliefN * (0.5 * kReliefGain) + 0.5;
+            t = t < 0.0 ? 0.0 : (t > 1.0 ? 1.0 : t);
+            const double rough = reliefRough(t); roughOut = rough;
+            const double profileH = reliefHeight(t);
+            const double hillMod = hillN * kHillRelief * rough;
+            const double ridge = std::pow(1.0 - std::fabs(ridgeN), kSpikePow);
+            const double spike = ridge * kSpikeAmp * rough;
+            const double plateH = plateLift(dwx, dwz);
+            double coastF = (contH - kSeaLevel) / kCoastFlatRange;
+            coastF = coastF < 0.0 ? 0.0 : (coastF > 1.0 ? 1.0 : coastF);
+            coastF = coastF * coastF * (3.0 - 2.0 * coastF);
+            const double lift = land * coastF;
+            double broad = contH + (profileH + hillMod + plateH) * lift;
+            if (broad > kBroadCap - kBroadSoft) {
+                const double over = broad - (kBroadCap - kBroadSoft);
+                broad = (kBroadCap - kBroadSoft) + kBroadSoft * (1.0 - std::exp(-over / kBroadSoft));
+            }
+            const double base = broad + spike * lift;
+            const double detailAmp = kBaseDetail + rough * kMtnDetail;
+            const double yB = base;
+            const double mainV = mainNoise.fbm(static_cast<float>(dwx * kMainFreqXZ * fmul),
+                                               static_cast<float>(yB * kMainFreqY * fmul),
+                                               static_cast<float>(dwz * kMainFreqXZ * fmul), kMainOct);
+            const double mn = minNoise.fbm(static_cast<float>(dwx * kDetailFreqXZ * fmul),
+                                           static_cast<float>(yB * kDetailFreqY * fmul),
+                                           static_cast<float>(dwz * kDetailFreqXZ * fmul), kDetailOct);
+            const double mx = maxNoise.fbm(static_cast<float>(dwx * kDetailFreqXZ * fmul),
+                                           static_cast<float>(yB * kDetailFreqY * fmul),
+                                           static_cast<float>(dwz * kDetailFreqXZ * fmul), kDetailOct);
+            double sel = (mainV + 1.0) * 0.5; sel = sel < 0.0 ? 0.0 : (sel > 1.0 ? 1.0 : sel);
+            const double nd = mn + (mx - mn) * sel;
+            return static_cast<int>(std::floor(base + nd * detailAmp));
+        };
+
+        // --- Biomes -------------------------------------------------------------
+        // Biome = elevation band + a low-freq biome-variety noise. Drives BOTH the surface
+        // material (skin pass) and the tree species (tree pass), each recomputing it purely
+        // so they always agree. Bands use the base stone/snow lines (cheap & seam-safe).
+        enum Biome : int { B_BEACH, B_OAK, B_BIRCH, B_PINE,
+                           B_GRASSY_MTN, B_STONE_MTN, B_SNOW_OAK, B_SNOW_BARE };
+        constexpr double kBiomeFreq = 0.0060;   // biome-region size (~165-block patches)
+        const auto biomeSelAt = [&](int wx, int wz) -> double {
+            return biomeNoise.fbm(static_cast<float>(wx * kBiomeFreq),
+                                  static_cast<float>(wz * kBiomeFreq), 2) * 0.5 + 0.5; // [0,1]
+        };
+        const auto biomeAt = [&](int wx, int wz, int surfaceY) -> Biome {
+            const double s = biomeSelAt(wx, wz);
+            // Wiggle the stone/snow lines (same band jitter the skin pass used) so the
+            // biome boundaries are organic, and so the skin & tree passes agree on them.
+            const double bj  = bandNoise.fbm(static_cast<float>(wx * kBandFreq),
+                                             static_cast<float>(wz * kBandFreq), 4);
+            const double bjg = bandNoise.fbm(static_cast<float>(wx * kBandFreq2),
+                                             static_cast<float>(wz * kBandFreq2), 2);
+            const int stoneLine = kStoneLine + static_cast<int>(bj * kBandJitter + bjg * kBandGrain);
+            const int snowLine  = kSnowLine  + static_cast<int>(bj * kBandJitter * 1.3 + bjg * kBandGrain);
+            if (surfaceY <= kSeaLevel + 5) return B_BEACH;                       // shore -> sand
+            if (surfaceY < stoneLine)      return s < 0.40 ? B_OAK                // lowland forests
+                                                : (s < 0.72 ? B_BIRCH : B_PINE);
+            if (surfaceY < snowLine)       return s < 0.50 ? B_GRASSY_MTN         // green pine mtn vs
+                                                           : B_STONE_MTN;         //   bare stone mtn
+            return s < 0.35 ? B_SNOW_OAK : B_SNOW_BARE;                           // snowy oaks vs bare spikes
+        };
+
         for (int ix = 0; ix < gx; ++ix) {
             for (int iz = 0; iz < gz; ++iz) {
                 const double wxL = baseX + ix * latX;
@@ -579,7 +693,23 @@ void World::generateColumnInto(int cx, int cz, Chunk* const* stack,
                 // Plate tilt (VG_PLATES): adds a per-plate sloped plane on land -> tilted
                 // tectonic blocks with fault scarps at their borders. 0 when the test is off.
                 const double plateH = plateLift(wxL, wzL);
-                const double baseHeightBlocks = contH + (profileH + hillMod + spike + plateH) * land;
+                // Coast flatten: ramp the relief + plate lift IN from the shoreline (by the
+                // continent's own height above sea) so coasts rise gently out of the water —
+                // wide, smooth sandy beaches instead of relief/plate cliffs into the sea.
+                double coastF = (contH - kSeaLevel) / kCoastFlatRange;
+                coastF = coastF < 0.0 ? 0.0 : (coastF > 1.0 ? 1.0 : coastF);
+                coastF = coastF * coastF * (3.0 - 2.0 * coastF);        // smoothstep
+                const double lift = land * coastF;
+                // Broad massif (continent + relief + hills + plate, NO spikes), soft-capped
+                // below the world-top taper so MASSIVE ranges don't shear into flat plateaus.
+                // Sharp spikes are added ON TOP — they alone approach the taper, which narrows
+                // their tips into needle peaks instead of flat mesas.
+                double broad = contH + (profileH + hillMod + plateH) * lift;
+                if (broad > kBroadCap - kBroadSoft) {
+                    const double over = broad - (kBroadCap - kBroadSoft);
+                    broad = (kBroadCap - kBroadSoft) + kBroadSoft * (1.0 - std::exp(-over / kBroadSoft));
+                }
+                const double baseHeightBlocks = broad + spike * lift;
                 const double detailAmp = kBaseDetail + rough * kMtnDetail;
 
                 // Floating islands (per column): a SPARSE 2D mask decides whether this
@@ -719,17 +849,11 @@ void World::generateColumnInto(int cx, int cz, Chunk* const* stack,
             }
         }
 
-        // --- replaceBlocksForBiome: surface skin (elevation-banded) ------------
-        // Walk each column top-down (water counts as "above" so the seabed STONE is
-        // the surface, matching Beta): the first solid hit gets a cap over a few
-        // blocks of filler, then stone below. The cap material is chosen by elevation:
-        //   <= kBeachTop ...... SAND  (beaches + seabed)
-        //   <  kStoneLine ..... GRASS over DIRT (rolling hills)
-        //   <  kSnowLine ...... bare STONE (mountain cliffs)
-        //   >= kSnowLine ...... SNOW cap over DIRT (high peaks)
-        // A too-thin surface (steep face) is always left as bare stone regardless of
-        // band -> rocky cliffs. The bottom layer stays stone (no bedrock block).
-        constexpr int kBeachTop = kSeaLevel + 2; // surfaces at/under this -> sandy
+        // --- replaceBlocksForBiome: surface skin (biome-driven) ----------------
+        // Walk each column top-down (water counts as "above" so the seabed STONE is the
+        // surface, matching Beta): the first solid hit gets a cap over a few blocks of
+        // filler, then stone below. The cap material comes from biomeAt() (elevation band
+        // + biome-variety noise) — see the biome table there. The bottom layer stays stone.
         for (int lx = 0; lx < N; ++lx) {
             for (int lz = 0; lz < N; ++lz) {
                 const int wx = baseX + lx;
@@ -737,18 +861,6 @@ void World::generateColumnInto(int cx, int cz, Chunk* const* stack,
                 const double surf = surfNoise.fbm(static_cast<float>(wx * kSurfFreq),
                                                   static_cast<float>(wz * kSurfFreq), kSurfOct);
                 const int dirtDepth = static_cast<int>(surf * 2.0 + 3.0); // ~1..5 blocks of skin
-                // Per-column jitter of the material-band lines: a smooth wander + a fine
-                // grain, so the grass/stone/snow boundaries wiggle and interleave (grass
-                // climbs higher in spots, rock & snow dip lower) instead of cutting off
-                // at a straight Y. The two lines share the smooth term so they move
-                // together (a region that lifts grass also lifts the snow line).
-                const double bj  = bandNoise.fbm(static_cast<float>(wx * kBandFreq),
-                                                 static_cast<float>(wz * kBandFreq), 4);
-                const double bjg = bandNoise.fbm(static_cast<float>(wx * kBandFreq2),
-                                                 static_cast<float>(wz * kBandFreq2), 2);
-                const int stoneLine = kStoneLine + static_cast<int>(bj * kBandJitter + bjg * kBandGrain);
-                const int snowLine  = kSnowLine  + static_cast<int>(bj * kBandJitter * 1.3 + bjg * kBandGrain);
-                const int beachTop  = kBeachTop  + static_cast<int>(bjg * 2.0);
                 // Rocky outcrops: a 2D Worley cell-edge field punches bare stone through
                 // the grass skin along cell walls -> exposed crags & cliff faces — but only
                 // in RUGGED regions (recompute the relief roughness here, unwarped to match
@@ -774,13 +886,20 @@ void World::generateColumnInto(int cx, int cz, Chunk* const* stack,
                         remaining = -1;            // air / water column -> still above the surface
                     } else if (here.id == stoneId_) {
                         if (remaining == -1) {     // first solid block = the surface
-                            // Pick the cap/filler by elevation band.
+                            // Pick the cap/filler by BIOME (elevation band + biome noise):
+                            //  beach -> sand; oak/birch/pine forest + grassy pine mountain
+                            //  -> grass/dirt; stone mountain -> bare stone; snowy peaks ->
+                            //  snow/dirt. Worley crags still poke bare stone through grass
+                            //  (but not through snow caps).
+                            const Biome bi = biomeAt(wx, wz, wy);
                             uint16_t topBlock;
-                            if (wy <= beachTop)         { topBlock = sandId_;  fillBlock = sandId_; }
-                            else if (bareRock)          { topBlock = stoneId_; fillBlock = stoneId_; }
-                            else if (wy < stoneLine)    { topBlock = grassId_; fillBlock = dirtId_; }
-                            else if (wy < snowLine)     { topBlock = stoneId_; fillBlock = stoneId_; }
-                            else                        { topBlock = snowId_;  fillBlock = dirtId_; }
+                            if (bi == B_BEACH)              { topBlock = sandId_;  fillBlock = sandId_; }
+                            else if (bareRock && bi != B_SNOW_OAK && bi != B_SNOW_BARE)
+                                                            { topBlock = stoneId_; fillBlock = stoneId_; }
+                            else if (bi == B_STONE_MTN)     { topBlock = stoneId_; fillBlock = stoneId_; }
+                            else if (bi == B_SNOW_OAK || bi == B_SNOW_BARE)
+                                                            { topBlock = snowId_;  fillBlock = dirtId_; }
+                            else                            { topBlock = grassId_; fillBlock = dirtId_; }
                             remaining = dirtDepth;
                             if (dirtDepth > 0 && writable) {
                                 stack[static_cast<size_t>(chunkCy)]->set(lx, ly, lz, Block{topBlock, 0});
@@ -794,6 +913,115 @@ void World::generateColumnInto(int cx, int cz, Chunk* const* stack,
                         }
                     }
                 }
+            }
+        }
+
+        // --- Trees (seam-safe biome scatter) -----------------------------------
+        // Roots live on a jittered grid; every chunk stamps ALL trees whose canopy reaches
+        // its columns. Root position, presence, species and shape are pure functions of the
+        // root cell + seed (surface from treeColumn(), biome from biomeAt()), so a tree that
+        // straddles a chunk border is re-derived identically on both sides. Trunks are sunk a
+        // few blocks (forced over terrain) so the surface-estimate slop stays buried.
+        {
+            constexpr int kTreeCell = 6;     // blocks between candidate roots (forest density)
+            constexpr int kReach    = 4;     // max canopy horizontal radius (gather margin)
+            const auto th = [&](int cx2, int cz2, uint32_t s) -> uint32_t {
+                uint32_t h = static_cast<uint32_t>(cx2) * 73856093u
+                           ^ static_cast<uint32_t>(cz2) * 19349663u
+                           ^ (config_.seed + s) * 83492791u;
+                h ^= h >> 13; h *= 1274126177u; return h ^ (h >> 16);
+            };
+            const auto setCell = [&](int wx, int wy, int wz, uint16_t id, bool force) {
+                if (wy < 0 || wy >= worldTop) return;
+                const int lx = wx - baseX, lz = wz - baseZ;
+                if (lx < 0 || lx >= N || lz < 0 || lz >= N) return;
+                const int ccy = wy / N;
+                if (!needNoise[static_cast<size_t>(ccy)]) return;
+                Chunk* c = stack[static_cast<size_t>(ccy)];
+                const int ly = wy % N;
+                if (!force && !c->get(lx, ly, lz).isAir()) return;
+                c->set(lx, ly, lz, Block{id, 0});
+            };
+            const auto stampTree = [&](int kind, uint16_t trunkId, uint16_t leafId,
+                                       int rx, int rz, int surfY, int hgt) {
+                for (int y = surfY - 8; y <= surfY + hgt; ++y) {       // trunk: sink DEEP (forced) so it always
+                    setCell(rx, y, rz, trunkId, y <= surfY);          // reaches real ground despite estimate slop;
+                }                                                     // air-only above the estimated surface
+                const int topY = surfY + hgt;
+                if (kind == 2) {                                       // pine: conical (slightly smaller)
+                    const int layers = hgt - 1;
+                    for (int i = 0; i <= layers; ++i) {
+                        const int y = surfY + 2 + i;
+                        const double frac = 1.0 - static_cast<double>(i) / (layers + 1);
+                        const int r = static_cast<int>(std::round(frac * 2.2));
+                        for (int dz = -r; dz <= r; ++dz)
+                        for (int dx = -r; dx <= r; ++dx)
+                            if (dx * dx + dz * dz <= r * r + 1) setCell(rx + dx, y, rz + dz, leafId, false);
+                    }
+                    setCell(rx, topY + 1, rz, leafId, false);         // pointed tip
+                } else if (kind == 1) {                               // birch: tall, narrow VERTICAL OVAL
+                    const int rH = 2, rV = 4;                         // horizontal 2, vertical 4 -> upright oval
+                    const int cy = topY - 2;
+                    for (int dy = -rV; dy <= rV; ++dy)
+                    for (int dz = -rH; dz <= rH; ++dz)
+                    for (int dx = -rH; dx <= rH; ++dx) {
+                        const double nx = static_cast<double>(dx) / rH;
+                        const double ny = static_cast<double>(dy) / rV;
+                        const double nz = static_cast<double>(dz) / rH;
+                        if (nx * nx + ny * ny + nz * nz <= 1.08) setCell(rx + dx, cy + dy, rz + dz, leafId, false);
+                    }
+                } else {                                              // oak: low, rounded crown (short)
+                    const int r = 3;
+                    const int cy = topY - 1;
+                    for (int dy = -2; dy <= 1; ++dy)                  // flatter than before -> shorter oaks
+                    for (int dz = -r; dz <= r; ++dz)
+                    for (int dx = -r; dx <= r; ++dx) {
+                        const double d2 = dx * dx + dy * dy * 1.9 + dz * dz;
+                        if (d2 <= r * r + 1) setCell(rx + dx, cy + dy, rz + dz, leafId, false);
+                    }
+                }
+            };
+            const auto fdiv = [](int a, int b) { return a >= 0 ? a / b : -((-a + b - 1) / b); };
+            const int cloX = fdiv(baseX - kReach, kTreeCell), chiX = fdiv(baseX + N - 1 + kReach, kTreeCell);
+            const int cloZ = fdiv(baseZ - kReach, kTreeCell), chiZ = fdiv(baseZ + N - 1 + kReach, kTreeCell);
+            for (int cz2 = cloZ; cz2 <= chiZ; ++cz2)
+            for (int cx2 = cloX; cx2 <= chiX; ++cx2) {
+                const int rootX = cx2 * kTreeCell + static_cast<int>(th(cx2, cz2, 1u) % kTreeCell);
+                const int rootZ = cz2 * kTreeCell + static_cast<int>(th(cx2, cz2, 2u) % kTreeCell);
+                double rgh = 0.0;
+                const int surfY = treeColumn(rootX, rootZ, rgh);
+                // Keep trees clearly inland: >= sea+11 leaves a wide margin above the beach so
+                // estimate slop can't root them on sand or over shallow water; not too high.
+                if (surfY <= kSeaLevel + 10 || surfY >= worldTop - 10) continue;
+                const Biome bi = biomeAt(rootX, rootZ, surfY);
+                uint16_t trunkId = 0, leafId = 0; int kind = 0; double density = 0.0;
+                switch (bi) {
+                    case B_OAK:        trunkId = oakTrunkId_;   leafId = oakLeavesId_;   kind = 0; density = 0.55; break;
+                    case B_BIRCH:      trunkId = birchTrunkId_; leafId = birchLeavesId_; kind = 1; density = 0.50; break;
+                    case B_PINE:       trunkId = pineTrunkId_;  leafId = pineLeavesId_;  kind = 2; density = 0.50; break;
+                    case B_GRASSY_MTN: trunkId = pineTrunkId_;  leafId = pineLeavesId_;  kind = 2; density = 0.22; break;
+                    case B_SNOW_OAK:   trunkId = oakTrunkId_;   leafId = oakLeavesId_;   kind = 0; density = 0.10; break;
+                    default: continue;   // beach / stone mountain / bare snowy spikes -> no trees
+                }
+                // Lowland forests sit near the coast — only place them on GENTLE terrain. Steep
+                // coastal cliffs carry a 3D crack-carve the surface estimate omits, so the est.
+                // runs high and the tree would float over the carved-out water. (Mountain pines/
+                // snowy oaks are far above sea, so no water to float over.)
+                if ((bi == B_OAK || bi == B_BIRCH || bi == B_PINE) && rgh > 0.32) continue;
+                // Forest-density variation: a low-freq noise splits tree regions into 3 tiers
+                // — sparse clearings (×0.35), normal woods (×1.0), dense forest (×1.8) — so the
+                // same species thins to scattered groves or thickens into closed canopy.
+                constexpr double kForestFreq = 0.0045;
+                const double fd = forestNoise.fbm(static_cast<float>(rootX * kForestFreq),
+                                                  static_cast<float>(rootZ * kForestFreq), 2) * 0.5 + 0.5;
+                const double densMul = fd < 0.33 ? 0.35 : (fd < 0.66 ? 1.0 : 1.8);
+                if ((th(cx2, cz2, 3u) & 0xffffu) / 65535.0 > density * densMul) continue; // thinning roll
+
+                const uint32_t hh = th(cx2, cz2, 4u);
+                const int hgt = kind == 2 ? 6 + static_cast<int>(hh % 5u)   // pine  6..10 (smaller)
+                              : kind == 1 ? 6 + static_cast<int>(hh % 3u)   // birch 6..8  (tall, slim)
+                                          : 6 + static_cast<int>(hh % 3u);  // oak   6..8  (taller trunk)
+                stampTree(kind, trunkId, leafId, rootX, rootZ, surfY, hgt);
             }
         }
         break;
