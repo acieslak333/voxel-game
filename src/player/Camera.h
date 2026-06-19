@@ -1,5 +1,15 @@
 #pragma once
 
+/**
+ * @file Camera.h
+ * @brief Minimal first-person camera: yaw/pitch angles and view-matrix generation.
+ *
+ * Owns no movement logic — position and orientation are written by PlayerController
+ * (or any other controller). Provides direction vectors used by locomotion and by
+ * the renderer for projection.
+ * @see docs/CODE_INDEX.md
+ */
+
 #include <glm/glm.hpp>
 
 namespace vg {
@@ -12,6 +22,7 @@ namespace vg {
 //  is decided by the PlayerController. Kept deliberately small so other
 //  controllers (spectator, cutscene, ...) could drive it later.
 // -----------------------------------------------------------------------------
+/** @brief Yaw/pitch first-person camera; position and orientation owned externally. */
 class Camera {
 public:
     glm::vec3 position{0.0f};

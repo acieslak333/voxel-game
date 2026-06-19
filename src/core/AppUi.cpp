@@ -1,3 +1,14 @@
+/**
+ * @file AppUi.cpp
+ * @brief App UI methods: HUD, inventory, crafting, chest, equipment, and menus.
+ *
+ * Implements App::buildUi and every sub-builder it calls (buildHotbar,
+ * buildInventory, buildCrafting, buildChest, buildEquipment, buildMenu,
+ * buildTuning, buildPalettePicker, buildShapePicker, buildDebugOverlay,
+ * buildCrosshair, buildDamageNumbers, buildBlockIndicator). Split from
+ * App.cpp to keep compilation times and diffs manageable.
+ * @see docs/CODE_INDEX.md
+ */
 #include "core/App.h"
 
 #include "core/ColorPalette.h"

@@ -1,3 +1,12 @@
+/**
+ * @file CompositeRenderer.cpp
+ * @brief CompositeRenderer implementation: NEAREST sampler, descriptor/pipeline
+ *        creation, and per-frame fog + retro post-effect recording.
+ *
+ * record() pushes fog + grain + submerge + pixel-scale constants, memcpys the
+ * retro/palette UBO into the persistently-mapped bloom buffer, and issues
+ * vkCmdDraw(3) for the fullscreen triangle.
+ */
 #include "render/CompositeRenderer.h"
 
 #include "core/ColorPalette.h"

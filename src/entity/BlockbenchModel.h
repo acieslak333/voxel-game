@@ -1,5 +1,16 @@
 #pragma once
 
+/**
+ * @file BlockbenchModel.h
+ * @brief Loader for Blockbench .bbmodel files into the box-part Skeleton + skin info.
+ *
+ * Maps Blockbench outliner groups to Joints and cuboid elements to Boxes, converting
+ * coordinates from Blockbench units (16 = 1 block) to block space. Supports per-face
+ * UV rects, box-UV cross layout, and embedded base64 texture PNGs. Pure CPU (uses
+ * yaml-cpp to parse JSON); exercised headlessly by `--logictest`.
+ * @see docs/CODE_INDEX.md
+ */
+
 #include "entity/Armature.h"
 
 #include <string>
@@ -22,6 +33,7 @@ namespace vg {
 //  dropped items and mobs. Pure CPU (yaml-cpp parses the JSON), so it's exercised
 //  headlessly by --logictest.
 // -----------------------------------------------------------------------------
+/** @brief Loaded .bbmodel: a poseable Skeleton, skin filename, resolution, and optional embedded PNG. */
 struct BlockbenchModel {
     Skeleton    skeleton;        // the posed-able box rig (joints + boxes)
     std::string skin;            // texture filename the model references (under assets/models/)

@@ -1,5 +1,16 @@
 #pragma once
 
+/**
+ * @file ChestStore.h
+ * @brief Per-position chest contents store with packed-key map and binary serialisation.
+ *
+ * Maps world position keys to 27-slot chests. Kept separate from chunk data so
+ * it is a small, pure, headlessly round-trip-testable unit. App performs the
+ * actual file I/O (reads/writes the byte buffer). Position keys pack x/y/z as
+ * 21 signed bits each — valid for coordinates within ±2^20 of the origin.
+ * @see docs/CODE_INDEX.md
+ */
+
 #include "player/Inventory.h" // ItemStack
 
 #include <array>
@@ -24,6 +35,7 @@ namespace vg {
 //  coordinates within ±2^20 (~1e6) of the origin — far beyond normal play. Outside
 //  that, two chests could alias; revisit with a wider key if worlds get that large.
 // -----------------------------------------------------------------------------
+/** @brief World-position-keyed store of 27-slot chest contents; serialisable to/from bytes. */
 class ChestStore {
 public:
     static constexpr int kSlots = 27; // 3x9 grid, like the backpack

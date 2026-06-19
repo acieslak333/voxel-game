@@ -1,5 +1,16 @@
 #pragma once
 
+/**
+ * @file Armature.h
+ * @brief Box-part rig, keyframe animation, and per-frame mesh baking for blocky entities.
+ *
+ * A Skeleton is a topologically-ordered joint tree plus axis-aligned Box geometry.
+ * AnimationClip stores per-joint T/R/S keyframes; sampleClip() produces a LocalPose;
+ * worldMatrices() composes it down the hierarchy; bakeMesh() writes a flat triangle
+ * list for upload. Entirely CPU math — no Vulkan — and headlessly testable.
+ * @see docs/CODE_INDEX.md
+ */
+
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
 
@@ -25,6 +36,7 @@ namespace vg {
 
 // One node in the part hierarchy. The rest transform (T*R*S) places the joint
 // relative to its parent; an animation overrides any of T/R/S per frame.
+/** @brief One rig node: a rest T/R/S transform relative to its parent joint. */
 struct Joint {
     std::string name;
     int         parent = -1;                 // index of the parent joint, -1 = root
@@ -37,6 +49,7 @@ struct Joint {
 // space. uvMin/uvMax is the texture rectangle (0..1) the box samples; `layer`
 // selects a texture-array slice (set by the renderer/loader). Rendering bakes the
 // 8 corners through the joint's world matrix each frame.
+/** @brief Axis-aligned cuboid attached to a joint; carries per-face UV and a texture-array layer. */
 struct Box {
     int       joint = 0;
     glm::vec3 min{-0.5f};
@@ -54,6 +67,7 @@ struct Box {
 
 // The static rig: a topologically ordered joint list (every parent precedes its
 // children, so a single forward pass composes world matrices) plus its boxes.
+/** @brief Topologically-ordered joint list plus the box geometry attached to those joints. */
 struct Skeleton {
     std::vector<Joint> joints;
     std::vector<Box>   boxes;
@@ -66,6 +80,7 @@ struct Skeleton {
 
 // A per-joint local transform set (the result of sampling a clip at some time).
 // Entries default to the joint's rest transform; channels override them.
+/** @brief Per-joint local T/R/S arrays for one sampled animation frame. */
 struct LocalPose {
     std::vector<glm::vec3> t;
     std::vector<glm::quat> r;
@@ -75,6 +90,7 @@ struct LocalPose {
 // One animated joint's keyframes. Any channel may be empty (then the joint keeps
 // its rest value for that component). `times` is shared by whichever of the T/R/S
 // arrays are non-empty; each non-empty array must match `times` in length.
+/** @brief Keyframe data for one joint in one animation (T/R/S channels, any may be empty). */
 struct AnimChannel {
     int                     joint = 0;
     std::vector<float>      times;
@@ -85,6 +101,7 @@ struct AnimChannel {
 
 // A named animation: a duration and a set of per-joint channels. `loop` wraps the
 // sample time into [0, duration).
+/** @brief Named animation: duration, looping flag, and per-joint channels. */
 struct AnimationClip {
     std::string              name;
     float                    duration = 0.0f;
@@ -112,6 +129,7 @@ struct AnimationClip {
 
 // One baked entity vertex. Model-space (the renderer applies the entity's world
 // placement); the box rig is already posed into these positions by bakeMesh().
+/** @brief One baked entity vertex: model-space position, normal, UV, and texture-array layer. */
 struct EntityVertex {
     glm::vec3 pos;
     glm::vec3 normal;

@@ -1,3 +1,13 @@
+/**
+ * @file Shape.cpp
+ * @brief shapeBoxes() and shapeOrientCount() implementations.
+ *
+ * Builds the axis-aligned box union for each ShapeKind/orient combination.
+ * The constants kPostLo/kPostHi and kWallLo/kWallHi encode the 6/16-wide
+ * column geometry so posts and walls share a consistent cross-section.
+ * @see docs/CODE_INDEX.md
+ */
+
 #include "world/Shape.h"
 
 namespace vg {
@@ -10,8 +20,8 @@ constexpr float kPostHi = 0.6875f;
 constexpr float kWallLo = 0.3125f; // wall centre/arm half-width
 constexpr float kWallHi = 0.6875f;
 
-// One horizontal-side box covering half the cell on side `s` (0 -Z, 1 +X, 2 +Z,
-// 3 -X), full height — used by VerticalSlab.
+/// Half-cell box on horizontal side s (0=-Z, 1=+X, 2=+Z, 3=-X), full height.
+/// Used by VerticalSlab.
 ShapeBox sideHalf(int s) {
     switch (s & 3) {
         case 0:  return {{0, 0, 0},        {1, 1, kHalf}};      // -Z
@@ -21,8 +31,8 @@ ShapeBox sideHalf(int s) {
     }
 }
 
-// The upper half-step box on horizontal side `s`, between y `lo`..`hi` — used by
-// Stairs (the part that sits above/below the slab on the high side).
+/// Step box on horizontal side s between y lo..hi — used by Stairs to build the
+/// raised portion on the high side of the step.
 ShapeBox stepBox(int s, float ylo, float yhi) {
     switch (s & 3) {
         case 0:  return {{0, ylo, 0},     {1, yhi, kHalf}};     // -Z

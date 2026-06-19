@@ -1,3 +1,9 @@
+/**
+ * @file SpanAllocator.cpp
+ * @brief Best-fit allocation scan, tail-remainder split, and coalescing free.
+ * @see docs/CODE_INDEX.md
+ */
+
 #include "utilities/alloc/SpanAllocator.h"
 
 #include <algorithm>
@@ -17,6 +23,7 @@ SpanAllocator::SpanAllocator(uint64_t capacity) {
     reset(capacity);
 }
 
+/// Discard all live and free state; reinitialise with a single free range [0, capacity).
 void SpanAllocator::reset(uint64_t capacity) {
     freeList_.clear();
     live_.clear();
@@ -27,6 +34,7 @@ void SpanAllocator::reset(uint64_t capacity) {
     }
 }
 
+/// Best-fit allocation: O(n) scan over the free list; returns kInvalid if no range fits.
 uint64_t SpanAllocator::allocate(uint64_t size, uint64_t alignment) {
     if (size == 0 || capacity_ == 0) {
         return kInvalid;
@@ -86,6 +94,7 @@ uint64_t SpanAllocator::allocate(uint64_t size, uint64_t alignment) {
     return aligned;
 }
 
+/// Release the span at `offset` (must have been returned by allocate()); coalesces neighbours.
 void SpanAllocator::free(uint64_t offset) {
     auto liveIt = live_.find(offset);
     // Callers must only free offsets returned by allocate().
@@ -127,6 +136,7 @@ void SpanAllocator::free(uint64_t offset) {
     freeList_.emplace(mergedStart, mergedSize);
 }
 
+/// Linear scan over the free list for the largest contiguous range; 0 when fully occupied.
 uint64_t SpanAllocator::largestFreeBlock() const {
     uint64_t largest = 0;
     for (const auto& [offset, size] : freeList_) {

@@ -1,5 +1,16 @@
 #pragma once
 
+/**
+ * @file EntityRenderer.h
+ * @brief Declares EntityRenderer, which draws animated box-rig entities into the scene pass.
+ *
+ * Each frame all entity meshes are baked from their posed skeletons (Armature::bakeMesh)
+ * and concatenated into a single per-frame host-visible vertex buffer; one draw call
+ * is issued per entity. Shares the block texture array with WorldRenderer and adds its
+ * own Blockbench skin atlas binding.
+ * @see docs/CODE_INDEX.md
+ */
+
 #include "entity/Armature.h"
 #include "render/Buffer.h"
 
@@ -14,32 +25,37 @@ namespace vg {
 
 class VulkanContext;
 
-// -----------------------------------------------------------------------------
-//  EntityRenderer (ISSUES #13E)
-// -----------------------------------------------------------------------------
-//  Draws animated box-rig entities (mobs, dropped items later) into the same
-//  low-res scene pass as the world, so they share its depth buffer and the
-//  composite/fog. Kept entirely separate from WorldRenderer: chunk meshes are
-//  static and streamed, whereas an entity is re-baked from its posed skeleton
-//  every frame (cheap for the small box counts a mob has) into a per-frame
-//  host-visible vertex buffer.
-//
-//  Geometry comes from entity/Armature.h bakeMesh(); this class only owns the
-//  Vulkan pipeline, the camera UBO/descriptor (reusing the block texture array),
-//  and the dynamic vertex buffers. One draw call per entity with a per-entity
-//  model push constant.
-// -----------------------------------------------------------------------------
+/**
+ * @brief Renders animated box-rig entities into the shared low-res scene pass.
+ *
+ * Entities share the scene depth buffer and composite/fog with the terrain.
+ * Geometry is re-baked every frame from Armature::bakeMesh() into a per-frame
+ * host-visible vertex buffer; one vkCmdDraw is issued per entity. Reuses the
+ * block texture array (binding 1) and adds a Blockbench skin atlas (binding 2).
+ *
+ * @note The vertex buffer is pre-allocated to kMaxVerts and never reallocated,
+ *       ensuring an in-flight frame's buffer is never freed mid-use.
+ */
 class EntityRenderer {
 public:
-    // One entity to draw this frame: its baked (model-space) mesh + world placement.
+    /// One entity to draw this frame: its baked (model-space) mesh + world placement.
     struct Draw {
         const std::vector<EntityVertex>* mesh;  // not owned; valid for the record call
         glm::mat4                        model; // world transform of the whole rig
         uint32_t                         useSkin = 0; // 0 = block atlas, 1 = skin atlas
     };
 
-    // `textureView/Sampler` is the block atlas (entities reusing block textures);
-    // `skinView/Sampler` is the Blockbench-model skin atlas (its own PNG layers).
+    /**
+     * @brief Construct the entity rendering pipeline and pre-allocate vertex buffers.
+     * @param ctx            Vulkan device context.
+     * @param renderPass     The scene render pass entities draw into.
+     * @param framesInFlight Number of frames in flight.
+     * @param shaderDir      Directory containing entity.vert/frag SPIR-V.
+     * @param textureView    Block texture array image view (binding 1).
+     * @param textureSampler Sampler for the block texture array.
+     * @param skinView       Blockbench skin atlas image view (binding 2).
+     * @param skinSampler    Sampler for the skin atlas.
+     */
     EntityRenderer(VulkanContext& ctx, VkRenderPass renderPass, uint32_t framesInFlight,
                    const std::string& shaderDir, VkImageView textureView,
                    VkSampler textureSampler, VkImageView skinView, VkSampler skinSampler);
@@ -48,8 +64,21 @@ public:
     EntityRenderer(const EntityRenderer&) = delete;
     EntityRenderer& operator=(const EntityRenderer&) = delete;
 
-    // Record all entity draws for this frame. Same sun/sky inputs as
-    // WorldRenderer::record so entities light identically to the terrain.
+    /**
+     * @brief Record all entity draw commands for this frame.
+     *
+     * Concatenates every entity's baked mesh into the per-frame vertex buffer and
+     * issues one vkCmdDraw per entity. No-op if @p draws is empty.
+     *
+     * @param cmd             Command buffer (must be inside the scene render pass).
+     * @param frameIndex      Current frame-in-flight index.
+     * @param extent          Render extent.
+     * @param view            Camera view matrix.
+     * @param proj            Camera projection matrix.
+     * @param sunDirAmbient   Same as WorldRenderer::record — xyz direction, w ambient.
+     * @param sunColIntensity Same as WorldRenderer::record — rgb tint, a sky intensity.
+     * @param draws           Entities to draw this frame.
+     */
     void record(VkCommandBuffer cmd, uint32_t frameIndex, VkExtent2D extent,
                 const glm::mat4& view, const glm::mat4& proj,
                 const glm::vec4& sunDirAmbient, const glm::vec4& sunColIntensity,

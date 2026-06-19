@@ -1,5 +1,16 @@
 #pragma once
 
+/**
+ * @file Particles.h
+ * @brief Data-driven billboard particle system: burst effects loaded from .prtcl YAML.
+ *
+ * ParticleEffect describes emitter parameters (count, gravity, speed, size, lifetime).
+ * Particles::spawnEffect() launches a burst; update() advances physics and ages them out.
+ * Collision via a SolidFn predicate. Pure simulation (no Vulkan); rendering done by
+ * the caller as camera-facing quads.
+ * @see docs/CODE_INDEX.md
+ */
+
 #include <cstdint>
 #include <functional>
 #include <string>
@@ -21,6 +32,7 @@ namespace vg {
 // -----------------------------------------------------------------------------
 
 // A data-driven particle effect (one burst), loaded from a `.prtcl` YAML file.
+/** @brief Emitter template loaded from a .prtcl file: all tunable burst parameters. */
 struct ParticleEffect {
     std::string name;
     std::string texture;        // texture filename (e.g. "stone.block.png"); empty =
@@ -45,6 +57,7 @@ struct ParticleEffect {
     static ParticleEffect load(const std::string& path);
 };
 
+/** @brief Live particle instance: position, velocity, lifetime, size, spin, and texture info. */
 struct Particle {
     glm::vec3 pos{0.0f};
     glm::vec3 vel{0.0f};
@@ -61,6 +74,7 @@ struct Particle {
     glm::vec2 uv0{0.0f};        // top-left of the chip's sub-rect in the texture
 };
 
+/** @brief Pooled particle system: spawn bursts from a ParticleEffect, step physics, expire. */
 class Particles {
 public:
     using SolidFn = std::function<bool(int x, int y, int z)>;

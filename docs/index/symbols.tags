@@ -1,0 +1,2047 @@
+!_TAG_FILE_FORMAT	2	/extended format/
+!_TAG_FILE_SORTED	1	/0=unsorted, 1=sorted/
+!_TAG_PROGRAM_NAME	codeindex.py	//
+Alloc	src/render/MeshArena.h	/^struct Alloc {/;"	s	line:70
+AnimChannel	src/entity/Armature.h	/^struct AnimChannel {/;"	s	line:94
+AnimationClip	src/entity/Armature.h	/^struct AnimationClip {/;"	s	line:105
+App	src/core/App.h	/^App();/;"	f	line:57
+App	src/core/App.h	/^class App {/;"	c	line:55
+Biome	src/world/World.cpp	/^enum Biome : int { B_BEACH, B_OAK, B_BIRCH, B_PINE,/;"	g	line:738
+Block	src/render/GpuAllocator.h	/^struct Block {/;"	s	line:105
+Block	src/world/Block.h	/^struct Block {/;"	s	line:35
+BlockProperties	src/world/BlockRegistry.h	/^struct BlockProperties {/;"	s	line:60
+BlockRegistr	src/player/Crafting.h	/^class BlockRegistry;/;"	c	line:23
+BlockRegistr	src/world/ChunkMesher.h	/^class BlockRegistry;/;"	c	line:25
+BlockRegistr	src/world/Feature.h	/^class BlockRegistry;/;"	c	line:25
+BlockRegistr	src/world/Structure.h	/^class BlockRegistry;/;"	c	line:22
+BlockRegistry	src/world/BlockRegistry.h	/^class BlockRegistry {/;"	c	line:165
+BlockRegistry	src/world/BlockRegistry.h	/^explicit BlockRegistry(const std::string& blocksFile);/;"	f	line:169
+BlockbenchModel	src/entity/BlockbenchModel.h	/^struct BlockbenchModel {/;"	s	line:37
+Box	src/entity/Armature.h	/^struct Box {/;"	s	line:53
+Buffer	src/render/Buffer.h	/^Buffer(Buffer&& other) noexcept;/;"	f	line:45
+Buffer	src/render/Buffer.h	/^class Buffer {/;"	c	line:38
+CHECK	tests/span_allocator_test.cpp	/^CHECK(a != SpanAllocator::kInvalid);/;"	f	line:182
+CHECK	tests/span_allocator_test.cpp	/^CHECK(a != SpanAllocator::kInvalid);/;"	f	line:233
+CHECK	tests/span_allocator_test.cpp	/^CHECK(a != SpanAllocator::kInvalid);/;"	f	line:66
+CHECK	tests/span_allocator_test.cpp	/^CHECK(a0 == 0);/;"	f	line:100
+CHECK	tests/span_allocator_test.cpp	/^CHECK(a0 == 0);/;"	f	line:213
+CHECK	tests/span_allocator_test.cpp	/^CHECK(a1 != SpanAllocator::kInvalid);/;"	f	line:105
+CHECK	tests/span_allocator_test.cpp	/^CHECK(a1 == 64);/;"	f	line:107
+CHECK	tests/span_allocator_test.cpp	/^CHECK(a1 == SpanAllocator::kInvalid);/;"	f	line:218
+CHECK	tests/span_allocator_test.cpp	/^CHECK(a2 == 128);/;"	f	line:112
+CHECK	tests/span_allocator_test.cpp	/^CHECK(a3 != SpanAllocator::kInvalid);/;"	f	line:117
+CHECK	tests/span_allocator_test.cpp	/^CHECK(a3 == 256);/;"	f	line:119
+CHECK	tests/span_allocator_test.cpp	/^CHECK(b != SpanAllocator::kInvalid);/;"	f	line:245
+CHECK	tests/span_allocator_test.cpp	/^CHECK(b != SpanAllocator::kInvalid);/;"	f	line:71
+CHECK	tests/span_allocator_test.cpp	/^CHECK(b != a);/;"	f	line:73
+CHECK	tests/span_allocator_test.cpp	/^CHECK(b == SpanAllocator::kInvalid);/;"	f	line:187
+CHECK	tests/span_allocator_test.cpp	/^CHECK(c != SpanAllocator::kInvalid);/;"	f	line:193
+CHECK	tests/span_allocator_test.cpp	/^CHECK(isAligned(a, 16));/;"	f	line:67
+CHECK	tests/span_allocator_test.cpp	/^CHECK(isAligned(a1, 64));/;"	f	line:106
+CHECK	tests/span_allocator_test.cpp	/^CHECK(isAligned(a3, 256));/;"	f	line:118
+CHECK	tests/span_allocator_test.cpp	/^CHECK(isAligned(b, 256));/;"	f	line:246
+CHECK	tests/span_allocator_test.cpp	/^CHECK(isAligned(b, 32));/;"	f	line:72
+CHECK	tests/span_allocator_test.cpp	/^CHECK(off != SpanAllocator::kInvalid);/;"	f	line:149
+CHECK	tests/span_allocator_test.cpp	/^CHECK(sa.capacity()        == 1024);/;"	f	line:237
+CHECK	tests/span_allocator_test.cpp	/^CHECK(sa.freeBytes()       == 1024);/;"	f	line:239
+CHECK	tests/span_allocator_test.cpp	/^CHECK(sa.freeBytes() == 0);/;"	f	line:153
+CHECK	tests/span_allocator_test.cpp	/^CHECK(sa.freeBytes() == 1024);/;"	f	line:62
+CHECK	tests/span_allocator_test.cpp	/^CHECK(sa.freeBytes() == 1024);/;"	f	line:83
+CHECK	tests/span_allocator_test.cpp	/^CHECK(sa.freeBytes() == 512 - 400);/;"	f	line:189
+CHECK	tests/span_allocator_test.cpp	/^CHECK(sa.largestFreeBlock() == 0);/;"	f	line:154
+CHECK	tests/span_allocator_test.cpp	/^CHECK(sa.largestFreeBlock() == 1000);/;"	f	line:129
+CHECK	tests/span_allocator_test.cpp	/^CHECK(sa.largestFreeBlock() == 1024);/;"	f	line:240
+CHECK	tests/span_allocator_test.cpp	/^CHECK(sa.largestFreeBlock() == 1024);/;"	f	line:249
+CHECK	tests/span_allocator_test.cpp	/^CHECK(sa.largestFreeBlock() == 1024);/;"	f	line:84
+CHECK	tests/span_allocator_test.cpp	/^CHECK(sa.largestFreeBlock() == 128);/;"	f	line:222
+CHECK	tests/span_allocator_test.cpp	/^CHECK(sa.largestFreeBlock() == 512);/;"	f	line:201
+CHECK	tests/span_allocator_test.cpp	/^CHECK(sa.largestFreeBlock() == kCap);/;"	f	line:169
+CHECK	tests/span_allocator_test.cpp	/^CHECK(sa.largestFreeBlock() == kCap);/;"	f	line:345
+CHECK	tests/span_allocator_test.cpp	/^CHECK(sa.used()            == 0);/;"	f	line:238
+CHECK	tests/span_allocator_test.cpp	/^CHECK(sa.used()      == 0);/;"	f	line:63
+CHECK	tests/span_allocator_test.cpp	/^CHECK(sa.used()      == 0);/;"	f	line:82
+CHECK	tests/span_allocator_test.cpp	/^CHECK(sa.used() == 0);/;"	f	line:128
+CHECK	tests/span_allocator_test.cpp	/^CHECK(sa.used() == 0);/;"	f	line:168
+CHECK	tests/span_allocator_test.cpp	/^CHECK(sa.used() == 0);/;"	f	line:200
+CHECK	tests/span_allocator_test.cpp	/^CHECK(sa.used() == 0);/;"	f	line:344
+Camera	src/player/Camera.h	/^class Camera {/;"	c	line:26
+CameraUBO	shaders/chunk.frag	/^uniform: layout(set = 0, binding = 0) uniform CameraUBO {/;"	v	line:11
+CameraUBO	shaders/chunk.vert	/^uniform: layout(set = 0, binding = 0) uniform CameraUBO {/;"	v	line:14
+CameraUBO	shaders/chunk_indirect.vert	/^uniform: layout(set = 0, binding = 0) uniform CameraUBO {/;"	v	line:30
+CameraUBO	shaders/entity.frag	/^uniform: layout(set = 0, binding = 0) uniform CameraUBO {/;"	v	line:9
+CameraUBO	shaders/entity.vert	/^uniform: layout(set = 0, binding = 0) uniform CameraUBO {/;"	v	line:10
+CameraUBO	src/render/EntityRenderer.h	/^struct CameraUBO {/;"	s	line:88
+CameraUBO	src/render/WorldRenderer.h	/^struct CameraUBO {/;"	s	line:200
+Cell	src/utilities/noise/Noise.h	/^enum class Cell : uint8_t { F1, F2, F2mF1 };/;"	g	line:80
+Cell	src/world/Feature.h	/^struct Cell { uint16_t id = kSkip; bool force = true; };/;"	s	line:96
+ChestStore	src/player/ChestStore.h	/^class ChestStore {/;"	c	line:39
+Chun	src/world/ChunkMesher.h	/^class Chunk;/;"	c	line:24
+Chunk	src/world/Chunk.h	/^Chunk() { blocks_.fill(Block{}); }/;"	f	line:45
+Chunk	src/world/Chunk.h	/^class Chunk {/;"	c	line:40
+ChunkDrawData	shaders/chunk_indirect.vert	/^var: layout(std430, set = 0, binding = 2) readonly buffer ChunkDrawData {/;"	v	line:46
+ChunkMesh	src/render/WorldRenderer.h	/^struct ChunkMesh {/;"	s	line:226
+ChunkMesher	src/world/ChunkMesher.h	/^class ChunkMesher {/;"	c	line:54
+ChunkMeta	src/render/WorldRenderer.h	/^struct ChunkMeta {/;"	s	line:241
+CloudNoise	src/clouds/CloudNoise.h	/^CloudNoise(VulkanContext& ctx, const std::string& cacheFile);/;"	f	line:42
+CloudNoise	src/clouds/CloudNoise.h	/^class CloudNoise {/;"	c	line:32
+CloudSystem	src/clouds/CloudSystem.h	/^class CloudSystem {/;"	c	line:37
+CompositeRenderer	src/render/CompositeRenderer.h	/^CompositeRenderer(VulkanContext& ctx, VkRenderPass targetRenderPass);/;"	f	line:37
+CompositeRenderer	src/render/CompositeRenderer.h	/^class CompositeRenderer {/;"	c	line:35
+CornerLight	src/world/ChunkMesher.cpp	/^struct CornerLight { glm::vec2 light; glm::vec3 col; };/;"	s	line:335
+Crafting	src/player/Crafting.h	/^Crafting(const std::string& recipesFile, const BlockRegistry& registry);/;"	f	line:50
+Crafting	src/player/Crafting.h	/^class Crafting {/;"	c	line:38
+Critter	src/entity/Critters.h	/^struct Critter {/;"	s	line:32
+Critters	src/entity/Critters.h	/^class Critters {/;"	c	line:43
+CullPush	src/render/WorldRenderer.cpp	/^struct CullPush {/;"	s	line:1023
+DayNigh	src/clouds/CloudSystem.h	/^class DayNight;/;"	c	line:26
+DayNight	src/core/DayNight.h	/^DayNight(const std::string& skyFile, const Palette& palette);/;"	f	line:98
+DayNight	src/core/DayNight.h	/^class DayNight {/;"	c	line:30
+DemoBlock	src/core/App.cpp	/^struct DemoBlock { glm::ivec3 p; ShapeKind k; uint8_t o; };/;"	s	line:1307
+Draw	src/render/EntityRenderer.h	/^struct Draw {/;"	s	line:42
+Edge	src/core/AppUi.cpp	/^struct Edge { int a, b, f0, f1; };/;"	s	line:199
+EntityRenderer	src/render/EntityRenderer.h	/^class EntityRenderer {/;"	c	line:39
+EntityVertex	src/entity/Armature.h	/^struct EntityVertex {/;"	s	line:133
+Entry	src/utilities/noise/NoiseStack.h	/^struct Entry { Layer cfg; Noise noise; float baseX = 0.0f, baseY = 0.0f, baseZ = 0.0f; };/;"	s	line:160
+EquipSlot	src/world/BlockRegistry.h	/^enum class EquipSlot { None, Head, Chest, Legs, Feet, Trinket };/;"	g	line:51
+Equipment	src/player/Equipment.h	/^struct Equipment {/;"	s	line:32
+Face	src/core/App.cpp	/^struct Face { int axis; float sign; int u; int v; int face; };/;"	s	line:173
+Face	src/core/App.cpp	/^struct Face { int axis; float sign; int u; int v; };/;"	s	line:201
+Face	src/entity/Armature.cpp	/^struct Face { int axis; float sign; int u; int v; };/;"	s	line:141
+Face	src/world/Block.h	/^enum Face : int {/;"	g	line:80
+FaceMap	src/entity/BlockbenchModel.cpp	/^struct FaceMap { const char* name; int idx; };/;"	s	line:149
+Falloff	src/utilities/noise/NoiseMask.h	/^enum class Falloff : uint8_t {/;"	g	line:27
+Feature	src/world/Feature.h	/^struct Feature {/;"	s	line:57
+FeatureSet	src/world/Feature.h	/^FeatureSet(const std::string& dir, const BlockRegistry& registry);/;"	f	line:133
+FeatureSet	src/world/Feature.h	/^class FeatureSet {/;"	c	line:127
+FileEntry	tools/codeindex/codeindex.py	/^class FileEntry:/;"	c	line:91
+Fill	src/world/Feature.h	/^enum class Fill  { Solid, Shell, Noise, Scatter };/;"	g	line:68
+Fog	src/render/CompositeRenderer.h	/^struct Fog {/;"	s	line:44
+FontOption	src/core/AppUi.cpp	/^struct FontOption { const char* file; const char* label; };/;"	s	line:687
+GenMode	src/world/World.cpp	/^enum class GenMode { Beta173, Layered3DPerlin };/;"	g	line:308
+Glyph	src/render/UiRenderer.h	/^struct Glyph {/;"	s	line:128
+GpuAlloc	src/render/GpuAllocator.h	/^struct GpuAlloc {/;"	s	line:60
+GpuAllocato	src/render/VulkanContext.h	/^class GpuAllocator;/;"	c	line:25
+GpuAllocator	src/render/GpuAllocator.h	/^class GpuAllocator {/;"	c	line:80
+GpuAllocator	src/render/GpuAllocator.h	/^explicit GpuAllocator(VulkanContext& ctx);/;"	f	line:82
+GpuParams	src/clouds/CloudSystem.h	/^struct GpuParams {/;"	s	line:40
+Input	src/core/Input.h	/^class Input {/;"	c	line:63
+Input	src/core/Input.h	/^explicit Input(Window& window);/;"	f	line:65
+InputStat	src/player/PlayerController.h	/^struct InputState;/;"	s	line:25
+InputState	src/core/Input.h	/^struct InputState {/;"	s	line:25
+Interval	tests/span_allocator_test.cpp	/^struct Interval { uint64_t start; uint64_t end; };/;"	s	line:318
+Inventory	src/player/Inventory.h	/^class Inventory {/;"	c	line:48
+ItemEntities	src/entity/ItemEntity.h	/^class ItemEntities {/;"	c	line:42
+ItemEntity	src/entity/ItemEntity.h	/^struct ItemEntity {/;"	s	line:33
+ItemStack	src/player/Inventory.h	/^struct ItemStack {/;"	s	line:27
+Joint	src/entity/Armature.h	/^struct Joint {/;"	s	line:40
+Kind	src/core/App.h	/^enum Kind { Break, Place, Reshape } kind;/;"	g	line:89
+Layer	src/utilities/noise/NoiseStack.h	/^struct Layer {/;"	s	line:49
+Layer	src/world/World.cpp	/^struct Layer {/;"	s	line:1392
+LightAtla	src/render/WorldRenderer.h	/^class LightAtlas;/;"	c	line:40
+LightAtlas	src/render/LightAtlas.h	/^LightAtlas(VulkanContext& ctx, uint32_t slotCapacity, uint32_t framesInFlight);/;"	f	line:74
+LightAtlas	src/render/LightAtlas.h	/^class LightAtlas {/;"	c	line:68
+LightSample	src/world/ChunkMesher.h	/^struct LightSample {/;"	s	line:67
+LiveEntry	tests/span_allocator_test.cpp	/^struct LiveEntry { uint64_t spanStart; uint64_t spanSize; uint64_t alignment; };/;"	s	line:272
+LocalPose	src/entity/Armature.h	/^struct LocalPose {/;"	s	line:84
+Mask	src/world/ChunkMesher.cpp	/^struct Mask {/;"	s	line:88
+MeshArena	src/render/MeshArena.h	/^MeshArena(VulkanContext& ctx, uint32_t vertexCapacity, uint32_t indexCapacity);/;"	f	line:83
+MeshArena	src/render/MeshArena.h	/^class MeshArena {/;"	c	line:66
+MeshData	src/world/ChunkMesher.h	/^struct MeshData {/;"	s	line:38
+MeshJob	src/render/WorldRenderer.h	/^struct MeshJob    { int cx, cy, cz; std::uint64_t version; };/;"	s	line:253
+MeshLayout	src/render/WorldRenderer.cpp	/^struct MeshLayout {/;"	s	line:97
+MeshPlacement	src/render/WorldRenderer.h	/^struct MeshPlacement {/;"	s	line:247
+MeshResult	src/render/WorldRenderer.h	/^struct MeshResult { int cx, cy, cz; std::uint64_t version; MeshData data; };/;"	s	line:254
+Meta	shaders/chunk_cull.comp	/^var: layout(std430, set = 0, binding = 0) readonly buffer Meta   { ChunkMeta meta[];  } inMeta;/;"	v	line:43
+Metric	src/utilities/noise/Noise.h	/^enum class Metric : uint8_t { Euclidean, Manhattan, Chebyshev };/;"	g	line:76
+Mode	src/player/PlayerController.h	/^enum class Mode { Walking, FreeFly };/;"	g	line:43
+N	src/core/App.cpp	/^const glm::vec3 N(0.0f, 1.0f, 0.0f);/;"	f	line:1802
+NType	src/world/World.cpp	/^enum class NType { Perlin, Ridged, Billow, Voronoi, Fbm, RidgedFbm };/;"	g	line:1389
+Nois	src/world/Feature.h	/^class Noise;/;"	c	line:26
+Noise	src/utilities/noise/Noise.h	/^class Noise {/;"	c	line:46
+Noise	src/utilities/noise/Noise.h	/^explicit Noise(uint32_t seed);/;"	f	line:49
+NoiseMask	src/utilities/noise/NoiseMask.h	/^struct NoiseMask {/;"	s	line:50
+NoiseStack	src/utilities/noise/NoiseStack.h	/^class NoiseStack {/;"	c	line:43
+OffscreenTarge	src/render/Renderer.h	/^class OffscreenTarget;/;"	c	line:37
+OffscreenTarget	src/render/OffscreenTarget.h	/^OffscreenTarget(VulkanContext& ctx, VkExtent2D extent, VkFormat colorFormat);/;"	f	line:39
+OffscreenTarget	src/render/OffscreenTarget.h	/^class OffscreenTarget {/;"	c	line:37
+Op	src/world/Feature.h	/^struct Op {/;"	s	line:74
+Opaque	shaders/chunk_cull.comp	/^var: layout(std430, set = 0, binding = 1) writeonly buffer Opaque { DrawCmd cmds[]; } outOpaque;/;"	v	line:44
+Palett	src/core/DayNight.h	/^class Palette;/;"	c	line:21
+Palette	src/core/Palette.h	/^class Palette {/;"	c	line:26
+Palette	src/core/Palette.h	/^explicit Palette(const std::string& paletteFile);/;"	f	line:30
+Particle	src/entity/Particles.h	/^struct Particle {/;"	s	line:61
+ParticleEffect	src/entity/Particles.h	/^struct ParticleEffect {/;"	s	line:36
+Particles	src/entity/Particles.h	/^class Particles {/;"	c	line:78
+PendingEdit	src/core/App.h	/^struct PendingEdit {/;"	s	line:88
+PendingLight	src/render/WorldRenderer.h	/^struct PendingLight { int slot, cx, cy, cz; };/;"	s	line:334
+PendingUpload	src/render/WorldRenderer.h	/^struct PendingUpload {/;"	s	line:422
+PhaseTimes	src/render/Renderer.h	/^struct PhaseTimes { double wait = 0, acquire = 0, record = 0, submit = 0; };/;"	s	line:128
+Pick	src/world/Feature.h	/^enum class Pick  { PerCell, PerInstance };/;"	g	line:69
+Pipelin	src/render/WorldRenderer.h	/^class Pipeline;/;"	c	line:38
+Pipeline	src/render/Pipeline.h	/^class Pipeline {/;"	c	line:41
+Place	src/world/Feature.h	/^enum class Place { Force, AirOnly };/;"	g	line:70
+PlayerController	src/player/PlayerController.h	/^class PlayerController {/;"	c	line:40
+PlayerController	src/player/PlayerController.h	/^explicit PlayerController(glm::vec3 feetPosition);/;"	f	line:58
+PlayerSave	src/player/PlayerSave.h	/^struct PlayerSave {/;"	s	line:34
+Post	shaders/composite.frag	/^uniform: layout(set = 0, binding = 2) uniform Post {/;"	v	line:20
+PostUbo	src/render/CompositeRenderer.cpp	/^struct PostUbo {/;"	s	line:66
+PregenStrip	src/world/World.h	/^struct PregenStrip {/;"	s	line:183
+Push	shaders/chunk.vert	/^uniform: layout(push_constant) uniform Push {/;"	v	line:26
+Push	shaders/chunk_cull.comp	/^uniform: layout(push_constant) uniform Push {/;"	v	line:47
+Push	shaders/chunk_indirect.vert	/^uniform: layout(push_constant) uniform Push {/;"	v	line:53
+Push	shaders/composite.frag	/^uniform: layout(push_constant) uniform Push {/;"	v	line:32
+Push	shaders/entity.frag	/^uniform: layout(push_constant) uniform Push {/;"	v	line:16
+Push	shaders/entity.vert	/^uniform: layout(push_constant) uniform Push {/;"	v	line:20
+Push	shaders/ui.vert	/^uniform: layout(push_constant) uniform Push {/;"	v	line:13
+PushConstants	src/render/CompositeRenderer.cpp	/^struct PushConstants {/;"	s	line:55
+PushConstants	src/render/WorldRenderer.h	/^struct PushConstants {/;"	s	line:214
+QueueFamilyIndices	src/render/VulkanContext.h	/^struct QueueFamilyIndices {/;"	s	line:36
+RandF	src/world/Feature.h	/^struct RandF {/;"	s	line:50
+Range	src/render/GpuAllocator.h	/^struct Range { VkDeviceSize offset; VkDeviceSize size; };/;"	s	line:104
+RaycastHit	src/world/Raycast.h	/^struct RaycastHit {/;"	s	line:39
+Recipe	src/player/Crafting.h	/^struct Recipe {/;"	s	line:41
+RenderType	src/world/Block.h	/^enum class RenderType : uint8_t {/;"	g	line:59
+Renderer	src/render/Renderer.h	/^Renderer(VulkanContext& ctx, Swapchain& swapchain, Window& window);/;"	f	line:70
+Renderer	src/render/Renderer.h	/^class Renderer {/;"	c	line:60
+Retired	src/render/LightAtlas.h	/^struct Retired { int framesLeft; int slot; };/;"	s	line:124
+SetThreadPriority	src/render/WorldRenderer.cpp	/^SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);/;"	f	line:61
+Settings	src/core/Settings.h	/^struct Settings {/;"	s	line:23
+Shape	src/world/Feature.h	/^enum class Shape { Box, Sphere, Ellipsoid, Cylinder, Cone, Column, Line,/;"	g	line:60
+ShapeBox	src/world/Shape.h	/^struct ShapeBox {/;"	s	line:46
+ShapeKind	src/world/Shape.h	/^enum class ShapeKind : uint8_t {/;"	g	line:36
+Skeleton	src/entity/Armature.h	/^struct Skeleton {/;"	s	line:71
+SkyRenderer	src/render/SkyRenderer.h	/^class SkyRenderer {/;"	c	line:36
+SkyState	src/core/DayNight.h	/^struct SkyState {/;"	s	line:33
+SkyUBO	shaders/sky.frag	/^uniform: layout(set = 0, binding = 0) uniform SkyUBO {/;"	v	line:21
+SkyUBO	src/render/SkyRenderer.h	/^struct SkyUBO {/;"	s	line:79
+Span	src/render/EntityRenderer.cpp	/^struct Span { uint32_t first; uint32_t count; glm::mat4 model; uint32_t useSkin; };/;"	s	line:290
+Span	src/utilities/alloc/SpanAllocator.h	/^struct Span { uint64_t start; uint64_t size; };/;"	s	line:82
+SpanAllocator	src/utilities/alloc/SpanAllocator.h	/^class SpanAllocator {/;"	c	line:54
+SpanAllocator	src/utilities/alloc/SpanAllocator.h	/^explicit SpanAllocator(uint64_t capacity);/;"	f	line:59
+StagingHold	src/render/LightAtlas.h	/^struct StagingHold { int framesLeft; Buffer buf; };/;"	s	line:126
+Stats	src/player/Equipment.h	/^struct Stats {/;"	s	line:50
+Structure	src/world/Structure.h	/^struct Structure {/;"	s	line:40
+StructureSet	src/world/Structure.h	/^StructureSet(const std::string& dir, const BlockRegistry& registry);/;"	f	line:73
+StructureSet	src/world/Structure.h	/^class StructureSet {/;"	c	line:69
+SunsetPreset	src/core/DayNight.h	/^struct SunsetPreset { glm::vec3 high, mid, horizon; };/;"	s	line:155
+SwapChainSupportDetails	src/render/VulkanContext.h	/^struct SwapChainSupportDetails {/;"	s	line:45
+Swapchai	src/render/Renderer.h	/^class Swapchain;/;"	c	line:35
+Swapchain	src/render/Swapchain.h	/^Swapchain(VulkanContext& ctx, const Window& window);/;"	f	line:44
+Swapchain	src/render/Swapchain.h	/^class Swapchain {/;"	c	line:42
+Symbol	tools/codeindex/codeindex.py	/^class Symbol:/;"	c	line:82
+TextureArra	src/render/WorldRenderer.h	/^class TextureArray;/;"	c	line:39
+TextureArray	src/render/TextureArray.h	/^class TextureArray {/;"	c	line:50
+ThresholdPoint	src/world/World.cpp	/^struct ThresholdPoint { float h; float threshold; };/;"	s	line:1431
+ToolKind	src/world/BlockRegistry.h	/^enum class ToolKind { None, Pickaxe, Sword };/;"	g	line:43
+Type	src/utilities/noise/NoiseStack.h	/^enum class Type { Perlin, Ridged, Billow, Worley };/;"	g	line:46
+Ui	src/core/Ui.h	/^Ui(UiRenderer& renderer, float mouseX, float mouseY, bool mouseDown, bool mousePressed);/;"	f	line:38
+Ui	src/core/Ui.h	/^class Ui {/;"	c	line:36
+UiBox	src/core/Ui.h	/^enum class UiBox { Bg, Bg2, Bg3, Eq, Button, SliderBg, Slider, Border };/;"	g	line:27
+UiRendere	src/core/Ui.h	/^class UiRenderer;/;"	c	line:20
+UiRenderer	src/render/UiRenderer.h	/^class UiRenderer {/;"	c	line:50
+UiSpriteLayers	src/world/BlockRegistry.h	/^struct UiSpriteLayers {/;"	s	line:32
+UiVertex	src/render/UiRenderer.h	/^struct UiVertex {/;"	s	line:35
+Vertex	src/render/Vertex.h	/^struct Vertex {/;"	s	line:71
+VulkanContex	src/clouds/CloudNoise.h	/^class VulkanContext;/;"	c	line:22
+VulkanContex	src/clouds/CloudSystem.h	/^class VulkanContext;/;"	c	line:25
+VulkanContex	src/clouds/WeatherMap.h	/^class VulkanContext;/;"	c	line:23
+VulkanContex	src/render/Buffer.h	/^class VulkanContext;/;"	c	line:21
+VulkanContex	src/render/CompositeRenderer.h	/^class VulkanContext;/;"	c	line:25
+VulkanContex	src/render/EntityRenderer.h	/^class VulkanContext;/;"	c	line:26
+VulkanContex	src/render/GpuAllocator.h	/^class VulkanContext;/;"	c	line:27
+VulkanContex	src/render/LightAtlas.h	/^class VulkanContext;/;"	c	line:35
+VulkanContex	src/render/MeshArena.h	/^class VulkanContext;/;"	c	line:31
+VulkanContex	src/render/OffscreenTarget.h	/^class VulkanContext;/;"	c	line:20
+VulkanContex	src/render/Pipeline.h	/^class VulkanContext;/;"	c	line:21
+VulkanContex	src/render/Renderer.h	/^class VulkanContext;/;"	c	line:34
+VulkanContex	src/render/Screenshot.h	/^class VulkanContext;/;"	c	line:18
+VulkanContex	src/render/SkyRenderer.h	/^class VulkanContext;/;"	c	line:27
+VulkanContex	src/render/Swapchain.h	/^class VulkanContext;/;"	c	line:21
+VulkanContex	src/render/TextureArray.h	/^class VulkanContext;/;"	c	line:26
+VulkanContex	src/render/UiRenderer.h	/^class VulkanContext;/;"	c	line:27
+VulkanContex	src/render/VulkanUtils.h	/^class VulkanContext;/;"	c	line:20
+VulkanContex	src/render/WorldRenderer.h	/^class VulkanContext;/;"	c	line:37
+VulkanContext	src/render/VulkanContext.h	/^class VulkanContext {/;"	c	line:70
+VulkanContext	src/render/VulkanContext.h	/^explicit VulkanContext(const Window& window);/;"	f	line:72
+WBlock	src/world/Feature.h	/^struct WBlock { uint16_t id = 0; float w = 1.0f; };/;"	s	line:72
+Water	shaders/chunk_cull.comp	/^var: layout(std430, set = 0, binding = 2) writeonly buffer Water  { DrawCmd cmds[]; } outWater;/;"	v	line:45
+WeatherMap	src/clouds/WeatherMap.h	/^WeatherMap(VulkanContext& ctx, uint32_t seed);/;"	f	line:42
+WeatherMap	src/clouds/WeatherMap.h	/^class WeatherMap {/;"	c	line:33
+WeatherState	src/clouds/CloudSystem.cpp	/^struct WeatherState {/;"	s	line:37
+Windo	src/core/Input.h	/^class Window;/;"	c	line:16
+Windo	src/render/Renderer.h	/^class Window;/;"	c	line:36
+Windo	src/render/Swapchain.h	/^class Window;/;"	c	line:22
+Windo	src/render/VulkanContext.h	/^class Window;/;"	c	line:24
+Window	src/core/Window.h	/^Window(int width, int height, std::string title);/;"	f	line:30
+Window	src/core/Window.h	/^class Window {/;"	c	line:28
+Worl	src/render/WorldRenderer.h	/^class World;/;"	c	line:41
+World	src/world/World.h	/^World(const WorldConfig& config, const std::string& blocksFile);/;"	f	line:47
+World	src/world/World.h	/^class World {/;"	c	line:43
+WorldConfig	src/world/WorldConfig.h	/^struct WorldConfig {/;"	s	line:32
+WorldRenderer	src/render/WorldRenderer.h	/^class WorldRenderer {/;"	c	line:59
+_avg_color	tools/feature_tool.py	/^def _avg_color(name):/;"	f	line:58
+_avg_color	tools/structure_tool.py	/^def _avg_color(name):/;"	f	line:56
+_cleanup	tools/hub.py	/^def _cleanup():/;"	f	line:107
+_h01	tools/feature_tool.py	/^def _h01(x):/;"	f	line:115
+_imul	tools/feature_tool.py	/^def _imul(a, b): return _u32(a * b)/;"	f	line:111
+_load_seq	tools/hub.py	/^def _load_seq(path, key=None):/;"	f	line:116
+_load_yaml	tools/feature_tool.py	/^def _load_yaml(path, default):/;"	f	line:51
+_load_yaml	tools/structure_tool.py	/^def _load_yaml(path, default):/;"	f	line:49
+_mix	tools/feature_tool.py	/^def _mix(a, b): return _u32(a ^ _u32(_u32(b + 0x9e3779b9) + _u32(a << 6) + (a >> 2)))/;"	f	line:112
+_opsalt	tools/feature_tool.py	/^def _opsalt(i): return _imul(i + 1, 2654435761)/;"	f	line:121
+_pick	tools/feature_tool.py	/^def _pick(blocks, roll):/;"	f	line:145
+_rat	tools/feature_tool.py	/^def _rat(rf, h):/;"	f	line:132
+_rf	tools/feature_tool.py	/^def _rf(v, default):/;"	f	line:124
+_ri	tools/feature_tool.py	/^def _ri(rf, h): return int(round(_rat(rf, h)))/;"	f	line:137
+_shade	tools/feature_tool.py	/^def _shade(hexc, f):/;"	f	line:266
+_u32	tools/feature_tool.py	/^def _u32(x): return x & 0xFFFFFFFF/;"	f	line:110
+_vnoise	tools/feature_tool.py	/^def _vnoise(x, y, z):/;"	f	line:140
+add	src/player/Inventory.h	/^int add(uint16_t blockId, int count = 1);/;"	f	line:70
+add	tools/recipe_tool.py	/^def add():/;"	f	line:177
+addLayer	src/utilities/noise/NoiseStack.h	/^void addLayer(const Layer& l, uint32_t seed) {/;"	f	line:95
+addLook	src/player/Camera.h	/^void addLook(float deltaX, float deltaY, float sensitivity);/;"	f	line:38
+addQuad	src/world/ChunkMesher.cpp	/^addQuad(d, u, v, x[d], i, j, w, h, mask[n]);/;"	f	line:486
+advance	src/core/DayNight.h	/^void advance(float dt);/;"	f	line:101
+aerialDistance	assets/clouds.yaml	/^aerialDistance/;"	m	line:31
+airMass	src/core/DayNight.cpp	/^float airMass(float cosZenith) {/;"	f	line:52
+airborne	src/main.cpp	/^vg::PlayerController airborne(glm::vec3(0.0f, 100.0f, 0.0f));/;"	f	line:391
+alignUp	src/render/GpuAllocator.cpp	/^inline VkDeviceSize alignUp(VkDeviceSize v, VkDeviceSize a) {/;"	f	line:22
+alignUp	src/utilities/alloc/SpanAllocator.cpp	/^inline uint64_t alignUp(uint64_t v, uint64_t a) {/;"	f	line:17
+altitudeLift	assets/clouds.yaml	/^altitudeLift/;"	m	line:67
+ambientScale	assets/clouds.yaml	/^ambientScale/;"	m	line:61
+ampOctaveCap	src/utilities/noise/NoiseStack.h	/^static int ampOctaveCap(float gain) {/;"	f	line:149
+anchor	assets/features/birch_tree.yaml	/^anchor/;"	m	line:5
+anchor	assets/features/oak_tree.yaml	/^anchor/;"	m	line:7
+anchor	assets/features/pine_tree.yaml	/^anchor/;"	m	line:6
+anchor	assets/structures/boulder.yaml	/^anchor/;"	m	line:6
+anchor	assets/structures/pillar.yaml	/^anchor/;"	m	line:6
+anchor	assets/structures/well.yaml	/^anchor/;"	m	line:7
+antiSolarStrength	assets/clouds.yaml	/^antiSolarStrength/;"	m	line:72
+antiSolarTint	assets/clouds.yaml	/^antiSolarTint/;"	m	line:71
+api_biomes	tools/feature_tool.py	/^def api_biomes():/;"	f	line:305
+api_blocks	tools/feature_tool.py	/^def api_blocks():/;"	f	line:300
+api_blocks	tools/hub.py	/^def api_blocks():/;"	f	line:180
+api_blocks	tools/structure_tool.py	/^def api_blocks():/;"	f	line:154
+api_feature	tools/feature_tool.py	/^def api_feature(name):/;"	f	line:315
+api_features	tools/feature_tool.py	/^def api_features():/;"	f	line:310
+api_items	tools/hub.py	/^def api_items():/;"	f	line:185
+api_open	tools/hub.py	/^def api_open(tid):/;"	f	line:169
+api_preview	tools/feature_tool.py	/^def api_preview(name):/;"	f	line:321
+api_recipes	tools/hub.py	/^def api_recipes():/;"	f	line:190
+api_save	tools/feature_tool.py	/^def api_save():/;"	f	line:332
+api_save	tools/structure_tool.py	/^def api_save():/;"	f	line:169
+api_structure	tools/structure_tool.py	/^def api_structure(name):/;"	f	line:164
+api_structures	tools/structure_tool.py	/^def api_structures():/;"	f	line:159
+applyEquipmentStats	src/core/App.cpp	/^applyEquipmentStats();/;"	f	line:1518
+applyEquipmentStats	src/core/App.cpp	/^applyEquipmentStats();/;"	f	line:830
+applyEquipmentStats	src/core/App.cpp	/^applyEquipmentStats();/;"	f	line:848
+applyEquipmentStats	src/core/App.h	/^void applyEquipmentStats();/;"	f	line:159
+applyFalloff	src/utilities/noise/NoiseMask.cpp	/^float applyFalloff(Falloff f, float t, float gain, const std::vector<float>& lut) {/;"	f	line:26
+applyRetroPalette	src/core/App.cpp	/^applyRetroPalette();/;"	f	line:430
+applyRetroPalette	src/core/App.h	/^void applyRetroPalette();/;"	f	line:198
+applyRetroPalette	src/core/AppUi.cpp	/^applyRetroPalette();/;"	f	line:890
+applySettings	src/core/App.cpp	/^applySettings();/;"	f	line:396
+applySettings	src/core/App.h	/^void applySettings();/;"	f	line:194
+applyTextures	src/world/BlockRegistry.cpp	/^void applyTextures(const YAML::Node& tex, BlockProperties& props, InternFn intern) {/;"	f	line:40
+assert	src/utilities/alloc/SpanAllocator.cpp	/^assert(liveIt != live_.end() && "SpanAllocator::free: offset not live");/;"	f	line:101
+async_streaming	assets/world.yaml	/^async_streaming/;"	m	line:50
+async_streaming	assets/world1.yaml	/^async_streaming/;"	m	line:50
+attributeDescriptions	src/render/Vertex.h	/^static std::array<VkVertexInputAttributeDescription, 7> attributeDescriptions() {/;"	f	line:109
+available	src/render/VulkanContext.cpp	/^std::vector<VkExtensionProperties> available(count);/;"	f	line:314
+available	src/render/VulkanContext.cpp	/^std::vector<VkLayerProperties> available(count);/;"	f	line:83
+bakeFont	src/render/UiRenderer.cpp	/^bakeFont(fontPath);/;"	f	line:244
+bakeFont	src/render/UiRenderer.cpp	/^bakeFont(fontPath);/;"	f	line:69
+bakeFont	src/render/UiRenderer.h	/^void bakeFont(const std::string& fontPath);/;"	f	line:135
+bakeMesh	src/core/App.cpp	/^bakeMesh(m.skeleton, worldMatrices(m.skeleton, restPose(m.skeleton)));/;"	f	line:1153
+bakeMesh	src/core/App.cpp	/^bakeMesh(testEntity_, worldMatrices(testEntity_, pose));/;"	f	line:1687
+bake_cube	scripts/gen_icons.py	/^def bake_cube(top_tex, side_tex):/;"	f	line:150
+bandNoise	src/world/World.cpp	/^vg::Noise bandNoise    (config_.seed + 9300u);/;"	f	line:533
+bands	src/world/World.cpp	/^std::vector<std::vector<glm::ivec3>> bands(static_cast<size_t>(s.z));/;"	f	line:1680
+bands	src/world/World.cpp	/^std::vector<std::vector<glm::ivec3>> bands(static_cast<size_t>(s.z));/;"	f	line:1790
+base64Decode	src/entity/BlockbenchModel.cpp	/^std::vector<unsigned char> base64Decode(const std::string& in) {/;"	f	line:44
+baseTileSize	assets/clouds.yaml	/^baseTileSize/;"	m	line:47
+begin	src/render/UiRenderer.h	/^void begin(VkExtent2D screen);/;"	f	line:71
+betaM	assets/sky.yaml	/^betaM/;"	m	line:38
+betaR	assets/sky.yaml	/^betaR/;"	m	line:35
+bind	src/core/App.cpp	/^bind(p, "pickaxe");/;"	f	line:1203
+bindingDescription	src/render/Vertex.h	/^static VkVertexInputBindingDescription bindingDescription() {/;"	f	line:97
+biomeNoise	src/world/World.cpp	/^vg::Noise biomeNoise   (config_.seed + 5150u);/;"	f	line:539
+biome_names	tools/feature_tool.py	/^def biome_names():/;"	f	line:93
+bitmap	src/render/UiRenderer.cpp	/^std::vector<uint8_t> bitmap(static_cast<size_t>(W) * H, 0);/;"	f	line:108
+blockTex	shaders/ui.frag	/^uniform: layout(set = 0, binding = 1) uniform sampler2DArray blockTex;/;"	v	line:8
+blockView_	src/render/UiRenderer.cpp	/^blockView_(blockTexView), blockSampler_(blockTexSampler) {/;"	f	line:68
+block_names	tools/recipe_tool.py	/^def block_names():/;"	f	line:67
+blocks	tools/recipe_tool.py	/^def blocks():/;"	f	line:153
+blocks_data	tools/feature_tool.py	/^def blocks_data():/;"	f	line:81
+blocks_data	tools/hub.py	/^def blocks_data():/;"	f	line:124
+blocks_data	tools/structure_tool.py	/^def blocks_data():/;"	f	line:76
+blue	assets/colors.yaml	/^blue/;"	m	line:21
+bob	src/player/PlayerController.cpp	/^glm::vec3 bob(0.0f);/;"	f	line:288
+box	src/core/App.cpp	/^box(1, glm::vec3(-0.18f, 0.0f, -0.10f),   glm::vec3(0.18f, 0.55f, 0.10f));/;"	f	line:1106
+box	src/core/App.cpp	/^box(2, glm::vec3(-0.16f, 0.0f, -0.16f),   glm::vec3(0.16f, 0.32f, 0.16f));/;"	f	line:1107
+box	src/core/App.cpp	/^box(3, glm::vec3(-0.09f, -0.50f, -0.09f), glm::vec3(0.09f, 0.06f, 0.09f));/;"	f	line:1108
+box	src/core/App.cpp	/^box(4, glm::vec3(-0.09f, -0.50f, -0.09f), glm::vec3(0.09f, 0.06f, 0.09f));/;"	f	line:1109
+box	src/core/App.cpp	/^box(5, glm::vec3(-0.09f, -0.70f, -0.09f), glm::vec3(0.09f, 0.0f, 0.09f));/;"	f	line:1110
+box	src/core/App.cpp	/^box(6, glm::vec3(-0.09f, -0.70f, -0.09f), glm::vec3(0.09f, 0.0f, 0.09f));/;"	f	line:1111
+box	src/core/Ui.cpp	/^box(UiBox::Bg, x, y, w, h);/;"	f	line:137
+box	src/core/Ui.cpp	/^box(UiBox::Button, x, y, w, h);/;"	f	line:217
+box	src/core/Ui.cpp	/^box(UiBox::Slider, x + pad, y + pad, (w - 2 * pad) * t, h - 2 * pad);/;"	f	line:253
+box	src/core/Ui.cpp	/^box(UiBox::SliderBg, x, y, w, h);/;"	f	line:251
+box	tools/gen_tool_models.py	/^def box(name, frm, to, origin, mat, rotation=None, **mats):/;"	f	line:168
+boxUVRects	src/entity/BlockbenchModel.cpp	/^boxUVRects(from, to, uvOff, rects);/;"	f	line:192
+breakBlockAt	src/core/App.cpp	/^breakBlockAt(mineBlock_);/;"	f	line:577
+breakBlockAt	src/core/App.cpp	/^case PendingEdit::Break:   breakBlockAt(e.pos); break;/;"	f	line:662
+breakBlockAt	src/core/App.h	/^void breakBlockAt(const glm::ivec3& b);/;"	f	line:77
+brick	assets/colors.yaml	/^brick/;"	m	line:6
+brown	assets/colors.yaml	/^brown/;"	m	line:9
+buf	src/render/EntityRenderer.cpp	/^std::vector<char> buf(size);/;"	f	line:22
+buffer	src/render/CompositeRenderer.cpp	/^std::vector<char> buffer(size);/;"	f	line:35
+buffer	src/render/Pipeline.cpp	/^std::vector<char> buffer(size);/;"	f	line:30
+buffer	src/render/UiRenderer.cpp	/^std::vector<char> buffer(size);/;"	f	line:44
+build	tools/gen_critter_model.py	/^def build():/;"	f	line:112
+build	tools/gen_tool_models.py	/^def build(tool, boxes):/;"	f	line:117
+buildBlockIndicator	src/core/AppUi.cpp	/^buildBlockIndicator(ui, view, proj, W, H);/;"	f	line:107
+buildChest	src/core/App.h	/^void buildChest(class Ui& ui, float w, float h, const InputState& in);/;"	f	line:151
+buildChest	src/core/AppUi.cpp	/^buildChest(ui, W, H, in);/;"	f	line:93
+buildCrafting	src/core/App.h	/^void buildCrafting(class Ui& ui, float x, float y, float w, const InputState& in);/;"	f	line:148
+buildCrafting	src/core/AppUi.cpp	/^buildCrafting(ui, px + panelW + 18.0f, py, 270.0f, in);/;"	f	line:342
+buildCrosshair	src/core/App.h	/^void buildCrosshair(class Ui& ui, float w, float h);/;"	f	line:178
+buildCrosshair	src/core/AppUi.cpp	/^buildCrosshair(ui, W, H);/;"	f	line:108
+buildDamageNumbers	src/core/AppUi.cpp	/^buildDamageNumbers(ui, view, proj, W, H);/;"	f	line:109
+buildDebugOverlay	src/core/App.h	/^void buildDebugOverlay(class Ui& ui);/;"	f	line:176
+buildDebugOverlay	src/core/AppUi.cpp	/^buildDebugOverlay(ui);/;"	f	line:76
+buildEquipment	src/core/App.h	/^void buildEquipment(class Ui& ui, float x, float y, const InputState& in);/;"	f	line:157
+buildEquipment	src/core/AppUi.cpp	/^buildEquipment(ui, px - 18.0f, py, in);/;"	f	line:341
+buildHotbar	src/core/App.h	/^void buildHotbar(class Ui& ui, float w, float h);/;"	f	line:138
+buildHotbar	src/core/AppUi.cpp	/^buildHotbar(ui, W, H);/;"	f	line:73
+buildInventory	src/core/App.h	/^void buildInventory(class Ui& ui, float w, float h, const InputState& in);/;"	f	line:141
+buildInventory	src/core/AppUi.cpp	/^buildInventory(ui, W, H, in);/;"	f	line:95
+buildLightBlock	src/render/WorldRenderer.cpp	/^buildLightBlock(pl.cx, pl.cy, pl.cz, block.data());/;"	f	line:486
+buildLightBlock	src/render/WorldRenderer.h	/^void buildLightBlock(int cx, int cy, int cz, unsigned char* out) const;/;"	f	line:338
+buildLightColorPalette	src/world/World.cpp	/^buildLightColorPalette();/;"	f	line:153
+buildLightColorPalette	src/world/World.h	/^void buildLightColorPalette();/;"	f	line:269
+buildMenu	src/core/App.h	/^void buildMenu(class Ui& ui, float px, float py, float pw, float ph);/;"	f	line:162
+buildMenu	src/core/AppUi.cpp	/^buildMenu(ui, startX, py, pw, ph);/;"	f	line:89
+buildMeshes	src/render/WorldRenderer.cpp	/^buildMeshes();/;"	f	line:155
+buildMeshes	src/render/WorldRenderer.h	/^void buildMeshes();/;"	f	line:256
+buildModelAtlas	src/core/App.cpp	/^std::vector<std::vector<unsigned char>> buildModelAtlas(const std::string& modelsDir) {/;"	f	line:82
+buildModels	src/core/App.cpp	/^buildModels();/;"	f	line:325
+buildPalettePicker	src/core/App.h	/^void buildPalettePicker(class Ui& ui, float w, float h, const InputState& in);/;"	f	line:167
+buildPalettePicker	src/core/AppUi.cpp	/^buildPalettePicker(ui, W, H, in);/;"	f	line:83
+buildShapePicker	src/core/App.h	/^void buildShapePicker(class Ui& ui, float w, float h, const InputState& in);/;"	f	line:145
+buildShapePicker	src/core/AppUi.cpp	/^buildShapePicker(ui, W, H, in);/;"	f	line:97
+buildTestEntity	src/core/App.cpp	/^buildTestEntity();/;"	f	line:322
+buildTuning	src/core/App.h	/^void buildTuning(class Ui& ui, float px, float py, float pw, float ph);/;"	f	line:164
+buildTuning	src/core/AppUi.cpp	/^buildTuning(ui, startX + pw + gap, py, tw, ph);/;"	f	line:90
+buildUi	src/core/App.cpp	/^buildUi(in);/;"	f	line:1587
+buildUi	src/core/App.h	/^void buildUi(const InputState& in);/;"	f	line:137
+button	src/core/Ui.h	/^bool button(float x, float y, float w, float h, const std::string& label);/;"	f	line:85
+calmCoverage	assets/clouds.yaml	/^calmCoverage/;"	m	line:94
+calmType	assets/clouds.yaml	/^calmType/;"	m	line:96
+carve	src/render/GpuAllocator.cpp	/^return carve(id, 0, size, alignment);/;"	f	line:119
+carve	src/render/GpuAllocator.cpp	/^return carve(id, i, size, alignment);/;"	f	line:113
+cavBigNoise	src/world/World.cpp	/^vg::Noise cavBigNoise  (config_.seed + 6900u);/;"	f	line:553
+cavThemeNoise	src/world/World.cpp	/^vg::Noise cavThemeNoise(config_.seed + 7000u);/;"	f	line:554
+cavWarpNoise	src/world/World.cpp	/^vg::Noise cavWarpNoise (config_.seed + 7100u);/;"	f	line:555
+caveCheese	src/world/World.cpp	/^vg::Noise caveCheese   (config_.seed + 6400u);/;"	f	line:547
+caveNoiseA	src/world/World.cpp	/^vg::Noise caveNoiseA   (config_.seed + 6100u);/;"	f	line:541
+caveNoiseB	src/world/World.cpp	/^vg::Noise caveNoiseB   (config_.seed + 6200u);/;"	f	line:542
+caveNoiseC	src/world/World.cpp	/^vg::Noise caveNoiseC   (config_.seed + 6150u);/;"	f	line:543
+caveNoiseD	src/world/World.cpp	/^vg::Noise caveNoiseD   (config_.seed + 6250u);/;"	f	line:544
+caveSelNoise	src/world/World.cpp	/^vg::Noise caveSelNoise (config_.seed + 6300u);/;"	f	line:546
+caveSurf	src/world/World.cpp	/^std::vector<int>   caveSurf(static_cast<size_t>(N) * N);/;"	f	line:954
+caveVorNoise	src/world/World.cpp	/^vg::Noise caveVorNoise (config_.seed + 7500u);/;"	f	line:559
+caves	assets/world1.yaml	/^caves/;"	m	line:155
+cc	tools/gen_critter_model.py	/^def cc(v):/;"	f	line:36
+cc	tools/gen_tool_models.py	/^def cc(v):/;"	f	line:41
+cell	src/core/AppUi.cpp	/^cell(c, gridX + c * (slot + gap), hotY);/;"	f	line:337
+cell	src/core/AppUi.cpp	/^cell(inv.slot(c), c == inv.selected(), gx + c * (slot + gap), hotY);/;"	f	line:579
+cells_to_struct	tools/structure_tool.py	/^def cells_to_struct(data):/;"	f	line:115
+changed_cpp_files	tools/codeindex/verify_comments.py	/^def changed_cpp_files() -> list:/;"	f	line:126
+charcoal	assets/colors.yaml	/^charcoal/;"	m	line:12
+check	src/main.cpp	/^check(!bad.deserialize(junk, sizeof junk), "corrupt player save is rejected");/;"	f	line:521
+check	src/main.cpp	/^check(!cbad.deserialize(cjunk, sizeof cjunk), "corrupt chest store is rejected");/;"	f	line:565
+check	src/main.cpp	/^check(!crafting.recipes().empty(), "recipes.yaml loaded some recipes");/;"	f	line:525
+check	src/main.cpp	/^check(!em.embeddedPNG.empty(), "embedded base64 texture is decoded");/;"	f	line:1056
+check	src/main.cpp	/^check(!reg.canHarvest(stone, air),        "stone needs a pickaxe (no bare-hand drop)");/;"	f	line:333
+check	src/main.cpp	/^check(!reg.isSolid(torch),                     "torch is walk-through");/;"	f	line:311
+check	src/main.cpp	/^check(!reg.placeable(hammer), "hammer is NOT placeable (a held tool)");/;"	f	line:623
+check	src/main.cpp	/^check(!reg.placeable(pick),                    "pickaxe is NOT placeable");/;"	f	line:304
+check	src/main.cpp	/^check(!reg.placeable(sword),                   "sword is NOT placeable");/;"	f	line:305
+check	src/main.cpp	/^check(!reg.shapeable(bush),   "foliage is NOT shapeable");/;"	f	line:622
+check	src/main.cpp	/^check(!store.has(pa), "erased chest is gone");/;"	f	line:562
+check	src/main.cpp	/^check(!vg::Crafting::canCraft(*plankRecipe, inv2), "can't craft planks with no wood");/;"	f	line:539
+check	src/main.cpp	/^check(!vg::Equipment::fits(reg, 0, swift), "a trinket doesn't fit the boots slot");/;"	f	line:574
+check	src/main.cpp	/^check(!vg::Equipment::fits(reg, 1, boots), "boots don't fit a trinket slot");/;"	f	line:576
+check	src/main.cpp	/^check(air.x >= 0, "found an open-sky air cell to edit-test");/;"	f	line:870
+check	src/main.cpp	/^check(back.deserialize(bytes.data(), bytes.size()), "player save parses");/;"	f	line:515
+check	src/main.cpp	/^check(bb.skeleton.boxes.size() >= 1, "bbmodel elements -> boxes");/;"	f	line:994
+check	src/main.cpp	/^check(bb.skeleton.boxes[0].perFaceUV, "bbmodel boxes carry per-face UVs");/;"	f	line:997
+check	src/main.cpp	/^check(bb.skeleton.isTopologicallyOrdered(), "bbmodel skeleton is parent-ordered");/;"	f	line:995
+check	src/main.cpp	/^check(bb.skeleton.joints.size() >= 2, "bbmodel outliner group -> a joint");/;"	f	line:993
+check	src/main.cpp	/^check(bb.skeleton.joints[1].parent == 0, "bbmodel group joint parents to root");/;"	f	line:996
+check	src/main.cpp	/^check(bb.skin == "hammer.png", "bbmodel reads its skin filename");/;"	f	line:991
+check	src/main.cpp	/^check(bb.texW > 0 && bb.texH > 0, "bbmodel reads a positive skin resolution");/;"	f	line:992
+check	src/main.cpp	/^check(bounded, "terraced stack stays bounded");/;"	f	line:249
+check	src/main.cpp	/^check(bounded, std::string(label) + ": output bounded to ~[-1,1]");/;"	f	line:179
+check	src/main.cpp	/^check(boxUVNorm, "box_uv rects are normalised into [0,1]");/;"	f	line:1043
+check	src/main.cpp	/^check(climb.feetPosition().y > 0.4f, "auto-step climbs onto a half-slab while walking");/;"	f	line:681
+check	src/main.cpp	/^check(crafting.craftable(inv2).empty(), "empty inventory crafts nothing");/;"	f	line:538
+check	src/main.cpp	/^check(crouch.sneaking(), "sneak flag set while holding the sneak key");/;"	f	line:412
+check	src/main.cpp	/^check(crouchDist < walkDist * 0.5f, "sneak walks much slower than a normal walk");/;"	f	line:411
+check	src/main.cpp	/^check(det, std::string(label) + ": pure (bit-identical across builds)");/;"	f	line:178
+check	src/main.cpp	/^check(differ >= 4, "domain warp changes the field (not a no-op)");/;"	f	line:209
+check	src/main.cpp	/^check(drown.air() == 0.0f, "breath drains to 0 with head underwater");/;"	f	line:388
+check	src/main.cpp	/^check(drown.health() < 100.0f, "drowning deals damage once breath is gone");/;"	f	line:389
+check	src/main.cpp	/^check(fell.feetPosition().y < 99.0f, "walking off a pillar falls");/;"	f	line:427
+check	src/main.cpp	/^check(foundLeaves || partialShade, "found a shaded region to relight-test");/;"	f	line:772
+check	src/main.cpp	/^check(gradMatch, "analytic gradient matches central differences");/;"	f	line:281
+check	src/main.cpp	/^check(held.feetPosition().y > 99.5f, "sneak edge-stop keeps the player on the pillar");/;"	f	line:428
+check	src/main.cpp	/^check(inBounds, "baked box verts lie within the box bounds");/;"	f	line:495
+check	src/main.cpp	/^check(inv2.count(planks) == 4, "four planks produced");/;"	f	line:544
+check	src/main.cpp	/^check(inv2.count(trunk) == 1, "one trunk consumed");/;"	f	line:543
+check	src/main.cpp	/^check(inv3.count(stone) == 0, "far item left the inventory empty");/;"	f	line:603
+check	src/main.cpp	/^check(items.size() == 0 && inv4.count(stone) == 5, "nearby item is collected");/;"	f	line:612
+check	src/main.cpp	/^check(items.size() == 1 && inv4.count(stone) == 0, "no pickup before the delay");/;"	f	line:610
+check	src/main.cpp	/^check(items.size() == 1, "far item is not picked up");/;"	f	line:600
+check	src/main.cpp	/^check(loaded.at(pb)[26].blockId == pick, "chest B contents round-trip");/;"	f	line:560
+check	src/main.cpp	/^check(loaded.deserialize(cbytes.data(), cbytes.size()), "chest store parses");/;"	f	line:556
+check	src/main.cpp	/^check(near(bx[0].hi.y, 0.5f) && near(bx[0].lo.y, 0.0f), "bottom slab = lower half");/;"	f	line:635
+check	src/main.cpp	/^check(near(bx[0].lo.y, 0.5f) && near(bx[0].hi.y, 1.0f), "top slab = upper half");/;"	f	line:637
+check	src/main.cpp	/^check(near(onSlab.feetPosition().y, 0.5f), "player rests on a bottom-slab floor at y=0.5");/;"	f	line:660
+check	src/main.cpp	/^check(near(pc.health(), 50.0f), "invulnerable ignores damage");/;"	f	line:357
+check	src/main.cpp	/^check(near(pc.health(), 70.0f), "damage subtracts HP");/;"	f	line:349
+check	src/main.cpp	/^check(near(pc.health(), pc.maxHealth()), "heal clamps at max");/;"	f	line:351
+check	src/main.cpp	/^check(near(pc2.health(), 70.0f), "25% armour: 40 damage -> 30 taken");/;"	f	line:590
+check	src/main.cpp	/^check(near(reg.breakSeconds(bush, air), 0.0f),    "bush breaks instantly");/;"	f	line:297
+check	src/main.cpp	/^check(near(reg.breakSeconds(dirt, pick), 0.6f),   "pickaxe doesn't speed dirt (no preferred tool)");/;"	f	line:296
+check	src/main.cpp	/^check(near(reg.breakSeconds(stone, air), 1.5f),   "stone by hand = 1.5s");/;"	f	line:293
+check	src/main.cpp	/^check(near(reg.breakSeconds(stone, pick), 0.3f),  "stone with pickaxe = 0.3s (5x)");/;"	f	line:294
+check	src/main.cpp	/^check(near(reg.breakSeconds(stone, sword), 1.5f), "sword does NOT speed stone");/;"	f	line:295
+check	src/main.cpp	/^check(near(st.armorReduction, 0.06f), "6 armour = 6% reduction");/;"	f	line:583
+check	src/main.cpp	/^check(near(st.regenBonus, 3.0f), "life charm = +3 regen");/;"	f	line:585
+check	src/main.cpp	/^check(near(st.speedMul, 1.35f), "swift charm = 1.35x speed");/;"	f	line:584
+check	src/main.cpp	/^check(near(vg::PlayerController::fallDamage(0.0f), 0.0f),  "no fall = no damage");/;"	f	line:340
+check	src/main.cpp	/^check(ok, label);/;"	f	line:853
+check	src/main.cpp	/^check(partialShade, "foliage\/relief casts a partial sky shadow (skylight 1..14)");/;"	f	line:771
+check	src/main.cpp	/^check(pc.isDead() && pc.health() == 0.0f, "lethal damage -> dead, HP floored at 0");/;"	f	line:353
+check	src/main.cpp	/^check(plankRecipe != nullptr, "found oak_trunk -> planks recipe");/;"	f	line:535
+check	src/main.cpp	/^check(reg.canHarvest(dirt, air),          "dirt drops by hand (no tier gate)");/;"	f	line:332
+check	src/main.cpp	/^check(reg.canHarvest(stone, stonePick),   "stone pickaxe harvests stone");/;"	f	line:335
+check	src/main.cpp	/^check(reg.canHarvest(stone, woodPick),    "wood pickaxe harvests stone");/;"	f	line:334
+check	src/main.cpp	/^check(reg.emission(torch) > 0,                 "torch emits block light");/;"	f	line:310
+check	src/main.cpp	/^check(reg.lightOpacity(air) == 0,        "air passes sky light");/;"	f	line:319
+check	src/main.cpp	/^check(reg.lightOpacity(bush) == 2,       "bush casts a faint shadow");/;"	f	line:322
+check	src/main.cpp	/^check(reg.lightOpacity(oakLeaves) == 3,  "leaves dim the sky a little");/;"	f	line:320
+check	src/main.cpp	/^check(reg.lightOpacity(oakTrunk) == 4,   "trunk dims the sky below it");/;"	f	line:321
+check	src/main.cpp	/^check(reg.lightOpacity(stone) == 15,     "stone blocks sky light fully (opaque default)");/;"	f	line:318
+check	src/main.cpp	/^check(reg.placeable(stone),                    "stone is placeable");/;"	f	line:303
+check	src/main.cpp	/^check(reg.placeable(torch),                    "torch is placeable");/;"	f	line:309
+check	src/main.cpp	/^check(reg.shapeable(cobble),  "cobblestone is shapeable");/;"	f	line:621
+check	src/main.cpp	/^check(reg.shapeable(stone),   "stone (solid opaque cube) is shapeable");/;"	f	line:620
+check	src/main.cpp	/^check(reg.tool(pick) == vg::ToolKind::Pickaxe, "pickaxe is a Pickaxe tool");/;"	f	line:300
+check	src/main.cpp	/^check(reg.tool(stone) == vg::ToolKind::None,   "stone is not a tool");/;"	f	line:302
+check	src/main.cpp	/^check(reg.tool(sword) == vg::ToolKind::Sword,  "sword is a Sword tool");/;"	f	line:301
+check	src/main.cpp	/^check(reg.toolTier(air) == 0,             "bare hand is tier 0");/;"	f	line:337
+check	src/main.cpp	/^check(reg.toolTier(stonePick) == 2,       "stone pickaxe is tier 2");/;"	f	line:336
+check	src/main.cpp	/^check(rise.feetPosition().y > 100.0f, "swim up: holding jump rises in water");/;"	f	line:383
+check	src/main.cpp	/^check(same, "identity transfer is byte-identical (no regression)");/;"	f	line:225
+check	src/main.cpp	/^check(shifted, "translating a joint moves its baked box");/;"	f	line:504
+check	src/main.cpp	/^check(skel.find("arm") == 1, "joint lookup by name");/;"	f	line:445
+check	src/main.cpp	/^check(skel.isTopologicallyOrdered(), "skeleton is parent-before-child ordered");/;"	f	line:444
+check	src/main.cpp	/^check(store.has(pa) && store.has(pb), "chests recorded at two positions");/;"	f	line:553
+check	src/main.cpp	/^check(unitN, "baked normals are unit length");/;"	f	line:496
+check	src/main.cpp	/^check(up != south, "box_uv gives distinct faces different rects");/;"	f	line:1039
+check	src/main.cpp	/^check(uvNormalised, "bbmodel per-face UVs are normalised into [0,1]");/;"	f	line:1003
+check	src/main.cpp	/^check(valueMatch, "derivative perlin() value == scalar perlin()");/;"	f	line:280
+check	src/main.cpp	/^check(verts.size() == 36, "one box bakes to 36 vertices");/;"	f	line:488
+check	src/main.cpp	/^check(vg::Crafting::canCraft(*plankRecipe, inv2), "2 trunks -> planks is craftable");/;"	f	line:541
+check	src/main.cpp	/^check(vg::Crafting::craft(*plankRecipe, inv2), "craft consumes input, yields output");/;"	f	line:542
+check	src/main.cpp	/^check(vg::Equipment::accepts(0) == vg::EquipSlot::Feet,    "slot 0 is the boots slot");/;"	f	line:571
+check	src/main.cpp	/^check(vg::Equipment::accepts(1) == vg::EquipSlot::Trinket, "slot 1 is a trinket slot");/;"	f	line:572
+check	src/main.cpp	/^check(vg::Equipment::fits(reg, 0, boots),  "boots fit the boots slot");/;"	f	line:573
+check	src/main.cpp	/^check(vg::Equipment::fits(reg, 1, swift),  "trinket fits a trinket slot");/;"	f	line:575
+check	src/main.cpp	/^check(vg::PlayerController::fallDamage(12.0f) == 0.0f,     "a 2-3 block fall is safe");/;"	f	line:341
+check	src/main.cpp	/^check(vg::PlayerController::fallDamage(30.0f) > 0.0f,      "a big fall hurts");/;"	f	line:342
+check	src/main.cpp	/^check(vg::shapeBoxes(vg::ShapeKind::Stairs, 0, 0, bx) == 2, "stairs = two boxes");/;"	f	line:638
+check	src/main.cpp	/^check(vg::shapeBoxes(vg::ShapeKind::Wall, 0, 0, bx) == 1, "wall, no neighbours = post only");/;"	f	line:642
+check	src/main.cpp	/^check(vg::shapeKindOf(0) == vg::ShapeKind::Cube, "metadata 0 decodes to Cube");/;"	f	line:626
+check	src/main.cpp	/^check(vnear(worldPos(midP[1]), glm::vec3(-s, s, 0.0f)), "slerp midpoint = 45deg");/;"	f	line:464
+check	src/main.cpp	/^check(wet.inWater(), "player reports submerged in water");/;"	f	line:377
+check	src/main.cpp	/^check(wetDrop < dryDrop * 0.5f, "buoyancy: sinks far slower in water than air");/;"	f	line:376
+checkDeviceExtensionSupport	src/render/VulkanContext.h	/^bool checkDeviceExtensionSupport(VkPhysicalDevice device) const;/;"	f	line:116
+checkInvariant	tests/span_allocator_test.cpp	/^checkInvariant(sa, "T1-after-alloc");/;"	f	line:68
+checkInvariant	tests/span_allocator_test.cpp	/^checkInvariant(sa, "T1-after-alloc2");/;"	f	line:74
+checkInvariant	tests/span_allocator_test.cpp	/^checkInvariant(sa, "T1-after-free-a");/;"	f	line:77
+checkInvariant	tests/span_allocator_test.cpp	/^checkInvariant(sa, "T1-after-free-b");/;"	f	line:79
+checkInvariant	tests/span_allocator_test.cpp	/^checkInvariant(sa, "T1-init");/;"	f	line:61
+checkInvariant	tests/span_allocator_test.cpp	/^checkInvariant(sa, "T2-a0");/;"	f	line:101
+checkInvariant	tests/span_allocator_test.cpp	/^checkInvariant(sa, "T2-a1");/;"	f	line:108
+checkInvariant	tests/span_allocator_test.cpp	/^checkInvariant(sa, "T2-a2");/;"	f	line:113
+checkInvariant	tests/span_allocator_test.cpp	/^checkInvariant(sa, "T2-a3");/;"	f	line:120
+checkInvariant	tests/span_allocator_test.cpp	/^checkInvariant(sa, "T2-after-all-free");/;"	f	line:127
+checkInvariant	tests/span_allocator_test.cpp	/^checkInvariant(sa, "T3-alloc");/;"	f	line:151
+checkInvariant	tests/span_allocator_test.cpp	/^checkInvariant(sa, "T3-free");/;"	f	line:164
+checkInvariant	tests/span_allocator_test.cpp	/^checkInvariant(sa, "T4-a");/;"	f	line:183
+checkInvariant	tests/span_allocator_test.cpp	/^checkInvariant(sa, "T4-c");/;"	f	line:194
+checkInvariant	tests/span_allocator_test.cpp	/^checkInvariant(sa, "T4-cleanup");/;"	f	line:199
+checkInvariant	tests/span_allocator_test.cpp	/^checkInvariant(sa, "T4-fail");/;"	f	line:188
+checkInvariant	tests/span_allocator_test.cpp	/^checkInvariant(sa, "T5-fail");/;"	f	line:219
+checkInvariant	tests/span_allocator_test.cpp	/^checkInvariant(sa, "T6-after-reset");/;"	f	line:241
+checkInvariant	tests/span_allocator_test.cpp	/^checkInvariant(sa, "T6-alloc-after-reset");/;"	f	line:247
+checkInvariant	tests/span_allocator_test.cpp	/^checkInvariant(sa, "fuzz-drain");/;"	f	line:341
+checkInvariant	tests/span_allocator_test.cpp	/^checkInvariant(sa, "fuzz-loop");/;"	f	line:303
+checkInvariant	tests/span_allocator_test.cpp	/^static void checkInvariant(const SpanAllocator& sa, const char* where) {/;"	f	line:40
+chooseExtent	src/render/Swapchain.h	/^VkExtent2D         chooseExtent(const VkSurfaceCapabilitiesKHR&) const;/;"	f	line:76
+choosePresentMode	src/render/Swapchain.h	/^VkPresentModeKHR   choosePresentMode(const std::vector<VkPresentModeKHR>&) const;/;"	f	line:75
+chooseSurfaceFormat	src/render/Swapchain.h	/^VkSurfaceFormatKHR chooseSurfaceFormat(const std::vector<VkSurfaceFormatKHR>&) const;/;"	f	line:74
+chunk	scripts/gen_hammer.py	/^def chunk(typ, data):/;"	f	line:48
+chunk	src/world/World.cpp	/^return chunk(cx, cy, cz).get(lx, ly, lz);/;"	f	line:1527
+chunkAtBlock	src/world/World.cpp	/^chunkAtBlock(x, y, z).get(floormod(x, N), floormod(y, N), floormod(z, N)).id));/;"	f	line:1887
+chunkAtBlock	src/world/World.cpp	/^chunkAtBlock(x, y, z).get(floormod(x, N), floormod(y, N), floormod(z, N)).id);/;"	f	line:1880
+chunkExtent	src/render/WorldRenderer.cpp	/^const glm::vec3 chunkExtent(static_cast<float>(Chunk::kSize));/;"	f	line:1198
+chunkIndex	src/world/World.cpp	/^chunkIndex(columns[i].x, cy, columns[i].y));/;"	f	line:2419
+chunkPath	src/world/World.cpp	/^std::string chunkPath(const std::string& dir, int cx, int cy, int cz) {/;"	f	line:69
+cleanupSizeDependent	src/render/Swapchain.cpp	/^cleanupSizeDependent();/;"	f	line:27
+cleanupSizeDependent	src/render/Swapchain.cpp	/^cleanupSizeDependent();/;"	f	line:39
+cleanupSizeDependent	src/render/Swapchain.h	/^void cleanupSizeDependent();/;"	f	line:68
+clear	src/entity/ItemEntity.h	/^void clear() { items_.clear(); }/;"	f	line:57
+clear	src/entity/Particles.h	/^void clear() { particles_.clear(); }/;"	f	line:91
+clear	src/player/Inventory.h	/^void clear() { blockId = 0; count = 0; }/;"	f	line:32
+clearFramebufferResized	src/core/Window.h	/^void clearFramebufferResized() { framebufferResized_ = false; }/;"	f	line:67
+clearTunedSunset	src/core/DayNight.h	/^void clearTunedSunset() { tunedSunset_ = false; }/;"	f	line:137
+clickEquipSlot	src/core/App.h	/^void clickEquipSlot(int slotIndex);/;"	f	line:158
+clickSlot	src/core/App.h	/^void clickSlot(ItemStack& s);/;"	f	line:154
+clickSlot	src/core/AppUi.cpp	/^clickSlot(inv.slot(index));/;"	f	line:323
+cliff3DNoise	src/world/World.cpp	/^vg::Noise cliff3DNoise (config_.seed + 1357u);/;"	f	line:536
+cliffSurfNoise	src/world/World.cpp	/^vg::Noise cliffSurfNoise(config_.seed + 1470u);/;"	f	line:537
+climb	src/main.cpp	/^vg::PlayerController climb(glm::vec3(0.5f, 0.0f, 0.5f));/;"	f	line:676
+cloudBase	shaders/sky.frag	/^uniform: layout(set = 0, binding = 1) uniform sampler3D cloudBase;/;"	v	line:56
+cloudDetail	shaders/sky.frag	/^uniform: layout(set = 0, binding = 2) uniform sampler3D cloudDetail;/;"	v	line:57
+cloudDuskStrength	assets/sky.yaml	/^cloudDuskStrength/;"	m	line:114
+cloudDuskTint	assets/sky.yaml	/^cloudDuskTint/;"	m	line:113
+clutterNoise	src/world/World.cpp	/^vg::Noise clutterNoise (config_.seed + 7400u);/;"	f	line:558
+cmd_check	tools/codeindex/codeindex.py	/^def cmd_check(args):/;"	f	line:430
+cmd_gen	tools/codeindex/codeindex.py	/^def cmd_gen(_args):/;"	f	line:418
+coastCliffNoise	src/world/World.cpp	/^vg::Noise coastCliffNoise(config_.seed + 1580u);/;"	f	line:538
+cocoa	assets/colors.yaml	/^cocoa/;"	m	line:10
+code	src/render/SkyRenderer.cpp	/^std::vector<char> code(size);/;"	f	line:29
+colSum	src/world/ChunkMesher.cpp	/^glm::vec3 colSum(0.0f);/;"	f	line:340
+colp	src/world/ChunkMesher.cpp	/^std::vector<uint32_t> colp(static_cast<size_t>(N + 2) * (N + 2), 0);/;"	f	line:287
+computeBlockLight	src/world/World.cpp	/^computeBlockLight(); _stamp("blockLight", _a);/;"	f	line:176
+computeBlockLight	src/world/World.cpp	/^computeBlockLight();/;"	f	line:2020
+computeBlockLight	src/world/World.cpp	/^computeBlockLight();/;"	f	line:2026
+computeBlockLight	src/world/World.cpp	/^computeBlockLight();/;"	f	line:2492
+computeBlockLight	src/world/World.h	/^void computeBlockLight();/;"	f	line:264
+computeLayout	src/render/WorldRenderer.cpp	/^MeshLayout computeLayout(const MeshData& m) {/;"	f	line:106
+computeSkyLight	src/world/World.cpp	/^computeSkyLight();   _stamp("skyLight", _a);    _a = std::chrono::steady_clock::now();/;"	f	line:175
+computeSkyLight	src/world/World.cpp	/^computeSkyLight();/;"	f	line:2019
+computeSkyLight	src/world/World.cpp	/^computeSkyLight();/;"	f	line:2025
+computeSkyLight	src/world/World.cpp	/^computeSkyLight();/;"	f	line:2491
+computeSkyLight	src/world/World.h	/^void computeSkyLight();/;"	f	line:261
+contNoise	src/world/World.cpp	/^vg::Noise contNoise  (config_.seed + 8008u);/;"	f	line:523
+coverageVariation	assets/clouds.yaml	/^coverageVariation/;"	m	line:87
+craft	src/player/Crafting.h	/^static bool craft(const Recipe& r, Inventory& inv);/;"	f	line:58
+crafting	src/main.cpp	/^vg::Crafting crafting(assetDir + "\/recipes.yaml", reg);/;"	f	line:524
+crafting_	src/core/App.cpp	/^crafting_(std::string(VG_ASSET_DIR) + "\/recipes.yaml", world_.registry()) {/;"	f	line:283
+cream	assets/colors.yaml	/^cream/;"	m	line:15
+create	src/render/Swapchain.cpp	/^create();/;"	f	line:21
+create	src/render/Swapchain.cpp	/^create();/;"	f	line:40
+create	src/render/Swapchain.h	/^void create();/;"	f	line:66
+createCommandBuffers	src/render/Renderer.cpp	/^createCommandBuffers();/;"	f	line:30
+createCommandBuffers	src/render/Renderer.h	/^void createCommandBuffers();/;"	f	line:135
+createCommandPool	src/render/Renderer.cpp	/^createCommandPool();/;"	f	line:29
+createCommandPool	src/render/Renderer.h	/^void createCommandPool();/;"	f	line:134
+createCullResources	src/render/WorldRenderer.cpp	/^createCullResources(shaderDir, framesInFlight);/;"	f	line:159
+createCullResources	src/render/WorldRenderer.h	/^void createCullResources(const std::string& shaderDir, uint32_t n);/;"	f	line:397
+createDepthResources	src/render/Swapchain.cpp	/^createDepthResources();/;"	f	line:111
+createDepthResources	src/render/Swapchain.h	/^void createDepthResources();/;"	f	line:71
+createDescriptor	src/render/CompositeRenderer.cpp	/^createDescriptor();/;"	f	line:84
+createDescriptor	src/render/CompositeRenderer.h	/^void createDescriptor();/;"	f	line:91
+createDescriptor	src/render/UiRenderer.cpp	/^createDescriptor();/;"	f	line:70
+createDescriptor	src/render/UiRenderer.h	/^void createDescriptor();/;"	f	line:137
+createDescriptorSetLayout	src/render/Pipeline.cpp	/^createDescriptorSetLayout();/;"	f	line:42
+createDescriptorSetLayout	src/render/Pipeline.h	/^void createDescriptorSetLayout();/;"	f	line:63
+createDescriptorSets	src/render/EntityRenderer.cpp	/^createDescriptorSets(framesInFlight, textureView, textureSampler, skinView, skinSampler);/;"	f	line:45
+createDescriptorSets	src/render/WorldRenderer.cpp	/^createDescriptorSets(framesInFlight);/;"	f	line:158
+createDescriptorSets	src/render/WorldRenderer.h	/^void createDescriptorSets(uint32_t n);/;"	f	line:318
+createFontTexture	src/render/UiRenderer.cpp	/^createFontTexture(bitmap, W, H);/;"	f	line:139
+createFontTexture	src/render/UiRenderer.h	/^void createFontTexture(const std::vector<uint8_t>& pixels, int w, int h);/;"	f	line:136
+createFramebuffers	src/render/Swapchain.cpp	/^createFramebuffers();/;"	f	line:23
+createFramebuffers	src/render/Swapchain.cpp	/^createFramebuffers();/;"	f	line:41
+createFramebuffers	src/render/Swapchain.h	/^void createFramebuffers();/;"	f	line:72
+createGpuDrivenBuffers	src/render/WorldRenderer.cpp	/^createGpuDrivenBuffers(framesInFlight);/;"	f	line:157
+createGpuDrivenBuffers	src/render/WorldRenderer.h	/^void createGpuDrivenBuffers(uint32_t n);/;"	f	line:321
+createImageViews	src/render/Swapchain.cpp	/^createImageViews();/;"	f	line:110
+createImageViews	src/render/Swapchain.h	/^void createImageViews();/;"	f	line:70
+createInstance	src/render/VulkanContext.cpp	/^createInstance();/;"	f	line:114
+createInstance	src/render/VulkanContext.h	/^void createInstance();/;"	f	line:108
+createLogicalDevice	src/render/VulkanContext.cpp	/^createLogicalDevice();/;"	f	line:118
+createLogicalDevice	src/render/VulkanContext.h	/^void createLogicalDevice();/;"	f	line:111
+createOffscreen	src/render/Renderer.cpp	/^createOffscreen();/;"	f	line:315
+createOffscreen	src/render/Renderer.cpp	/^createOffscreen();/;"	f	line:32
+createOffscreen	src/render/Renderer.cpp	/^createOffscreen();/;"	f	line:376
+createOffscreen	src/render/Renderer.cpp	/^createOffscreen();/;"	f	line:64
+createOffscreen	src/render/Renderer.h	/^void createOffscreen();/;"	f	line:139
+createPipeline	src/render/CompositeRenderer.cpp	/^createPipeline(targetRenderPass);/;"	f	line:85
+createPipeline	src/render/CompositeRenderer.h	/^void createPipeline(VkRenderPass targetRenderPass);/;"	f	line:92
+createPipeline	src/render/EntityRenderer.cpp	/^createPipeline(renderPass, shaderDir);/;"	f	line:34
+createPipeline	src/render/EntityRenderer.h	/^void createPipeline(VkRenderPass renderPass, const std::string& shaderDir);/;"	f	line:96
+createPipeline	src/render/Pipeline.cpp	/^createPipeline(renderPass, vertSpvPath, fragSpvPath);/;"	f	line:43
+createPipeline	src/render/SkyRenderer.cpp	/^createPipeline(sceneRenderPass, shaderDir);/;"	f	line:53
+createPipeline	src/render/SkyRenderer.h	/^void createPipeline(VkRenderPass renderPass, const std::string& shaderDir);/;"	f	line:103
+createPipeline	src/render/UiRenderer.cpp	/^createPipeline(uiRenderPass);/;"	f	line:71
+createPipeline	src/render/UiRenderer.h	/^void createPipeline(VkRenderPass uiRenderPass);/;"	f	line:138
+createRenderPass	src/render/Swapchain.cpp	/^createRenderPass();/;"	f	line:22
+createRenderPass	src/render/Swapchain.h	/^void createRenderPass();/;"	f	line:67
+createSampler	src/render/CompositeRenderer.cpp	/^createSampler();/;"	f	line:78
+createSampler	src/render/CompositeRenderer.h	/^void createSampler();/;"	f	line:90
+createSampler	src/render/TextureArray.cpp	/^createSampler();/;"	f	line:148
+createSampler	src/render/TextureArray.h	/^void createSampler();/;"	f	line:73
+createSyncObjects	src/render/Renderer.cpp	/^createSyncObjects();/;"	f	line:31
+createSyncObjects	src/render/Renderer.h	/^void createSyncObjects();/;"	f	line:136
+createTransientCommandPool	src/render/VulkanContext.cpp	/^createTransientCommandPool();/;"	f	line:119
+createTransientCommandPool	src/render/VulkanContext.h	/^void createTransientCommandPool();/;"	f	line:112
+createUiFramebuffers	src/render/Renderer.cpp	/^createUiFramebuffers();/;"	f	line:317
+createUiFramebuffers	src/render/Renderer.cpp	/^createUiFramebuffers();/;"	f	line:34
+createUiFramebuffers	src/render/Renderer.cpp	/^createUiFramebuffers();/;"	f	line:378
+createUiFramebuffers	src/render/Renderer.h	/^void createUiFramebuffers();/;"	f	line:142
+createUiRenderPass	src/render/Renderer.cpp	/^createUiRenderPass();/;"	f	line:33
+createUiRenderPass	src/render/Renderer.h	/^void createUiRenderPass();/;"	f	line:141
+createUniformBuffers	src/render/EntityRenderer.cpp	/^createUniformBuffers(framesInFlight);/;"	f	line:35
+createUniformBuffers	src/render/EntityRenderer.h	/^void createUniformBuffers(uint32_t n);/;"	f	line:97
+createUniformBuffers	src/render/WorldRenderer.cpp	/^createUniformBuffers(framesInFlight);/;"	f	line:156
+createUniformBuffers	src/render/WorldRenderer.h	/^void createUniformBuffers(uint32_t n);/;"	f	line:317
+createVertexBuffers	src/render/UiRenderer.cpp	/^createVertexBuffers(framesInFlight);/;"	f	line:72
+createVertexBuffers	src/render/UiRenderer.h	/^void createVertexBuffers(uint32_t framesInFlight);/;"	f	line:139
+crouch	src/main.cpp	/^vg::PlayerController crouch(glm::vec3(0.5f, 100.0f, 0.5f));/;"	f	line:405
+cycleFont	src/core/App.h	/^void cycleFont(int dir);/;"	f	line:195
+cycleFont	src/core/AppUi.cpp	/^cycleFont(+1);/;"	f	line:979
+d	src/entity/Critters.cpp	/^const glm::vec3 d(std::sin(c.yaw), 0.0f, std::cos(c.yaw));/;"	f	line:54
+damage	src/player/PlayerController.cpp	/^damage(fallDamage(impactSpeed));/;"	f	line:247
+damage	src/player/PlayerController.h	/^void damage(float amount);/;"	f	line:86
+dayAmbient	assets/sky.yaml	/^dayAmbient/;"	m	line:132
+dayHaze	src/core/App.cpp	/^const glm::vec3 dayHaze(0.66f, 0.74f, 0.86f);/;"	f	line:1654
+dayHorizon	assets/sky.yaml	/^dayHorizon/;"	m	line:65
+dayVariation	assets/sky.yaml	/^dayVariation/;"	m	line:23
+dayZenith	assets/sky.yaml	/^dayZenith/;"	m	line:64
+deep_teal	assets/colors.yaml	/^deep_teal/;"	m	line:28
+delete	tools/recipe_tool.py	/^def delete():/;"	f	line:201
+dens	src/world/World.cpp	/^std::vector<double> dens(static_cast<size_t>(gx) * gz * gy);/;"	f	line:575
+densityScale	assets/clouds.yaml	/^densityScale/;"	m	line:52
+depthTex	shaders/composite.frag	/^uniform: layout(set = 0, binding = 1) uniform sampler2D depthTex;/;"	v	line:14
+deserialize	src/player/ChestStore.h	/^bool deserialize(const uint8_t* data, size_t len);/;"	f	line:54
+destroy	src/render/Buffer.cpp	/^destroy();/;"	f	line:45
+destroy	src/render/Buffer.cpp	/^destroy();/;"	f	line:75
+destroy	src/render/Buffer.h	/^void destroy();/;"	f	line:68
+destroyDebugUtilsMessengerEXT	src/render/VulkanContext.cpp	/^destroyDebugUtilsMessengerEXT(instance_, debugMessenger_, nullptr);/;"	f	line:138
+destroySyncObjects	src/render/Renderer.cpp	/^destroySyncObjects();/;"	f	line:72
+destroySyncObjects	src/render/Renderer.h	/^void destroySyncObjects();/;"	f	line:137
+destroyUiFramebuffers	src/render/Renderer.cpp	/^destroyUiFramebuffers();/;"	f	line:316
+destroyUiFramebuffers	src/render/Renderer.cpp	/^destroyUiFramebuffers();/;"	f	line:377
+destroyUiFramebuffers	src/render/Renderer.cpp	/^destroyUiFramebuffers();/;"	f	line:68
+destroyUiFramebuffers	src/render/Renderer.h	/^void destroyUiFramebuffers();/;"	f	line:143
+detailTileSize	assets/clouds.yaml	/^detailTileSize/;"	m	line:48
+deterministicAndBounded	src/main.cpp	/^deterministicAndBounded("derivative-attenuated fbm", eroded);/;"	f	line:257
+deterministicAndBounded	src/main.cpp	/^deterministicAndBounded("domain-warped perlin", warped);/;"	f	line:196
+deterministicAndBounded	src/main.cpp	/^deterministicAndBounded("hybrid multifractal", hmf);/;"	f	line:192
+deterministicAndBounded	src/main.cpp	/^deterministicAndBounded("ridged multifractal", rmf);/;"	f	line:188
+deterministicAndBounded	src/main.cpp	/^deterministicAndBounded("worley F2-F1\/manhattan", worley);/;"	f	line:184
+devices	src/render/VulkanContext.cpp	/^std::vector<VkPhysicalDevice> devices(count);/;"	f	line:203
+dirty	src/world/World.cpp	/^std::vector<uint8_t*> dirty(static_cast<size_t>(counts_.y));/;"	f	line:2556
+dirty	src/world/World.cpp	/^std::vector<uint8_t*> dirty(static_cast<size_t>(counts_.y));/;"	f	line:256
+dirtyGrid	src/world/World.cpp	/^std::vector<char> dirtyGrid(static_cast<size_t>(ncx) * counts_.y * ncz, 0);/;"	f	line:2060
+dirtyGrid	src/world/World.cpp	/^std::vector<char> dirtyGrid(static_cast<size_t>(ncx) * counts_.y * ncz, 0);/;"	f	line:2199
+dirtyScratch	src/world/World.cpp	/^std::vector<uint8_t> dirtyScratch(s.chunks.size(), 0);/;"	f	line:2553
+discoverModelNames	src/core/App.cpp	/^std::vector<std::string> discoverModelNames(const std::string& modelsDir) {/;"	f	line:59
+diurnalBuildFull	assets/clouds.yaml	/^diurnalBuildFull/;"	m	line:99
+diurnalBuildStart	assets/clouds.yaml	/^diurnalBuildStart/;"	m	line:98
+diurnalFadeEnd	assets/clouds.yaml	/^diurnalFadeEnd/;"	m	line:101
+diurnalFadeStart	assets/clouds.yaml	/^diurnalFadeStart/;"	m	line:100
+dot	src/core/AppUi.cpp	/^dot(rc + o, kCharcoal);/;"	f	line:135
+dot	src/core/AppUi.cpp	/^dot(rc, kCream);/;"	f	line:136
+drainBeforeWorldMutation	src/core/App.cpp	/^drainBeforeWorldMutation();/;"	f	line:412
+drainBeforeWorldMutation	src/core/App.h	/^void drainBeforeWorldMutation();/;"	f	line:101
+drainBeforeWorldMutation	src/core/AppUi.cpp	/^drainBeforeWorldMutation();/;"	f	line:1020
+drainMeshJobs	src/render/WorldRenderer.cpp	/^drainMeshJobs();/;"	f	line:861
+drainMeshJobs	src/render/WorldRenderer.h	/^void drainMeshJobs();/;"	f	line:299
+drawSlot	src/core/AppUi.cpp	/^drawSlot(ui, reg, cx, cy, slot, radius, s, hov);/;"	f	line:482
+drawSlot	src/core/AppUi.cpp	/^drawSlot(ui, reg, sx, sy, slot, radius, inv.slot(index), sel || hovered);/;"	f	line:321
+drawSlot	src/core/AppUi.cpp	/^drawSlot(ui, reg, sx, sy, slot, radius, s, selected || hov);/;"	f	line:557
+drawSlot	src/core/AppUi.cpp	/^drawSlot(ui, reg, x, y, slot, radius, inv.slot(i), i == inv.selected());/;"	f	line:275
+drown	src/main.cpp	/^vg::PlayerController drown(glm::vec3(0.0f, 100.0f, 0.0f));/;"	f	line:385
+dry	src/main.cpp	/^vg::PlayerController dry(glm::vec3(0.0f, 100.0f, 0.0f));/;"	f	line:368
+duskBrightness	assets/sky.yaml	/^duskBrightness/;"	m	line:57
+editBlocks	src/core/App.cpp	/^editBlocks(in, dt);/;"	f	line:1521
+editBlocks	src/core/App.h	/^void editBlocks(const InputState& in, float dt);/;"	f	line:74
+el	tools/gen_critter_model.py	/^def el(name, frm, to, origin, mat, group=None, **mats):/;"	f	line:86
+emit	src/core/App.cpp	/^emit(0); emit(1); emit(2);/;"	f	line:191
+emit	src/core/App.cpp	/^emit(0); emit(1); emit(2);/;"	f	line:217
+emit	src/core/App.cpp	/^emit(0); emit(2); emit(3);/;"	f	line:192
+emit	src/core/App.cpp	/^emit(0); emit(2); emit(3);/;"	f	line:218
+emit	src/entity/Armature.cpp	/^emit(0); emit(1); emit(2);/;"	f	line:186
+emit	src/entity/Armature.cpp	/^emit(0); emit(2); emit(3);/;"	f	line:187
+enableFlyOverview	src/core/App.h	/^void enableFlyOverview();/;"	f	line:68
+enabled	assets/clouds.yaml	/^enabled/;"	m	line:14
+endSingleTimeCommands	src/render/VulkanContext.h	/^void endSingleTimeCommands(VkCommandBuffer cmd) const;/;"	f	line:105
+enqueueEdit	src/core/App.h	/^void enqueueEdit(const PendingEdit& e);/;"	f	line:114
+enqueueMeshJobs	src/render/WorldRenderer.cpp	/^enqueueMeshJobs(chunks);/;"	f	line:867
+enqueueMeshJobs	src/render/WorldRenderer.h	/^void enqueueMeshJobs(const std::vector<glm::ivec3>& chunks);/;"	f	line:298
+envf	src/core/App.cpp	/^envf("VG_HZ", hz); envf("VG_HY", hy); envf("VG_HX", hx);/;"	f	line:1714
+envf	src/core/App.cpp	/^envf("VG_TX", tx); envf("VG_TY", ty); envf("VG_TZ", tz); envf("VG_HS", hs);/;"	f	line:1715
+eqCell	src/core/AppUi.cpp	/^eqCell(0, sx + (gridW - slot) * 0.5f, sy);/;"	f	line:487
+eqCell	src/core/AppUi.cpp	/^eqCell(Equipment::kArmorSlots + i, sx + c * (slot + gap), sy + r * (slot + gap));/;"	f	line:492
+erase	src/player/ChestStore.h	/^void erase(const glm::ivec3& pos) { chests_.erase(key(pos)); }/;"	f	line:49
+erosion	assets/clouds.yaml	/^erosion/;"	m	line:50
+eulerDegToQuat	src/entity/BlockbenchModel.cpp	/^glm::quat eulerDegToQuat(const glm::vec3& deg) {/;"	f	line:34
+eval_feature	tools/feature_tool.py	/^def eval_feature(feat, seed):/;"	f	line:155
+expand_args	tools/codeindex/verify_comments.py	/^def expand_args(args: list) -> list:/;"	f	line:135
+exposure	assets/sky.yaml	/^exposure/;"	m	line:46
+ext	src/render/WorldRenderer.cpp	/^const glm::vec3 ext(static_cast<float>(Chunk::kSize));/;"	f	line:360
+extinction	assets/clouds.yaml	/^extinction/;"	m	line:59
+extractFrustum	src/render/WorldRenderer.cpp	/^std::array<glm::vec4, 6> extractFrustum(const glm::mat4& clip) {/;"	f	line:71
+extract_cpp	tools/codeindex/codeindex.py	/^def extract_cpp(rel: str, lines):/;"	f	line:161
+extract_data	tools/codeindex/codeindex.py	/^def extract_data(rel: str, lines):/;"	f	line:248
+extract_glsl	tools/codeindex/codeindex.py	/^def extract_glsl(rel: str, lines):/;"	f	line:206
+extract_python	tools/codeindex/codeindex.py	/^def extract_python(rel: str, lines):/;"	f	line:231
+f	src/core/App.cpp	/^std::ifstream f(dir + "\/player.dat", std::ios::binary);/;"	f	line:789
+f	src/core/App.cpp	/^std::ofstream f(dir + "\/player.dat", std::ios::binary | std::ios::trunc);/;"	f	line:781
+f	src/core/AppUi.cpp	/^std::ifstream f(dir + "\/chests.dat", std::ios::binary);/;"	f	line:603
+f	src/core/AppUi.cpp	/^std::ofstream f(dir + "\/chests.dat", std::ios::binary | std::ios::trunc);/;"	f	line:595
+f	src/main.cpp	/^std::ofstream f(path);/;"	f	line:1016
+f	src/render/WorldRenderer.cpp	/^std::ifstream f(shaderDir + "\/chunk_cull.comp.spv", std::ios::ate | std::ios::binary);/;"	f	line:1033
+f	src/world/World.cpp	/^std::ifstream f(path, std::ios::binary);/;"	f	line:80
+f	src/world/World.cpp	/^std::ofstream f(path, std::ios::binary | std::ios::trunc);/;"	f	line:112
+faceIndex	src/world/ChunkMesher.cpp	/^int faceIndex(int axis, bool positive) {/;"	f	line:37
+faceShade	src/world/ChunkMesher.cpp	/^float faceShade(int axis, bool positive) {/;"	f	line:30
+faceUV	src/world/ChunkMesher.cpp	/^glm::vec2 faceUV(const glm::vec3& p, int axis) {/;"	f	line:68
+face_size_units	tools/gen_critter_model.py	/^def face_size_units(box, d):/;"	f	line:70
+face_size_units	tools/gen_tool_models.py	/^def face_size_units(box, d):/;"	f	line:104
+face_texture	scripts/gen_icons.py	/^def face_texture(entry, which):/;"	f	line:70
+fail	tests/span_allocator_test.cpp	/^static void fail(const char* file, int line, const char* expr) {/;"	f	line:30
+fairCoverage	assets/clouds.yaml	/^fairCoverage/;"	m	line:95
+fairType	assets/clouds.yaml	/^fairType/;"	m	line:97
+families	src/render/VulkanContext.cpp	/^std::vector<VkQueueFamilyProperties> families(count);/;"	f	line:279
+feature_list	tools/feature_tool.py	/^def feature_list():/;"	f	line:98
+fell	src/main.cpp	/^vg::PlayerController fell(glm::vec3(0.5f, 100.0f, 0.5f));/;"	f	line:421
+fieldAt	src/world/World.cpp	/^fieldAt(ix, iy, iz) = static_cast<uint8_t>(v);/;"	f	line:1959
+fieldAt	src/world/World.cpp	/^fieldAt(nx, ny, nz) = static_cast<uint8_t>(level - step);/;"	f	line:2003
+fieldAt	src/world/World.cpp	/^fieldAt(x, y, z) = static_cast<uint8_t>(sky);/;"	f	line:1917
+file	src/render/CompositeRenderer.cpp	/^std::ifstream file(path, std::ios::ate | std::ios::binary);/;"	f	line:30
+file	src/render/EntityRenderer.cpp	/^std::ifstream file(path, std::ios::ate | std::ios::binary);/;"	f	line:19
+file	src/render/Pipeline.cpp	/^std::ifstream file(path, std::ios::ate | std::ios::binary);/;"	f	line:25
+file	src/render/SkyRenderer.cpp	/^std::ifstream file(path, std::ios::ate | std::ios::binary);/;"	f	line:24
+file	src/render/UiRenderer.cpp	/^std::ifstream file(fontPath, std::ios::binary | std::ios::ate);/;"	f	line:89
+file	src/render/UiRenderer.cpp	/^std::ifstream file(path, std::ios::ate | std::ios::binary);/;"	f	line:39
+findDepthFormat	src/render/VulkanUtils.cpp	/^VkFormat findDepthFormat(VkPhysicalDevice physical) {/;"	f	line:157
+findDepthFormat	src/render/VulkanUtils.h	/^VkFormat findDepthFormat(VkPhysicalDevice physical);/;"	f	line:57
+findQueueFamilies	src/render/VulkanContext.h	/^QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device) const;/;"	f	line:114
+first	scripts/gen_icons.py	/^def first(value):/;"	f	line:65
+flat	assets/textures.yaml	/^flat/;"	m	line:41
+flat_texture	scripts/gen_icons.py	/^def flat_texture(entry):/;"	f	line:83
+floordiv	src/utilities/hash/Hash.h	/^constexpr int floordiv(int a, int b) {/;"	f	line:34
+floormod	src/utilities/hash/Hash.h	/^constexpr int floormod(int a, int b) {/;"	f	line:40
+floormod	src/world/World.cpp	/^return floormod(wx, s.x) + s.x * (floormod(wy, s.y) + s.y * floormod(wz, s.z));/;"	f	line:1601
+flushPendingEdits	src/core/App.cpp	/^flushPendingEdits();/;"	f	line:1520
+flushPendingEdits	src/core/App.h	/^void flushPendingEdits();/;"	f	line:111
+fn	src/core/App.cpp	/^fn();/;"	f	line:1567
+fn	src/render/VulkanContext.cpp	/^fn(instance, messenger, allocator);/;"	f	line:65
+fnv1a	src/main.cpp	/^inline uint64_t fnv1a(uint64_t h, uint64_t v) {/;"	f	line:55
+fontLabel	src/core/AppUi.cpp	/^std::string fontLabel(const std::string& file) {/;"	f	line:696
+fontTex	shaders/ui.frag	/^uniform: layout(set = 0, binding = 0) uniform sampler2D fontTex;/;"	v	line:5
+forceCoverage	assets/clouds.yaml	/^forceCoverage/;"	m	line:111
+forceDrainForStep	src/core/App.cpp	/^forceDrainForStep();/;"	f	line:1037
+forceDrainForStep	src/core/App.cpp	/^forceDrainForStep();/;"	f	line:965
+forceDrainForStep	src/core/App.cpp	/^forceDrainForStep();/;"	f	line:999
+forceType	assets/clouds.yaml	/^forceType/;"	m	line:112
+forest	assets/colors.yaml	/^forest/;"	m	line:27
+forestNoise	src/world/World.cpp	/^vg::Noise forestNoise  (config_.seed + 5260u);/;"	f	line:540
+fragAlpha	shaders/chunk.frag	/^in: layout(location = 4) in flat float fragAlpha;/;"	v	line:26
+fragAlpha	shaders/chunk.vert	/^out: layout(location = 4) out flat float fragAlpha;/;"	v	line:35
+fragAlpha	shaders/chunk_indirect.vert	/^out: layout(location = 4) out flat float fragAlpha;/;"	v	line:62
+fragBlockColor	shaders/chunk.frag	/^in: layout(location = 5) in vec3      fragBlockColor;/;"	v	line:27
+fragBlockColor	shaders/chunk.vert	/^out: layout(location = 5) out vec3      fragBlockColor;/;"	v	line:36
+fragBlockColor	shaders/chunk_indirect.vert	/^out: layout(location = 5) out vec3      fragBlockColor;/;"	v	line:63
+fragColor	shaders/ui.frag	/^in: layout(location = 1) in vec4  fragColor;/;"	v	line:11
+fragColor	shaders/ui.vert	/^out: layout(location = 1) out vec4  fragColor;/;"	v	line:18
+fragLayer	shaders/chunk.frag	/^in: layout(location = 1) in flat uint fragLayer;/;"	v	line:23
+fragLayer	shaders/chunk.vert	/^out: layout(location = 1) out flat uint fragLayer;/;"	v	line:32
+fragLayer	shaders/chunk_indirect.vert	/^out: layout(location = 1) out flat uint fragLayer;/;"	v	line:59
+fragLayer	shaders/entity.frag	/^in: layout(location = 2) in flat uint fragLayer;/;"	v	line:23
+fragLayer	shaders/entity.vert	/^out: layout(location = 2) out flat uint fragLayer;/;"	v	line:27
+fragLayer	shaders/ui.frag	/^in: layout(location = 2) in float fragLayer;/;"	v	line:12
+fragLayer	shaders/ui.vert	/^out: layout(location = 2) out float fragLayer;/;"	v	line:19
+fragLight	shaders/chunk.frag	/^in: layout(location = 2) in vec2      fragLight;/;"	v	line:24
+fragLight	shaders/chunk.vert	/^out: layout(location = 2) out vec2      fragLight;/;"	v	line:33
+fragLight	shaders/chunk_indirect.vert	/^out: layout(location = 2) out vec2      fragLight;/;"	v	line:60
+fragLightSlot	shaders/chunk.frag	/^in: layout(location = 9) in flat int fragLightSlot;/;"	v	line:31
+fragLightSlot	shaders/chunk_indirect.vert	/^out: layout(location = 9) out flat int fragLightSlot;/;"	v	line:67
+fragLocalPos	shaders/chunk.frag	/^in: layout(location = 10) in vec3 fragLocalPos;/;"	v	line:32
+fragLocalPos	shaders/chunk_indirect.vert	/^out: layout(location = 10) out vec3 fragLocalPos;/;"	v	line:68
+fragNormal	shaders/chunk.frag	/^in: layout(location = 3) in flat uint fragNormal;/;"	v	line:25
+fragNormal	shaders/chunk.vert	/^out: layout(location = 3) out flat uint fragNormal;/;"	v	line:34
+fragNormal	shaders/chunk_indirect.vert	/^out: layout(location = 3) out flat uint fragNormal;/;"	v	line:61
+fragNormal	shaders/entity.frag	/^in: layout(location = 0) in vec3      fragNormal;/;"	v	line:21
+fragNormal	shaders/entity.vert	/^out: layout(location = 0) out vec3      fragNormal;/;"	v	line:25
+fragTint	shaders/chunk.frag	/^in: layout(location = 6) in vec3      fragTint;/;"	v	line:28
+fragTint	shaders/chunk.vert	/^out: layout(location = 6) out vec3      fragTint;/;"	v	line:37
+fragTint	shaders/chunk_indirect.vert	/^out: layout(location = 6) out vec3      fragTint;/;"	v	line:64
+fragUV	shaders/chunk.frag	/^in: layout(location = 0) in vec2      fragUV;/;"	v	line:22
+fragUV	shaders/chunk.vert	/^out: layout(location = 0) out vec2      fragUV;/;"	v	line:31
+fragUV	shaders/chunk_indirect.vert	/^out: layout(location = 0) out vec2      fragUV;/;"	v	line:58
+fragUV	shaders/entity.frag	/^in: layout(location = 1) in vec2      fragUV;/;"	v	line:22
+fragUV	shaders/entity.vert	/^out: layout(location = 1) out vec2      fragUV;/;"	v	line:26
+fragUV	shaders/ui.frag	/^in: layout(location = 0) in vec2  fragUV;/;"	v	line:10
+fragUV	shaders/ui.vert	/^out: layout(location = 0) out vec2  fragUV;/;"	v	line:17
+fragUVaffine	shaders/chunk.frag	/^var: layout(location = 7) noperspective in vec2 fragUVaffine;/;"	v	line:29
+fragUVaffine	shaders/chunk.vert	/^var: layout(location = 7) noperspective out vec2 fragUVaffine;/;"	v	line:40
+fragUVaffine	shaders/chunk_indirect.vert	/^var: layout(location = 7) noperspective out vec2 fragUVaffine;/;"	v	line:65
+fragWorldPos	shaders/chunk.frag	/^in: layout(location = 8) in vec3 fragWorldPos;/;"	v	line:30
+fragWorldPos	shaders/chunk.vert	/^out: layout(location = 8) out vec3 fragWorldPos;/;"	v	line:41
+fragWorldPos	shaders/chunk_indirect.vert	/^out: layout(location = 8) out vec3 fragWorldPos;/;"	v	line:66
+frame	src/core/Ui.cpp	/^frame(x, y, w, h, kCharcoal, hot ? kLilac : kCream, kBorder, kRadius);/;"	f	line:220
+frame	src/core/Ui.cpp	/^frame(x, y, w, h, kCharcoal, kCream, kBorder, kRadius);/;"	f	line:256
+framebufferResizeCallback	src/core/Window.h	/^static void framebufferResizeCallback(GLFWwindow* window, int width, int height);/;"	f	line:77
+framebufferSize	src/core/Window.h	/^void framebufferSize(int& outWidth, int& outHeight) const;/;"	f	line:49
+frand	src/entity/Critters.h	/^float frand();/;"	f	line:61
+free	src/render/GpuAllocator.h	/^void free(const GpuAlloc& a);/;"	f	line:96
+free	src/render/MeshArena.h	/^void free(const Alloc& a);/;"	f	line:93
+free	src/utilities/alloc/SpanAllocator.h	/^void free(uint64_t offset);/;"	f	line:72
+freeDeferred	src/render/LightAtlas.h	/^void freeDeferred(int slot);/;"	f	line:85
+freqModNoise	src/world/World.cpp	/^vg::Noise freqModNoise(config_.seed + 7777u);/;"	f	line:572
+freqOctaveCap	src/utilities/noise/NoiseStack.h	/^static int freqOctaveCap(float freq, float lacunarity) {/;"	f	line:155
+fullRecompute	src/main.cpp	/^fullRecompute();/;"	f	line:843
+generate	src/clouds/CloudNoise.cpp	/^generate();/;"	f	line:100
+generate	src/clouds/CloudNoise.h	/^void generate();/;"	f	line:56
+generate	src/world/World.cpp	/^generate();          _stamp("generate", _a);   _a = std::chrono::steady_clock::now();/;"	f	line:174
+generate	src/world/World.cpp	/^generate();/;"	f	line:2490
+generate	src/world/World.h	/^void generate();/;"	f	line:244
+generateColumn	src/world/World.cpp	/^generateColumn(c.x, c.y);/;"	f	line:2431
+generateColumn	src/world/World.cpp	/^generateColumn(c.x, c.y);/;"	f	line:246
+generateColumn	src/world/World.h	/^void generateColumn(int cx, int cz);/;"	f	line:250
+generateColumnInto	src/world/World.cpp	/^generateColumnInto(columns[i].x, columns[i].y, stack.data(), dirty.data());/;"	f	line:2562
+generateColumnInto	src/world/World.cpp	/^generateColumnInto(cx, cz, stack.data(), dirty.data());/;"	f	line:262
+generateMipmaps	src/render/TextureArray.cpp	/^generateMipmaps(width, height, layerCount);/;"	f	line:139
+generateMipmaps	src/render/TextureArray.h	/^void generateMipmaps(int width, int height, uint32_t layerCount);/;"	f	line:74
+get	src/core/Settings.cpp	/^get("arenaVertsPerSlot", s.arenaVertsPerSlot);/;"	f	line:42
+get	src/core/Settings.cpp	/^get("blockFalloff", s.blockFalloff);/;"	f	line:40
+get	src/core/Settings.cpp	/^get("darkNoise", s.darkNoise);/;"	f	line:43
+get	src/core/Settings.cpp	/^get("dayLengthMinutes", s.dayLengthMinutes);/;"	f	line:54
+get	src/core/Settings.cpp	/^get("flySpeed", s.flySpeed);/;"	f	line:51
+get	src/core/Settings.cpp	/^get("font", s.font);/;"	f	line:58
+get	src/core/Settings.cpp	/^get("fov", s.fov);/;"	f	line:49
+get	src/core/Settings.cpp	/^get("fullscreen", s.fullscreen);/;"	f	line:56
+get	src/core/Settings.cpp	/^get("lod", s.lod);/;"	f	line:53
+get	src/core/Settings.cpp	/^get("pixelate", s.pixelate);/;"	f	line:38
+get	src/core/Settings.cpp	/^get("renderDistance", s.renderDistance);/;"	f	line:41
+get	src/core/Settings.cpp	/^get("retroAffine", s.retroAffine);/;"	f	line:44
+get	src/core/Settings.cpp	/^get("retroColorBits", s.retroColorBits);/;"	f	line:45
+get	src/core/Settings.cpp	/^get("retroDither", s.retroDither);/;"	f	line:46
+get	src/core/Settings.cpp	/^get("retroInterlace", s.retroInterlace);/;"	f	line:47
+get	src/core/Settings.cpp	/^get("retroPalette", s.retroPalette);/;"	f	line:48
+get	src/core/Settings.cpp	/^get("sensitivity", s.sensitivity);/;"	f	line:50
+get	src/core/Settings.cpp	/^get("skyColor", s.skyColor);/;"	f	line:57
+get	src/core/Settings.cpp	/^get("skyFalloff", s.skyFalloff);/;"	f	line:39
+get	src/core/Settings.cpp	/^get("timeRunning", s.timeRunning);/;"	f	line:55
+get	src/core/Settings.cpp	/^get("viewBob", s.viewBob);/;"	f	line:52
+get	src/world/WorldConfig.cpp	/^get(root["async_streaming"], c.asyncStreaming);/;"	f	line:60
+get	src/world/WorldConfig.cpp	/^get(root["height_chunks"], c.heightChunks);/;"	f	line:62
+get	src/world/WorldConfig.cpp	/^get(root["random_seed"], randomSeed);/;"	f	line:50
+get	src/world/WorldConfig.cpp	/^get(root["save_dir"], c.saveDir);/;"	f	line:57
+get	src/world/WorldConfig.cpp	/^get(root["seed"], c.seed);/;"	f	line:44
+get	src/world/WorldConfig.cpp	/^get(root["stream_workers"], c.streamWorkers);/;"	f	line:58
+get	src/world/WorldConfig.cpp	/^get(root["streaming"], c.streaming);/;"	f	line:56
+get	src/world/WorldConfig.cpp	/^get(root["view_radius"], c.viewRadius);/;"	f	line:61
+get	src/world/WorldConfig.cpp	/^get(str["core_radius"], c.streamCoreRadius);/;"	f	line:71
+get	src/world/WorldConfig.cpp	/^get(str["melt_budget"], c.streamMeltBudget);/;"	f	line:70
+get	src/world/WorldConfig.cpp	/^get(str["pump_budget"], c.streamPumpBudget);/;"	f	line:69
+get	src/world/WorldConfig.cpp	/^get(str["upload_slice"], c.streamUploadSlice);/;"	f	line:72
+giantB	src/world/World.cpp	/^std::vector<float> giantB(static_cast<size_t>(N) * N);/;"	f	line:958
+giantMaskNoise	src/world/World.cpp	/^vg::Noise giantMaskNoise(config_.seed + 7200u);/;"	f	line:556
+give	src/core/App.cpp	/^give("chest", 3);/;"	f	line:368
+give	src/core/App.cpp	/^give("cobblestone", 64);/;"	f	line:363
+give	src/core/App.cpp	/^give("dirt", 64);/;"	f	line:362
+give	src/core/App.cpp	/^give("iron_boots", 1);/;"	f	line:369
+give	src/core/App.cpp	/^give("oak_leaves", 16);/;"	f	line:366
+give	src/core/App.cpp	/^give("oak_trunk", 16);/;"	f	line:365
+give	src/core/App.cpp	/^give("planks", 32);/;"	f	line:364
+give	src/core/App.cpp	/^give("swift_charm", 1);/;"	f	line:370
+give	src/core/App.cpp	/^give("torch", 16);/;"	f	line:367
+glfwDestroyWindow	src/core/Window.cpp	/^glfwDestroyWindow(window_);/;"	f	line:35
+glfwGetCursorPos	src/core/Input.cpp	/^glfwGetCursorPos(w, &x, &y);/;"	f	line:108
+glfwGetFramebufferSize	src/core/Window.cpp	/^glfwGetFramebufferSize(window_, &outWidth, &outHeight);/;"	f	line:67
+glfwGetFramebufferSize	src/core/Window.cpp	/^glfwGetFramebufferSize(window_, &w, &h);/;"	f	line:101
+glfwGetFramebufferSize	src/core/Window.cpp	/^glfwGetFramebufferSize(window_, &w, &h);/;"	f	line:103
+glfwGetWindowPos	src/core/Window.cpp	/^glfwGetWindowPos(window_, &winX_, &winY_);/;"	f	line:83
+glfwGetWindowSize	src/core/Window.cpp	/^glfwGetWindowSize(window_, &winW_, &winH_);/;"	f	line:84
+glfwPollEvents	src/core/Window.cpp	/^glfwPollEvents();/;"	f	line:45
+glfwSetFramebufferSizeCallback	src/core/Window.cpp	/^glfwSetFramebufferSizeCallback(window_, framebufferResizeCallback);/;"	f	line:29
+glfwSetInputMode	src/core/Window.cpp	/^glfwSetInputMode(window_, GLFW_RAW_MOUSE_MOTION, GLFW_TRUE);/;"	f	line:75
+glfwSetScrollCallback	src/core/Window.cpp	/^glfwSetScrollCallback(window_, scrollCallback);/;"	f	line:30
+glfwSetWindowMonitor	src/core/Window.cpp	/^glfwSetWindowMonitor(window_, nullptr, winX_, winY_, w, h, 0);/;"	f	line:93
+glfwSetWindowUserPointer	src/core/Window.cpp	/^glfwSetWindowUserPointer(window_, this);/;"	f	line:28
+glfwTerminate	src/core/Window.cpp	/^glfwTerminate();/;"	f	line:23
+glfwTerminate	src/core/Window.cpp	/^glfwTerminate();/;"	f	line:37
+glfwWaitEvents	src/core/Window.cpp	/^glfwWaitEvents();/;"	f	line:104
+glfwWindowHint	src/core/Window.cpp	/^glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);/;"	f	line:19
+glfwWindowShouldClose	src/core/Window.cpp	/^return glfwWindowShouldClose(window_);/;"	f	line:41
+gold	assets/colors.yaml	/^gold/;"	m	line:8
+grass_green	assets/colors.yaml	/^grass_green/;"	m	line:24
+grid	src/world/World.cpp	/^std::vector<char> grid(static_cast<size_t>(ncx) * counts_.y * ncz, 0);/;"	f	line:2342
+hash01	src/utilities/hash/Hash.h	/^inline float hash01(int x, int y, int z, uint32_t salt) {/;"	f	line:59
+hash01	src/utilities/hash/Hash.h	/^inline float hash01(int x, int z, uint32_t salt) {/;"	f	line:48
+hash2	src/clouds/WeatherMap.cpp	/^float hash2(int x, int y, uint32_t seed) {/;"	f	line:22
+hashSeq	src/clouds/CloudSystem.cpp	/^float hashSeq(uint32_t s) {/;"	f	line:25
+hashWorld	src/main.cpp	/^uint64_t hashWorld(const vg::World& w) {/;"	f	line:66
+head_version	tools/codeindex/verify_comments.py	/^def head_version(path: str) -> str | None:/;"	f	line:115
+heal	src/player/PlayerController.cpp	/^heal((kRegenRate + regenBonus_) * dt);/;"	f	line:264
+heal	src/player/PlayerController.h	/^void heal(float amount);/;"	f	line:87
+height_chunks	assets/world.yaml	/^height_chunks/;"	m	line:77
+height_chunks	assets/world1.yaml	/^height_chunks/;"	m	line:71
+held	src/main.cpp	/^vg::PlayerController held(glm::vec3(0.5f, 100.0f, 0.5f));/;"	f	line:424
+heldLight	src/core/App.cpp	/^glm::vec4 heldLight(0.0f);/;"	f	line:1663
+heldLightCol	src/core/App.cpp	/^glm::vec4 heldLightCol(0.0f);/;"	f	line:1664
+hgG	assets/clouds.yaml	/^hgG/;"	m	line:60
+hi	src/player/PlayerController.cpp	/^const glm::vec3 hi(feet.x + kHalfWidth, feet.y + kHeight, feet.z + kHalfWidth);/;"	f	line:339
+hillNoise	src/world/World.cpp	/^vg::Noise hillNoise  (config_.seed + 4001u);/;"	f	line:524
+horizontalMove	src/player/PlayerController.cpp	/^horizontalMove();/;"	f	line:216
+horizontalMove	src/player/PlayerController.cpp	/^horizontalMove();/;"	f	line:235
+hueRotate	src/core/DayNight.cpp	/^glm::vec3 hueRotate(const glm::vec3& c, float a) {/;"	f	line:64
+icon	tools/feature_tool.py	/^def icon(name):/;"	f	line:360
+icon	tools/hub.py	/^def icon(name):/;"	f	line:201
+icon	tools/recipe_tool.py	/^def icon(name):/;"	f	line:158
+icon	tools/structure_tool.py	/^def icon(name):/;"	f	line:189
+idx	src/world/World.cpp	/^std::vector<size_t> idx(columns.size());/;"	f	line:2564
+idxAlloc_	src/render/MeshArena.cpp	/^idxAlloc_(indexCapacity) {}/;"	f	line:27
+ifloor	src/entity/Critters.cpp	/^int ifloor(float v) { return static_cast<int>(std::floor(v)); }/;"	f	line:18
+imageWrite	src/render/CompositeRenderer.cpp	/^imageWrite(0, 0, &imgs[0]);/;"	f	line:186
+imageWrite	src/render/CompositeRenderer.cpp	/^imageWrite(1, 1, &imgs[1]);/;"	f	line:187
+in	src/clouds/CloudNoise.cpp	/^std::ifstream in(file, std::ios::binary);/;"	f	line:201
+in	src/core/ColorPalette.cpp	/^std::ifstream in(path);/;"	f	line:48
+inBlockColor	shaders/chunk.vert	/^in: layout(location = 5) in vec4  inBlockColor;/;"	v	line:9
+inBlockColor	shaders/chunk_indirect.vert	/^in: layout(location = 5) in vec4  inBlockColor;/;"	v	line:27
+inColor	shaders/ui.vert	/^in: layout(location = 2) in vec4 inColor;/;"	v	line:8
+inLayer	shaders/chunk.vert	/^in: layout(location = 2) in uint  inLayer;/;"	v	line:6
+inLayer	shaders/chunk_indirect.vert	/^in: layout(location = 2) in uint  inLayer;/;"	v	line:24
+inLayer	shaders/entity.vert	/^in: layout(location = 3) in uint inLayer;/;"	v	line:8
+inLayer	shaders/ui.vert	/^in: layout(location = 3) in float inLayer;/;"	v	line:11
+inLight	shaders/chunk.vert	/^in: layout(location = 3) in vec2  inLight;/;"	v	line:7
+inLight	shaders/chunk_indirect.vert	/^in: layout(location = 3) in vec2  inLight;/;"	v	line:25
+inNormal	shaders/chunk.vert	/^in: layout(location = 4) in uint  inNormal;/;"	v	line:8
+inNormal	shaders/chunk_indirect.vert	/^in: layout(location = 4) in uint  inNormal;/;"	v	line:26
+inNormal	shaders/entity.vert	/^in: layout(location = 1) in vec3 inNormal;/;"	v	line:6
+inPos	shaders/chunk.vert	/^in: layout(location = 0) in vec3  inPos;/;"	v	line:4
+inPos	shaders/chunk_indirect.vert	/^in: layout(location = 0) in vec3  inPos;/;"	v	line:22
+inPos	shaders/entity.vert	/^in: layout(location = 0) in vec3 inPos;/;"	v	line:5
+inPos	shaders/ui.vert	/^in: layout(location = 0) in vec2 inPos;/;"	v	line:6
+inTint	shaders/chunk.vert	/^in: layout(location = 6) in vec4  inTint;/;"	v	line:10
+inTint	shaders/chunk_indirect.vert	/^in: layout(location = 6) in vec4  inTint;/;"	v	line:28
+inUV	shaders/chunk.vert	/^in: layout(location = 1) in vec2  inUV;/;"	v	line:5
+inUV	shaders/chunk_indirect.vert	/^in: layout(location = 1) in vec2  inUV;/;"	v	line:23
+inUV	shaders/entity.vert	/^in: layout(location = 2) in vec2 inUV;/;"	v	line:7
+inUV	shaders/ui.vert	/^in: layout(location = 1) in vec2 inUV;/;"	v	line:7
+index	tools/feature_tool.py	/^def index():/;"	f	line:295
+index	tools/hub.py	/^def index():/;"	f	line:164
+index	tools/particle_tool.py	/^def index():/;"	f	line:108
+index	tools/recipe_tool.py	/^def index():/;"	f	line:148
+index	tools/structure_tool.py	/^def index():/;"	f	line:149
+indigo	assets/colors.yaml	/^indigo/;"	m	line:20
+installMesh	src/render/WorldRenderer.cpp	/^installMesh(cx, cy, cz, std::move(mesh), false);/;"	f	line:263
+installMesh	src/render/WorldRenderer.h	/^void installMesh(int cx, int cy, int cz, MeshData&& mesh, bool deferOldBuffers);/;"	f	line:272
+installMeshBatch	src/render/WorldRenderer.cpp	/^installMeshBatch(batch);/;"	f	line:683
+installMeshBatch	src/render/WorldRenderer.cpp	/^installMeshBatch(batch);/;"	f	line:856
+installMeshBatch	src/render/WorldRenderer.h	/^void installMeshBatch(std::vector<MeshResult>& batch);/;"	f	line:291
+internTexture	src/world/BlockRegistry.cpp	/^internTexture("crack_" + std::to_string(s) + ".block.png");/;"	f	line:258
+internTexture	src/world/BlockRegistry.h	/^uint32_t internTexture(const std::string& filename);/;"	f	line:262
+isAligned	tests/span_allocator_test.cpp	/^static bool isAligned(uint64_t offset, uint64_t alignment) {/;"	f	line:52
+isBgra	src/render/Screenshot.cpp	/^bool isBgra(VkFormat f) {/;"	f	line:34
+isDeviceSuitable	src/render/VulkanContext.h	/^bool isDeviceSuitable(VkPhysicalDevice device) const;/;"	f	line:115
+isWater_	src/player/PlayerController.cpp	/^isWater_(cx, static_cast<int>(std::floor(feet_.y + kHeight * 0.5f)), cz);/;"	f	line:157
+is_flat	scripts/gen_icons.py	/^def is_flat(entry):/;"	f	line:103
+is_running	tools/hub.py	/^def is_running(tool):/;"	f	line:74
+is_vendored	tools/codeindex/codeindex.py	/^def is_vendored(rel_posix: str) -> bool:/;"	f	line:109
+islAltNoise	src/world/World.cpp	/^vg::Noise islAltNoise  (config_.seed + 9100u);/;"	f	line:531
+islMaskNoise	src/world/World.cpp	/^vg::Noise islMaskNoise (config_.seed + 9009u);/;"	f	line:530
+islShapeNoise	src/world/World.cpp	/^vg::Noise islShapeNoise(config_.seed + 9200u);/;"	f	line:532
+itemIcon	src/core/Ui.h	/^void itemIcon(float cx, float cy, float r, uint32_t iconLayer);/;"	f	line:79
+items_data	tools/hub.py	/^def items_data():/;"	f	line:140
+j	src/core/App.cpp	/^const glm::vec3 j(std::sin(a), std::cos(a * 1.7f), std::sin(a * 0.7f));/;"	f	line:1610
+jointMatrix	src/entity/Armature.cpp	/^glm::mat4 jointMatrix(const glm::vec3& t, const glm::quat& r, const glm::vec3& s) {/;"	f	line:29
+label	src/core/Ui.h	/^void label(float x, float y, const std::string& s, float scale, const glm::vec4& color);/;"	f	line:80
+lakeLvlNoise	src/world/World.cpp	/^vg::Noise lakeLvlNoise (config_.seed + 6800u);/;"	f	line:551
+lakeMaskNoise	src/world/World.cpp	/^vg::Noise lakeMaskNoise(config_.seed + 6700u);/;"	f	line:550
+lakeY	src/world/World.cpp	/^std::vector<int>   lakeY(static_cast<size_t>(N) * N, -1);/;"	f	line:957
+lang_for	tools/codeindex/codeindex.py	/^def lang_for(ext: str):/;"	f	line:260
+latitude	assets/sky.yaml	/^latitude/;"	m	line:154
+launchRelight	src/core/App.cpp	/^launchRelight(std::move(boxes), std::move(dirty));/;"	f	line:1012
+launchRelight	src/core/App.cpp	/^launchRelight(std::move(boxes), std::move(dirty));/;"	f	line:1040
+launchRelight	src/core/App.cpp	/^launchRelight(std::move(boxes), std::move(dirty));/;"	f	line:968
+layer	src/core/App.cpp	/^std::vector<unsigned char> layer(bytes, 0);/;"	f	line:101
+layerBottom	assets/clouds.yaml	/^layerBottom/;"	m	line:25
+layerTop	assets/clouds.yaml	/^layerTop/;"	m	line:26
+layers	assets/structures/boulder.yaml	/^layers/;"	m	line:11
+layers	assets/structures/pillar.yaml	/^layers/;"	m	line:10
+layers	assets/structures/well.yaml	/^layers/;"	m	line:12
+layouts	src/render/EntityRenderer.cpp	/^std::vector<VkDescriptorSetLayout> layouts(n, descriptorSetLayout_);/;"	f	line:231
+layouts	src/render/SkyRenderer.cpp	/^std::vector<VkDescriptorSetLayout> layouts(n, setLayout_);/;"	f	line:104
+layouts	src/render/WorldRenderer.cpp	/^std::vector<VkDescriptorSetLayout> layouts(n, cullSetLayout_);/;"	f	line:1093
+layouts	src/render/WorldRenderer.cpp	/^std::vector<VkDescriptorSetLayout> layouts(n, pipeline_->descriptorSetLayout());/;"	f	line:955
+lcg	scripts/gen_cracks.py	/^def lcg(seed):/;"	f	line:18
+legend	assets/structures/boulder.yaml	/^legend/;"	m	line:7
+legend	assets/structures/pillar.yaml	/^legend/;"	m	line:7
+legend	assets/structures/well.yaml	/^legend/;"	m	line:8
+light	src/world/ChunkMesher.cpp	/^return light(c[0], c[1], c[2]);/;"	f	line:329
+lightStepLength	assets/clouds.yaml	/^lightStepLength/;"	m	line:78
+lightSteps	assets/clouds.yaml	/^lightSteps/;"	m	line:77
+lightVol	shaders/chunk.frag	/^uniform: layout(set = 0, binding = 3) uniform sampler3D lightVol;/;"	v	line:8
+lilac	assets/colors.yaml	/^lilac/;"	m	line:16
+lime	assets/colors.yaml	/^lime/;"	m	line:25
+liquids	assets/world1.yaml	/^liquids/;"	m	line:103
+listColorPalettes	src/core/ColorPalette.cpp	/^std::vector<std::string> listColorPalettes(const std::string& dir) {/;"	f	line:66
+list_effects	tools/particle_tool.py	/^def list_effects():/;"	f	line:113
+list_textures	tools/particle_tool.py	/^def list_textures():/;"	f	line:120
+lk	src/render/WorldRenderer.cpp	/^std::lock_guard<std::mutex> lk(barrierMutex_);/;"	f	line:805
+lk	src/render/WorldRenderer.cpp	/^std::lock_guard<std::mutex> lk(jobMutex_);/;"	f	line:767
+lk	src/render/WorldRenderer.cpp	/^std::lock_guard<std::mutex> lk(jobMutex_);/;"	f	line:816
+lk	src/render/WorldRenderer.cpp	/^std::lock_guard<std::mutex> lk(resultMutex_);/;"	f	line:799
+lk	src/render/WorldRenderer.cpp	/^std::lock_guard<std::mutex> lk(resultMutex_);/;"	f	line:843
+lk	src/render/WorldRenderer.cpp	/^std::lock_guard<std::mutex> lk(resultMutex_);/;"	f	line:882
+lk	src/render/WorldRenderer.cpp	/^std::unique_lock<std::mutex> lk(barrierMutex_);/;"	f	line:828
+lk	src/render/WorldRenderer.cpp	/^std::unique_lock<std::mutex> lk(jobMutex_);/;"	f	line:784
+lo	src/core/App.cpp	/^glm::vec3 lo(1e9f), hi(-1e9f);/;"	f	line:1156
+lo	src/player/PlayerController.cpp	/^const glm::vec3 lo(feet.x - kHalfWidth, feet.y,           feet.z - kHalfWidth);/;"	f	line:338
+load	src/entity/Particles.h	/^static ParticleEffect load(const std::string& path);/;"	f	line:57
+loadBlockbenchModel	src/entity/BlockbenchModel.cpp	/^BlockbenchModel loadBlockbenchModel(const std::string& path) {/;"	f	line:90
+loadCache	src/clouds/CloudNoise.h	/^bool loadCache(const std::string& file);/;"	f	line:57
+loadChests	src/core/App.cpp	/^loadChests();/;"	f	line:393
+loadChests	src/core/App.h	/^void loadChests();/;"	f	line:128
+loadChunkFile	src/world/World.cpp	/^bool loadChunkFile(const std::string& path, Chunk& out) {/;"	f	line:79
+loadColorPalette	src/core/ColorPalette.cpp	/^std::vector<glm::vec3> loadColorPalette(const std::string& path) {/;"	f	line:46
+loadMask	src/utilities/noise/NoiseLoad.h	/^inline NoiseMask loadMask(const YAML::Node& node, uint32_t seed) {/;"	f	line:136
+loadModule	src/render/CompositeRenderer.cpp	/^VkShaderModule loadModule(VkDevice device, const std::string& path) {/;"	f	line:41
+loadModule	src/render/SkyRenderer.cpp	/^VkShaderModule loadModule(VkDevice device, const std::string& path) {/;"	f	line:23
+loadModule	src/render/UiRenderer.cpp	/^VkShaderModule loadModule(VkDevice device, const std::string& path) {/;"	f	line:50
+loadPlayer	src/core/App.cpp	/^loadPlayer();/;"	f	line:392
+loadPlayer	src/core/App.h	/^bool loadPlayer();/;"	f	line:125
+loadPreviewThumb	src/core/App.h	/^void loadPreviewThumb();/;"	f	line:174
+loadPreviewThumb	src/core/AppUi.cpp	/^loadPreviewThumb();/;"	f	line:750
+loadSeq	src/world/BlockRegistry.cpp	/^loadSeq(blocksFile, false);/;"	f	line:233
+loadSeq	src/world/BlockRegistry.cpp	/^loadSeq(itemsFile, true);/;"	f	line:237
+loadShader	src/render/EntityRenderer.h	/^VkShaderModule loadShader(const std::string& path) const;/;"	f	line:100
+loadShaderModule	src/render/Pipeline.h	/^VkShaderModule loadShaderModule(const std::string& path) const;/;"	f	line:66
+loadStack	src/utilities/noise/NoiseLoad.h	/^inline NoiseStack loadStack(const YAML::Node& fieldNode, uint32_t baseSeed) {/;"	f	line:35
+load_blocks	tools/recipe_tool.py	/^def load_blocks():/;"	f	line:44
+load_config	scripts/gen_textures.py	/^def load_config():/;"	f	line:49
+load_effect	tools/particle_tool.py	/^def load_effect():/;"	f	line:132
+load_entries	scripts/gen_icons.py	/^def load_entries():/;"	f	line:52
+load_names	scripts/gen_colors.py	/^def load_names():/;"	f	line:29
+load_palette	scripts/gen_textures.py	/^def load_palette():/;"	f	line:59
+load_recipes_doc	tools/recipe_tool.py	/^def load_recipes_doc():/;"	f	line:71
+load_swatches	scripts/gen_colors.py	/^def load_swatches():/;"	f	line:41
+load_tex	scripts/gen_icons.py	/^def load_tex(filename):/;"	f	line:92
+log_tail	tools/hub.py	/^def log_tail(tool, lines=12):/;"	f	line:78
+lowerWorkerThreadPriority	src/render/WorldRenderer.cpp	/^lowerWorkerThreadPriority();/;"	f	line:780
+lowerWorkerThreadPriority	src/render/WorldRenderer.cpp	/^void lowerWorkerThreadPriority() {/;"	f	line:59
+lv	src/world/ChunkMesher.cpp	/^const glm::vec2 lv(sky, blk);/;"	f	line:756
+main	scripts/gen_colors.py	/^def main():/;"	f	line:48
+main	scripts/gen_icons.py	/^def main():/;"	f	line:173
+main	scripts/gen_textures.py	/^def main():/;"	f	line:269
+main	shaders/chunk.frag	/^main/;"	f	line:59
+main	shaders/chunk.vert	/^main/;"	f	line:43
+main	shaders/chunk_cull.comp	/^main/;"	f	line:66
+main	shaders/chunk_indirect.vert	/^main/;"	f	line:70
+main	shaders/composite.frag	/^main/;"	f	line:63
+main	shaders/composite.vert	/^main/;"	f	line:7
+main	shaders/entity.frag	/^main/;"	f	line:27
+main	shaders/entity.vert	/^main/;"	f	line:29
+main	shaders/sky.frag	/^main/;"	f	line:514
+main	shaders/sky.vert	/^main/;"	f	line:8
+main	shaders/ui.frag	/^main/;"	f	line:25
+main	shaders/ui.vert	/^main/;"	f	line:21
+main	src/main.cpp	/^int main(int argc, char** argv) {/;"	f	line:1090
+main	tests/span_allocator_test.cpp	/^int main() {/;"	f	line:351
+main	tools/codeindex/codeindex.py	/^def main(argv=None):/;"	f	line:460
+main	tools/codeindex/verify_comments.py	/^def main(argv):/;"	f	line:151
+mainNoise	src/world/World.cpp	/^vg::Noise mainNoise  (config_.seed + 3003u);/;"	f	line:527
+make	scripts/gen_ui.py	/^def make(fill):/;"	f	line:35
+makeCubeMesh	src/core/App.cpp	/^std::vector<EntityVertex> makeCubeMesh(const BlockRegistry& reg, uint16_t id, float half) {/;"	f	line:172
+makeCubeMeshLayer	src/core/App.cpp	/^std::vector<EntityVertex> makeCubeMeshLayer(uint32_t layer, float half) {/;"	f	line:200
+makeTintSampler	src/render/WorldRenderer.cpp	/^makeTintSampler(cx, cy, cz));/;"	f	line:252
+make_recipe	tools/recipe_tool.py	/^def make_recipe(output, count, inputs):/;"	f	line:115
+make_stage	scripts/gen_cracks.py	/^def make_stage(stage):/;"	f	line:25
+make_texture	scripts/gen_textures.py	/^def make_texture(spec, size, patterns, flat=False):/;"	f	line:99
+mark	src/world/World.cpp	/^mark(cx, cy, cz);/;"	f	line:2116
+mark	src/world/World.cpp	/^mark(cx, cy, cz);/;"	f	line:2221
+mark	src/world/World.cpp	/^mark(floordiv(x, N), floordiv(y, N), floordiv(z, N));/;"	f	line:2087
+mark	src/world/World.cpp	/^mark(floordiv(x, N), floordiv(y, N), floordiv(z, N));/;"	f	line:2212
+markChanged	src/world/World.cpp	/^markChanged(x, y, z);/;"	f	line:2353
+maroon	assets/colors.yaml	/^maroon/;"	m	line:5
+mask	src/world/ChunkMesher.cpp	/^std::vector<Mask> mask(static_cast<size_t>(N) * N);/;"	f	line:276
+matchesFull	src/main.cpp	/^matchesFull("batched emitters (overlapping cross-chunk glow) match full");/;"	f	line:921
+matchesFull	src/main.cpp	/^matchesFull("batched tall blocker (multi-chunk shadow) matches full");/;"	f	line:904
+matchesFull	src/main.cpp	/^matchesFull("breaking the blocker relights to match a full recompute");/;"	f	line:876
+matchesFull	src/main.cpp	/^matchesFull("placing a sky-blocker relights to match a full recompute");/;"	f	line:873
+matchesFull	src/main.cpp	/^matchesFull("placing an emitter relights block light to match full");/;"	f	line:880
+matchesFull	src/main.cpp	/^matchesFull("removing the batched blocker matches full");/;"	f	line:908
+matchesFull	src/main.cpp	/^matchesFull("removing the batched emitters matches full");/;"	f	line:925
+matchesFull	src/main.cpp	/^matchesFull("removing the emitter relights block light to match full");/;"	f	line:882
+maxDistance	assets/clouds.yaml	/^maxDistance/;"	m	line:32
+maxNoise	src/world/World.cpp	/^vg::Noise maxNoise   (config_.seed + 2005u);/;"	f	line:529
+meshChunkData	src/render/WorldRenderer.cpp	/^return meshChunkData(c.x, c.y, c.z);/;"	f	line:583
+meshChunksDeferred	src/render/WorldRenderer.cpp	/^meshChunksDeferred(chunks);/;"	f	line:692
+meshChunksDeferred	src/render/WorldRenderer.cpp	/^meshChunksDeferred(slice);/;"	f	line:748
+meshChunksDeferred	src/render/WorldRenderer.h	/^void meshChunksDeferred(const std::vector<glm::ivec3>& chunks);/;"	f	line:267
+meshed	src/render/WorldRenderer.cpp	/^std::vector<MeshData> meshed(coords.size());/;"	f	line:579
+mieG	assets/sky.yaml	/^mieG/;"	m	line:41
+milkyWay	assets/sky.yaml	/^milkyWay/;"	m	line:163
+minNoise	src/world/World.cpp	/^vg::Noise minNoise   (config_.seed + 1004u);/;"	f	line:528
+mipLevelsFor	src/render/TextureArray.h	/^static uint32_t mipLevelsFor(int width, int height);/;"	f	line:75
+moonColor	assets/sky.yaml	/^moonColor/;"	m	line:123
+moonIntensity	assets/sky.yaml	/^moonIntensity/;"	m	line:143
+moonSizeDeg	assets/sky.yaml	/^moonSizeDeg/;"	m	line:124
+moonlight	assets/sky.yaml	/^moonlight/;"	m	line:140
+moveAxis	src/player/PlayerController.cpp	/^moveAxis(feet_, -climbed, 1);/;"	f	line:236
+moveAxis	src/player/PlayerController.cpp	/^moveAxis(feet_, delta.x, 0);/;"	f	line:210
+moveAxis	src/player/PlayerController.cpp	/^moveAxis(feet_, delta.y, 1);/;"	f	line:242
+moveAxis	src/player/PlayerController.cpp	/^moveAxis(feet_, delta.z, 2);/;"	f	line:213
+moveAxis	src/player/PlayerController.cpp	/^moveAxis(feet_, kStepHeight, 1);/;"	f	line:233
+moveAxis	src/player/PlayerController.h	/^void moveAxis(glm::vec3& feet, float delta, int axis);/;"	f	line:144
+ms	src/core/App.cpp	/^ms(t0, t2));/;"	f	line:1021
+msFalloff	assets/clouds.yaml	/^msFalloff/;"	m	line:69
+msOctaves	assets/clouds.yaml	/^msOctaves/;"	m	line:68
+multiDayVariation	assets/clouds.yaml	/^multiDayVariation/;"	m	line:105
+n	src/core/App.cpp	/^glm::vec3 n(0.0f); n[f.axis] = f.sign;/;"	f	line:182
+n	src/core/App.cpp	/^glm::vec3 n(0.0f); n[f.axis] = f.sign;/;"	f	line:209
+n	src/entity/Armature.cpp	/^glm::vec3 n(0.0f); n[f.axis] = f.sign;/;"	f	line:160
+n	src/main.cpp	/^vg::Noise n(0xBADCAB1Eu);/;"	f	line:265
+name	assets/features/birch_tree.yaml	/^name/;"	m	line:2
+name	assets/features/oak_tree.yaml	/^name/;"	m	line:4
+name	assets/features/pine_tree.yaml	/^name/;"	m	line:3
+name	assets/structures/boulder.yaml	/^name/;"	m	line:3
+name	assets/structures/pillar.yaml	/^name/;"	m	line:3
+name	assets/structures/well.yaml	/^name/;"	m	line:4
+ndc	shaders/sky.frag	/^in: layout(location = 0) in vec2 ndc;/;"	v	line:60
+ndc	shaders/sky.vert	/^out: layout(location = 0) out vec2 ndc;/;"	v	line:6
+near	src/main.cpp	/^near(bx[0].hi.y, 1.0f), "Y post = centred full-height column");/;"	f	line:641
+near	src/main.cpp	/^near(bx[0].lo.y, 0.0f) && near(bx[0].hi.y, 1.0f), "cube = one full box");/;"	f	line:633
+near_black	assets/colors.yaml	/^near_black/;"	m	line:11
+needNoise	src/world/World.cpp	/^std::vector<uint8_t> needNoise(static_cast<size_t>(counts_.y), 1);/;"	f	line:272
+nightAmbient	assets/sky.yaml	/^nightAmbient/;"	m	line:133
+nightHorizon	assets/sky.yaml	/^nightHorizon/;"	m	line:67
+nightZenith	assets/sky.yaml	/^nightZenith/;"	m	line:66
+ninePatch	src/core/Ui.cpp	/^ninePatch(x, y, w, h, layer, tint);/;"	f	line:179
+noiseFor	src/clouds/CloudNoise.cpp	/^FastNoise& noiseFor(uint32_t seed) {/;"	f	line:40
+normalise	tools/codeindex/verify_comments.py	/^def normalise(code: str) -> str:/;"	f	line:109
+old	src/world/World.cpp	/^std::vector<uint8_t> old(static_cast<size_t>(bw) * bh * bd);/;"	f	line:2074
+oldBlk	src/world/World.cpp	/^std::vector<uint8_t> oldBlk(static_cast<size_t>(bw) * sy * bd);/;"	f	line:2180
+oldBlk	src/world/World.cpp	/^std::vector<uint8_t> oldBlk(static_cast<size_t>(bw) * sy * bd);/;"	f	line:2309
+oldSky	src/world/World.cpp	/^std::vector<uint8_t> oldSky(static_cast<size_t>(bw) * (skyY1 + 1) * bd);/;"	f	line:2308
+oldSky	src/world/World.cpp	/^std::vector<uint8_t> oldSky(static_cast<size_t>(bw) * sy * bd);/;"	f	line:2179
+olive	assets/colors.yaml	/^olive/;"	m	line:26
+onSlab	src/main.cpp	/^vg::PlayerController onSlab(glm::vec3(0.5f, 5.0f, 0.5f));/;"	f	line:652
+openChestAt	src/core/App.cpp	/^openChestAt(hit.block);/;"	f	line:598
+openChestAt	src/core/App.h	/^void openChestAt(const glm::ivec3& pos);/;"	f	line:160
+ops	assets/features/birch_tree.yaml	/^ops/;"	m	line:6
+ops	assets/features/oak_tree.yaml	/^ops/;"	m	line:8
+ops	assets/features/pine_tree.yaml	/^ops/;"	m	line:7
+ores	assets/world1.yaml	/^ores/;"	m	line:193
+out	src/clouds/CloudNoise.cpp	/^std::ofstream out(file, std::ios::binary);/;"	f	line:221
+out	src/core/AppUi.cpp	/^std::vector<glm::vec3> out(previewThumb_.size());/;"	f	line:775
+out	src/core/Settings.cpp	/^std::ofstream out(path);/;"	f	line:86
+outColor	shaders/chunk.frag	/^out: layout(location = 0) out vec4 outColor;/;"	v	line:34
+outColor	shaders/composite.frag	/^out: layout(location = 0) out vec4 outColor;/;"	v	line:43
+outColor	shaders/entity.frag	/^out: layout(location = 0) out vec4 outColor;/;"	v	line:25
+outColor	shaders/sky.frag	/^out: layout(location = 0) out vec4 outColor;/;"	v	line:61
+outColor	shaders/ui.frag	/^out: layout(location = 0) out vec4 outColor;/;"	v	line:14
+ozone	assets/sky.yaml	/^ozone/;"	m	line:107
+ozoneStrength	assets/sky.yaml	/^ozoneStrength/;"	m	line:108
+p	src/clouds/CloudNoise.cpp	/^const glm::vec3 p(x * inv, y * inv, z * inv);/;"	f	line:139
+p	src/clouds/CloudNoise.cpp	/^const glm::vec3 p(x * invD, y * invD, z * invD);/;"	f	line:183
+p	src/clouds/WeatherMap.cpp	/^const glm::vec2 p(static_cast<float>(x) \/ kSize, static_cast<float>(y) \/ kSize);/;"	f	line:53
+p0	src/world/ChunkMesher.cpp	/^const glm::vec3 p0(base[0], base[1], base[2]);/;"	f	line:197
+p1	src/world/ChunkMesher.cpp	/^const glm::vec3 p1(base[0] + du[0], base[1] + du[1], base[2] + du[2]);/;"	f	line:198
+p3	src/world/ChunkMesher.cpp	/^const glm::vec3 p3(base[0] + dv[0], base[1] + dv[1], base[2] + dv[2]);/;"	f	line:201
+packLightColor	src/world/World.cpp	/^inline uint32_t packLightColor(const glm::vec3& c) {/;"	f	line:45
+packShape	src/world/Shape.h	/^constexpr uint8_t packShape(ShapeKind k, uint8_t orient) {/;"	f	line:57
+paint_face	tools/gen_critter_model.py	/^def paint_face(mat, direction, w, h):/;"	f	line:44
+paint_face	tools/gen_tool_models.py	/^def paint_face(mat, direction, w, h):/;"	f	line:49
+pair	src/entity/Particles.cpp	/^pair("lifetime", fx.lifeMin, fx.lifeMax);/;"	f	line:42
+pair	src/entity/Particles.cpp	/^pair("size", fx.sizeMin, fx.sizeMax);/;"	f	line:43
+pair	src/entity/Particles.cpp	/^pair("speed", fx.speedMin, fx.speedMax);/;"	f	line:41
+pair	src/entity/Particles.cpp	/^pair("spin", fx.spinMin, fx.spinMax);/;"	f	line:44
+panel	src/core/Ui.h	/^void panel(float x, float y, float w, float h, const glm::vec4& color);/;"	f	line:53
+parseColor	src/world/BlockRegistry.cpp	/^glm::vec3 parseColor(const YAML::Node& node, const char* key, glm::vec3 fallback) {/;"	f	line:81
+parseEquip	src/world/BlockRegistry.cpp	/^EquipSlot parseEquip(const YAML::Node& node, const char* key) {/;"	f	line:97
+parseHex	src/core/Palette.cpp	/^glm::vec3 parseHex(const std::string& value, const std::string& name) {/;"	f	line:25
+parseHexColor	src/core/ColorPalette.cpp	/^bool parseHexColor(std::string h, glm::vec3& out) {/;"	f	line:31
+parseTool	src/world/BlockRegistry.cpp	/^ToolKind parseTool(const YAML::Node& node, const char* key) {/;"	f	line:88
+parse_prtcl	tools/particle_tool.py	/^def parse_prtcl(text):/;"	f	line:45
+paste_face	scripts/gen_icons.py	/^def paste_face(canvas, tex, A, B, C):/;"	f	line:120
+patterns	assets/textures.yaml	/^patterns/;"	m	line:48
+pc	src/main.cpp	/^vg::PlayerController pc(glm::vec3(0.0f));/;"	f	line:347
+pc2	src/main.cpp	/^vg::PlayerController pc2(glm::vec3(0.0f));/;"	f	line:587
+periwinkle	assets/colors.yaml	/^periwinkle/;"	m	line:22
+perlin	src/clouds/CloudNoise.cpp	/^float perlin(glm::vec3 p, int period, uint32_t seed) {/;"	f	line:74
+perlin	src/clouds/CloudNoise.cpp	/^perlin(p * 2.0f, 2, 0xC3ACu));/;"	f	line:146
+perlin	src/utilities/noise/Noise.h	/^float perlin(float x, float y, float& dx, float& dy) const;/;"	f	line:60
+perlinGain	src/utilities/noise/NoiseMask.cpp	/^case Falloff::Gain:         return perlinGain(t, gain);/;"	f	line:33
+perlinGain	src/utilities/noise/NoiseMask.cpp	/^float perlinGain(float t, float g) {/;"	f	line:18
+pickNextState	src/clouds/CloudSystem.cpp	/^int pickNextState(int cur, uint32_t seq) {/;"	f	line:67
+pickPhysicalDevice	src/render/VulkanContext.cpp	/^pickPhysicalDevice();/;"	f	line:117
+pickPhysicalDevice	src/render/VulkanContext.h	/^void pickPhysicalDevice();/;"	f	line:110
+pillarNoise	src/world/World.cpp	/^vg::Noise pillarNoise  (config_.seed + 7300u);/;"	f	line:557
+pillarV	src/world/World.cpp	/^std::vector<float> pillarV(static_cast<size_t>(N) * N);/;"	f	line:959
+pixels	src/clouds/WeatherMap.cpp	/^std::vector<uint8_t> pixels(static_cast<size_t>(kSize) * kSize * 2);/;"	f	line:50
+pixels	src/render/Screenshot.cpp	/^std::vector<unsigned char> pixels(bytes);/;"	f	line:81
+pixels	src/render/TextureArray.cpp	/^std::vector<unsigned char> pixels(layerBytes * layerCount);/;"	f	line:89
+placeBlockAt	src/core/App.cpp	/^case PendingEdit::Place:   placeBlockAt(e.pos, e.id, e.metadata); break;/;"	f	line:663
+placeBlockAt	src/core/App.cpp	/^placeBlockAt(t, placeId);/;"	f	line:606
+placeBlockAt	src/core/App.h	/^void placeBlockAt(const glm::ivec3& t, uint16_t id, uint8_t metadata = 0);/;"	f	line:78
+planets	assets/sky.yaml	/^planets/;"	m	line:171
+plum	assets/colors.yaml	/^plum/;"	m	line:18
+poll	src/core/Input.h	/^InputState poll();/;"	f	line:69
+pollEvents	src/core/Window.h	/^void pollEvents() const;/;"	f	line:40
+populateDebugMessengerCreateInfo	src/render/VulkanContext.cpp	/^populateDebugMessengerCreateInfo(debugInfo);/;"	f	line:177
+populateDebugMessengerCreateInfo	src/render/VulkanContext.cpp	/^populateDebugMessengerCreateInfo(info);/;"	f	line:191
+populateDebugMessengerCreateInfo	src/render/VulkanContext.cpp	/^void populateDebugMessengerCreateInfo(VkDebugUtilsMessengerCreateInfoEXT& info) {/;"	f	line:69
+port_open	tools/hub.py	/^def port_open(port):/;"	f	line:68
+powder	assets/clouds.yaml	/^powder/;"	m	line:62
+primarySteps	assets/clouds.yaml	/^primarySteps/;"	m	line:76
+processMeshResults	src/render/WorldRenderer.cpp	/^processMeshResults(budget);/;"	f	line:894
+processMeshResults	src/render/WorldRenderer.h	/^void processMeshResults(int budget);/;"	f	line:300
+processRemeshQueue	src/render/WorldRenderer.cpp	/^processRemeshQueue(budget);/;"	f	line:896
+processRemeshQueue	src/render/WorldRenderer.h	/^void processRemeshQueue(int budget);/;"	f	line:303
+pushQuad	src/render/UiRenderer.cpp	/^pushQuad(x, y, x + w, y + h, whiteU_, whiteV_, whiteU_, whiteV_, color);/;"	f	line:406
+put	src/core/App.cpp	/^put(bx + i, floorY, bz + z, floor);/;"	f	line:1364
+put	src/core/App.cpp	/^put(bx + i, topY + 1, bz + z, 0);/;"	f	line:1366
+put	src/player/ChestStore.cpp	/^put(&count, sizeof count);/;"	f	line:45
+put	src/player/ChestStore.cpp	/^put(&kVersion, sizeof kVersion);/;"	f	line:36
+put	src/player/ChestStore.cpp	/^put(&p.x, sizeof p.x);/;"	f	line:51
+put	src/player/ChestStore.cpp	/^put(&p.y, sizeof p.y);/;"	f	line:52
+put	src/player/ChestStore.cpp	/^put(&p.z, sizeof p.z);/;"	f	line:53
+put	src/player/ChestStore.cpp	/^put(&s.blockId, sizeof s.blockId);/;"	f	line:55
+put	src/player/ChestStore.cpp	/^put(&s.count, sizeof s.count);/;"	f	line:56
+put	src/player/ChestStore.cpp	/^put(kMagic, 4);/;"	f	line:35
+put	src/player/PlayerSave.h	/^put(&cr, 1);/;"	f	line:64
+put	src/player/PlayerSave.h	/^put(&e, sizeof e);/;"	f	line:72
+put	src/player/PlayerSave.h	/^put(&feet, sizeof feet);/;"	f	line:58
+put	src/player/PlayerSave.h	/^put(&health, sizeof health);/;"	f	line:61
+put	src/player/PlayerSave.h	/^put(&kVersion, sizeof kVersion);/;"	f	line:57
+put	src/player/PlayerSave.h	/^put(&n, sizeof n);/;"	f	line:66
+put	src/player/PlayerSave.h	/^put(&pitch, sizeof pitch);/;"	f	line:60
+put	src/player/PlayerSave.h	/^put(&s.first, sizeof s.first);/;"	f	line:68
+put	src/player/PlayerSave.h	/^put(&s.first, sizeof s.first);/;"	f	line:74
+put	src/player/PlayerSave.h	/^put(&s.second, sizeof s.second);/;"	f	line:69
+put	src/player/PlayerSave.h	/^put(&s.second, sizeof s.second);/;"	f	line:75
+put	src/player/PlayerSave.h	/^put(&selected, sizeof selected);/;"	f	line:62
+put	src/player/PlayerSave.h	/^put(&yaw, sizeof yaw);/;"	f	line:59
+put	src/player/PlayerSave.h	/^put(kMagic, 4);/;"	f	line:56
+q	src/core/App.cpp	/^const glm::quat q(1, 0, 0, 0);/;"	f	line:1091
+q	src/render/Vertex.h	/^return q(c.r) | (q(c.g) << 8) | (q(c.b) << 16) | (0xFFu << 24);/;"	f	line:129
+q	src/world/World.cpp	/^return q(c.r) | (q(c.g) << 8) | (q(c.b) << 16) | (0xFFu << 24);/;"	f	line:50
+querySwapChainSupport	src/render/VulkanContext.cpp	/^return querySwapChainSupport(physicalDevice_);/;"	f	line:325
+querySwapChainSupport	src/render/VulkanContext.h	/^SwapChainSupportDetails querySwapChainSupport(VkPhysicalDevice device) const;/;"	f	line:117
+queueRemesh	src/render/WorldRenderer.cpp	/^queueRemesh(chunks);/;"	f	line:869
+queueRemesh	src/render/WorldRenderer.h	/^void queueRemesh(const std::vector<glm::ivec3>& chunks);/;"	f	line:302
+rand01	src/entity/Particles.h	/^float rand01();/;"	f	line:96
+random_seed	assets/world.yaml	/^random_seed/;"	m	line:27
+random_seed	assets/world1.yaml	/^random_seed/;"	m	line:27
+ravFloor	src/world/World.cpp	/^std::vector<int>   ravFloor(static_cast<size_t>(N) * N);/;"	f	line:956
+ravFloorNoise	src/world/World.cpp	/^vg::Noise ravFloorNoise(config_.seed + 6550u);/;"	f	line:545
+ravLineNoise	src/world/World.cpp	/^vg::Noise ravLineNoise (config_.seed + 6600u);/;"	f	line:549
+ravMaskNoise	src/world/World.cpp	/^vg::Noise ravMaskNoise (config_.seed + 6500u);/;"	f	line:548
+ravW	src/world/World.cpp	/^std::vector<float> ravW(static_cast<size_t>(N) * N);/;"	f	line:955
+readFile	src/render/CompositeRenderer.cpp	/^std::vector<char> readFile(const std::string& path) {/;"	f	line:29
+readFile	src/render/EntityRenderer.cpp	/^std::vector<char> readFile(const std::string& path) {/;"	f	line:18
+readFile	src/render/Pipeline.cpp	/^std::vector<char> readFile(const std::string& path) {/;"	f	line:24
+readFile	src/render/UiRenderer.cpp	/^std::vector<char> readFile(const std::string& path) {/;"	f	line:38
+recipes	assets/recipes.yaml	/^recipes/;"	m	line:21
+recipes	tools/recipe_tool.py	/^def recipes():/;"	f	line:172
+recipes_data	tools/hub.py	/^def recipes_data():/;"	f	line:151
+recipes_list	tools/recipe_tool.py	/^def recipes_list(doc):/;"	f	line:86
+recomputeLight	src/world/World.h	/^void recomputeLight();/;"	f	line:144
+record	src/render/CompositeRenderer.h	/^void record(VkCommandBuffer cmd, VkExtent2D screen, VkExtent2D lowRes, const Fog& fog);/;"	f	line:87
+record	src/render/UiRenderer.h	/^void record(VkCommandBuffer cmd, uint32_t frameIndex, VkExtent2D extent);/;"	f	line:116
+recordCommandBuffer	src/render/Renderer.cpp	/^recordCommandBuffer(cmd, imageIndex, recordPre, recordScene, recordUi);/;"	f	line:336
+recordCull	src/render/WorldRenderer.h	/^void recordCull(VkCommandBuffer cmd, uint32_t frameIndex);/;"	f	line:181
+recordPendingUploads	src/render/WorldRenderer.h	/^void recordPendingUploads(VkCommandBuffer cmd);/;"	f	line:169
+recordPre	src/render/Renderer.cpp	/^recordPre(cmd, currentFrame_, offscreen_->extent());/;"	f	line:240
+recordScene	src/render/Renderer.cpp	/^recordScene(cmd, currentFrame_, lowExtent);/;"	f	line:263
+recordUi	src/render/Renderer.cpp	/^recordUi(cmd, currentFrame_, swapExtent);/;"	f	line:283
+recordWrite	src/render/LightAtlas.h	/^void recordWrite(VkCommandBuffer cmd, int slot, const uint8_t* rgba);/;"	f	line:90
+recreate	src/render/Swapchain.h	/^void recreate();/;"	f	line:52
+rect	scripts/gen_hammer.py	/^def rect(x0, y0, x1, y1, c):/;"	f	line:18
+rect	src/render/UiRenderer.h	/^void rect(float x, float y, float w, float h, const glm::vec4& color);/;"	f	line:74
+refreshPaletteCache	src/core/App.cpp	/^refreshPaletteCache();/;"	f	line:1390
+refreshPaletteCache	src/core/App.h	/^void refreshPaletteCache();/;"	f	line:171
+reg	src/main.cpp	/^vg::BlockRegistry reg(assetDir + "\/blocks.yaml");/;"	f	line:284
+registry_	src/world/World.cpp	/^registry_(blocksFile) {/;"	f	line:136
+reliefNoise	src/world/World.cpp	/^vg::Noise reliefNoise(config_.seed + 7007u);/;"	f	line:526
+relightAndMark	src/world/World.cpp	/^relightAndMark(blockLight_, true, blkY0, blkY1);/;"	f	line:2112
+relightAndMark	src/world/World.cpp	/^relightAndMark(skyLight_, false, skyY0, skyY1);/;"	f	line:2111
+relightBox	src/world/World.cpp	/^relightBox(b.x, b.y, b.z, b.w, dirty);/;"	f	line:2455
+relightBox	src/world/World.h	/^void relightBox(int x0, int x1, int z0, int z1, std::vector<glm::ivec3>& dirty);/;"	f	line:292
+relightBoxes	src/world/World.h	/^void relightBoxes(const std::vector<glm::ivec4>& boxes, std::vector<glm::ivec3>& dirty);/;"	f	line:223
+relightField	src/world/World.cpp	/^relightField(blockLight_, true, x0, x1, 0, sy - 1, z0, z1);/;"	f	line:2194
+relightField	src/world/World.cpp	/^relightField(blockLight_, true, x0, x1, 0, sy - 1, z0, z1);/;"	f	line:2332
+relightField	src/world/World.cpp	/^relightField(blockLight_, true, x0, x1, 0, sy - 1, z0, z1);/;"	f	line:2336
+relightField	src/world/World.cpp	/^relightField(field, emitter, x0, x1, y0, y1, z0, z1);/;"	f	line:2082
+relightField	src/world/World.cpp	/^relightField(skyLight_, false, x0, x1, 0, skyY1, z0, z1);/;"	f	line:2330
+relightField	src/world/World.cpp	/^relightField(skyLight_, false, x0, x1, 0, skyY1, z0, z1);/;"	f	line:2335
+relightField	src/world/World.cpp	/^relightField(skyLight_, false, x0, x1, 0, sy - 1, z0, z1);/;"	f	line:2193
+remapCell	src/utilities/noise/Noise.cpp	/^float remapCell(float v) { return std::clamp(1.0f - 2.0f * v, -1.0f, 1.0f); }/;"	f	line:38
+remapCell	src/utilities/noise/Noise.cpp	/^return remapCell(f.GetCellular(x, y));/;"	f	line:105
+remapCell	src/utilities/noise/Noise.cpp	/^return remapCell(f.GetCellular(x, y, z));/;"	f	line:112
+remapf	src/clouds/CloudNoise.cpp	/^float remapf(float x, float a, float b, float c, float d) {/;"	f	line:88
+remeshAll	src/render/WorldRenderer.h	/^void remeshAll();/;"	f	line:124
+remeshChunk	src/render/WorldRenderer.h	/^void remeshChunk(int cx, int cy, int cz);/;"	f	line:109
+remeshChunks	src/render/WorldRenderer.h	/^void remeshChunks(const std::vector<glm::ivec3>& chunks);/;"	f	line:116
+remove	src/player/Inventory.h	/^int remove(uint16_t blockId, int n);/;"	f	line:80
+render_iso	tools/feature_tool.py	/^def render_iso(feat, seed, w=260, h=240):/;"	f	line:272
+requestClose	src/core/Window.h	/^void requestClose() const { glfwSetWindowShouldClose(window_, GLFW_TRUE); }/;"	f	line:39
+required	src/render/VulkanContext.cpp	/^std::set<std::string> required(kDeviceExtensions.begin(), kDeviceExtensions.end());/;"	f	line:317
+reset	src/utilities/alloc/SpanAllocator.cpp	/^reset(capacity);/;"	f	line:23
+reset	src/utilities/alloc/SpanAllocator.h	/^void reset(uint64_t capacity);/;"	f	line:62
+resetMouseDelta	src/core/Input.h	/^void resetMouseDelta() { haveLast_ = false; }/;"	f	line:74
+reshapeBlockAt	src/core/App.cpp	/^case PendingEdit::Reshape: reshapeBlockAt(e.pos, e.id, e.metadata); break;/;"	f	line:664
+reshapeBlockAt	src/core/App.cpp	/^reshapeBlockAt(hit.block, hb.id, meta);/;"	f	line:559
+reshapeBlockAt	src/core/App.h	/^void reshapeBlockAt(const glm::ivec3& b, uint16_t id, uint8_t metadata);/;"	f	line:81
+resolve	scripts/gen_textures.py	/^def resolve(color):/;"	f	line:77
+restPose	src/entity/Armature.cpp	/^LocalPose restPose(const Skeleton& skel) {/;"	f	line:36
+retireQueue	src/core/App.cpp	/^retireQueue();/;"	f	line:1009
+retireQueue	src/core/App.cpp	/^retireQueue();/;"	f	line:1035
+retireQueue	src/core/App.cpp	/^retireQueue();/;"	f	line:973
+rev	src/core/App.cpp	/^glm::mat4 rev(1.0f);/;"	f	line:1623
+ridgeNoise	src/world/World.cpp	/^vg::Noise ridgeNoise (config_.seed + 5002u);/;"	f	line:525
+right	src/core/App.cpp	/^const glm::vec3 right(view[0][0], view[1][0], view[2][0]);/;"	f	line:1800
+rise	src/main.cpp	/^vg::PlayerController rise(glm::vec3(0.0f, 100.0f, 0.0f));/;"	f	line:379
+rng	tests/span_allocator_test.cpp	/^std::mt19937 rng(kSeed);/;"	f	line:276
+rose	assets/colors.yaml	/^rose/;"	m	line:17
+roundRect	src/core/Ui.cpp	/^roundRect(x + t * w - handleW * 0.5f, y - kUnit, handleW, h + 2 * kUnit, kUnit, kCream);/;"	f	line:262
+roundRect	src/core/Ui.cpp	/^roundRect(x, y, w, h, radius, border);/;"	f	line:140
+roundRect	src/core/Ui.h	/^void roundRect(float x, float y, float w, float h, float radius, const glm::vec4& color);/;"	f	line:57
+run	src/core/App.h	/^void run(long maxFrames = -1, const std::string& screenshotPath = "");/;"	f	line:64
+runLogicTest	src/main.cpp	/^int runLogicTest(const std::string& assetDir) {/;"	f	line:137
+runLogicTest	src/main.cpp	/^return runLogicTest(VG_ASSET_DIR);/;"	f	line:1109
+runRecenter	src/main.cpp	/^runRecenter(false, bSky, bBlk);/;"	f	line:974
+runRecenter	src/main.cpp	/^runRecenter(true,  fSky, fBlk);/;"	f	line:975
+runWorldGenSelfTest	src/main.cpp	/^int runWorldGenSelfTest(const std::string& assetDir) {/;"	f	line:92
+runWorldGenSelfTest	src/main.cpp	/^return runWorldGenSelfTest(VG_ASSET_DIR);/;"	f	line:1106
+rust	assets/colors.yaml	/^rust/;"	m	line:7
+s	src/core/Ui.cpp	/^s(mx, my, mw, mh, u1, u1, u2, u2);/;"	f	line:163
+s	src/core/Ui.cpp	/^s(mx, y,  mw, cd, u1, u0, u2, u1);  s(mx, yB, mw, cd, u1, u2, u2, u3);/;"	f	line:161
+s	src/core/Ui.cpp	/^s(x,  my, cd, mh, u0, u1, u1, u2);  s(xR, my, cd, mh, u2, u1, u3, u2);/;"	f	line:162
+s	src/core/Ui.cpp	/^s(x,  y,  cd, cd, u0, u0, u1, u1);  s(xR, y,  cd, cd, u2, u0, u3, u1);/;"	f	line:159
+s	src/core/Ui.cpp	/^s(x,  yB, cd, cd, u0, u2, u1, u3);  s(xR, yB, cd, cd, u2, u2, u3, u3);/;"	f	line:160
+sa	tests/span_allocator_test.cpp	/^SpanAllocator sa(1000);/;"	f	line:96
+sa	tests/span_allocator_test.cpp	/^SpanAllocator sa(1024);/;"	f	line:60
+sa	tests/span_allocator_test.cpp	/^SpanAllocator sa(128);/;"	f	line:211
+sa	tests/span_allocator_test.cpp	/^SpanAllocator sa(256);/;"	f	line:231
+sa	tests/span_allocator_test.cpp	/^SpanAllocator sa(512);/;"	f	line:179
+sa	tests/span_allocator_test.cpp	/^SpanAllocator sa(kCap);/;"	f	line:143
+sa	tests/span_allocator_test.cpp	/^SpanAllocator sa(kCap);/;"	f	line:269
+sampleClip	src/core/App.cpp	/^sampleClip(critterRig_, critterWalk_, cr.animTime))));/;"	f	line:1744
+sampleClip	src/core/App.cpp	/^sampleClip(testEntity_, testWalk_, cr.animTime))));/;"	f	line:1751
+sampleClip	src/entity/Armature.cpp	/^LocalPose sampleClip(const Skeleton& skel, const AnimationClip& clip, float time) {/;"	f	line:98
+saturate	src/core/DayNight.cpp	/^glm::vec3 saturate(const glm::vec3& c, float k) {/;"	f	line:80
+save	src/core/Settings.h	/^void save(const std::string& path) const;/;"	f	line:75
+saveCache	src/clouds/CloudNoise.cpp	/^saveCache(cacheFile);/;"	f	line:101
+saveCache	src/clouds/CloudNoise.h	/^void saveCache(const std::string& file) const;/;"	f	line:58
+saveChests	src/core/App.cpp	/^saveChests();/;"	f	line:1958
+saveChests	src/core/App.h	/^void saveChests() const;/;"	f	line:127
+saveChunkFile	src/world/World.cpp	/^saveChunkFile(chunkPath(savePath_, cx, cy, cz), chunks_[slot]);/;"	f	line:2251
+saveChunkFile	src/world/World.cpp	/^void saveChunkFile(const std::string& path, const Chunk& c) {/;"	f	line:111
+saveChunkIfDirty	src/world/World.cpp	/^saveChunkIfDirty(cx, cy, cz);/;"	f	line:2262
+saveChunkIfDirty	src/world/World.cpp	/^saveChunkIfDirty(cx, cy, edge - dir * counts_.z);/;"	f	line:2403
+saveChunkIfDirty	src/world/World.cpp	/^saveChunkIfDirty(edge - dir * counts_.x, cy, cz);/;"	f	line:2394
+saveChunkIfDirty	src/world/World.h	/^void saveChunkIfDirty(int cx, int cy, int cz);/;"	f	line:296
+saveDirtyWindow	src/world/World.cpp	/^saveDirtyWindow();/;"	f	line:182
+saveDirtyWindow	src/world/World.cpp	/^saveDirtyWindow();/;"	f	line:2487
+saveDirtyWindow	src/world/World.h	/^void saveDirtyWindow();/;"	f	line:298
+savePlayer	src/core/App.cpp	/^savePlayer();/;"	f	line:1957
+savePlayer	src/core/App.h	/^void savePlayer() const;/;"	f	line:124
+saveScreenshot	src/render/Renderer.h	/^void saveScreenshot(const std::string& path) const;/;"	f	line:121
+save_and_deploy	tools/recipe_tool.py	/^def save_and_deploy(doc):/;"	f	line:132
+save_effect	tools/particle_tool.py	/^def save_effect():/;"	f	line:142
+scan	tools/codeindex/codeindex.py	/^def scan() -> list:/;"	f	line:272
+scatter	assets/features/birch_tree.yaml	/^scatter/;"	m	line:3
+scatter	assets/features/oak_tree.yaml	/^scatter/;"	m	line:5
+scatter	assets/features/pine_tree.yaml	/^scatter/;"	m	line:4
+scene	shaders/composite.frag	/^uniform: layout(set = 0, binding = 0) uniform sampler2D scene;/;"	v	line:13
+screen	src/render/UiRenderer.cpp	/^const glm::vec2 screen(static_cast<float>(extent.width), static_cast<float>(extent.height));/;"	f	line:507
+screenshot	src/render/Screenshot.h	/^screenshot/;"	n	line:20
+scrollCallback	src/core/Window.h	/^static void scrollCallback(GLFWwindow* window, double xoffset, double yoffset);/;"	f	line:78
+scrollSelected	src/player/Inventory.h	/^void scrollSelected(int delta) { setSelected(selected_ + delta); }/;"	f	line:65
+seed	assets/world.yaml	/^seed/;"	m	line:21
+seed	assets/world1.yaml	/^seed/;"	m	line:21
+segment	src/entity/Armature.cpp	/^segment(times, time, i, f);/;"	f	line:79
+segment	src/entity/Armature.cpp	/^segment(times, time, i, f);/;"	f	line:90
+segment	src/entity/Armature.cpp	/^void segment(const std::vector<float>& times, float time, size_t& i, float& f) {/;"	f	line:54
+serve_texture	tools/particle_tool.py	/^def serve_texture(name):/;"	f	line:127
+set	src/world/Chunk.h	/^void set(int x, int y, int z, Block b) {/;"	f	line:66
+setBlock	src/world/World.h	/^std::vector<glm::ivec3> setBlock(int wx, int wy, int wz, Block b);/;"	f	line:124
+setBlocksBatch	src/world/World.h	/^std::vector<glm::ivec3> setBlocksBatch(const std::vector<std::pair<glm::ivec3, Block>>& edits);/;"	f	line:129
+setCell	src/world/World.cpp	/^setCell(rx, topY + 1, rz, leafId, false);/;"	f	line:1291
+setCell	src/world/World.cpp	/^setCell(rx, y, rz, trunkId, y <= surfY);/;"	f	line:1278
+setChangeInterval	src/clouds/CloudSystem.h	/^void setChangeInterval(float v) { holdMin_ = v * 0.6f; holdMax_ = v * 1.4f; }/;"	f	line:118
+setClearColor	src/render/Renderer.h	/^void setClearColor(float r, float g, float b) { clearColor_ = {r, g, b, 1.0f}; }/;"	f	line:105
+setCollisionBoxesFn	src/player/PlayerController.h	/^void setCollisionBoxesFn(BoxesFn fn) { boxesFn_ = std::move(fn); }/;"	f	line:61
+setCursorDisabled	src/core/Window.h	/^void setCursorDisabled(bool disabled) const;/;"	f	line:56
+setDay	src/core/DayNight.h	/^void setDay(int d) { days_ = d; }/;"	f	line:107
+setDayLengthMinutes	src/core/DayNight.h	/^void setDayLengthMinutes(float minutes);/;"	f	line:113
+setDayZenithOverride	src/core/DayNight.h	/^void setDayZenithOverride(const glm::vec3& linearColor) { dayZenith_ = linearColor; }/;"	f	line:121
+setDensityScale	src/clouds/CloudSystem.h	/^void setDensityScale(float v) { densityScale_ = v; }/;"	f	line:112
+setErosion	src/clouds/CloudSystem.h	/^void setErosion(float v)      { erosion_ = v; }/;"	f	line:113
+setExtinction	src/clouds/CloudSystem.h	/^void setExtinction(float v)   { extinction_ = v; }/;"	f	line:115
+setFace	src/world/ChunkMesher.cpp	/^setFace(m, ob.id, false, x[d], x[u], x[v]);/;"	f	line:448
+setFace	src/world/ChunkMesher.cpp	/^setFace(m, ob.id, true, x[d] + 1, x[u], x[v]);/;"	f	line:440
+setFlySpeed	src/player/PlayerController.h	/^void setFlySpeed(float s)          { flySpeed_ = s; }/;"	f	line:125
+setFog	src/render/Renderer.h	/^void setFog(const CompositeRenderer::Fog& fog) { fog_ = fog; }/;"	f	line:110
+setFont	src/render/UiRenderer.h	/^void setFont(const std::string& fontPath);/;"	f	line:123
+setForceCoverage	src/clouds/CloudSystem.h	/^void setForceCoverage(float c){ forceCoverage_ = c; }/;"	f	line:110
+setForceType	src/clouds/CloudSystem.h	/^void setForceType(float t)    { forceType_ = t; }/;"	f	line:111
+setForcedState	src/clouds/CloudSystem.h	/^void setForcedState(int s)    { forcedState_ = s; }/;"	f	line:109
+setFrontDuration	src/clouds/CloudSystem.h	/^void setFrontDuration(float v)  { frontDuration_ = v; }/;"	f	line:117
+setFrontWidth	src/clouds/CloudSystem.h	/^void setFrontWidth(float v)     { frontWidth_ = v; }/;"	f	line:119
+setFullscreen	src/core/Window.h	/^void setFullscreen(bool on);/;"	f	line:61
+setHealth	src/player/PlayerController.h	/^void setHealth(float h);/;"	f	line:88
+setHour	src/core/DayNight.cpp	/^setHour(num("startHour", 9.0f));/;"	f	line:195
+setHour	src/core/DayNight.h	/^void setHour(float h);/;"	f	line:104
+setInvulnerable	src/player/PlayerController.h	/^void setInvulnerable(bool v) { invulnerable_ = v; }/;"	f	line:90
+setLightFalloff	src/world/World.h	/^bool setLightFalloff(int skyFalloff, int blockFalloff);/;"	f	line:135
+setMilkyWay	src/core/DayNight.h	/^void setMilkyWay(float v)       { milkyWay_ = v; }/;"	f	line:125
+setMode	src/player/PlayerController.h	/^void setMode(Mode m);/;"	f	line:70
+setMouseSensitivity	src/player/PlayerController.h	/^void setMouseSensitivity(float s) { sensitivity_ = s; }/;"	f	line:124
+setOzoneStrength	src/core/DayNight.h	/^void setOzoneStrength(float v)  { ozoneStrength_ = v; }/;"	f	line:126
+setPalette	src/render/CompositeRenderer.h	/^void setPalette(const std::vector<glm::vec3>& srgbColors);/;"	f	line:78
+setPixelScale	src/render/Renderer.h	/^void setPixelScale(uint32_t scale);/;"	f	line:96
+setRedistribution	src/utilities/noise/NoiseStack.h	/^void setRedistribution(float exponent) { redistribution_ = exponent; }/;"	f	line:136
+setRetro	src/render/WorldRenderer.h	/^void setRetro(float affine) { retroAffine_ = affine; }/;"	f	line:100
+setRetroPalette	src/render/Renderer.h	/^void setRetroPalette(const std::vector<glm::vec3>& srgbColors) {/;"	f	line:115
+setRunning	src/core/DayNight.h	/^void setRunning(bool r) { running_ = r; }/;"	f	line:114
+setSelected	src/player/Inventory.h	/^void setSelected(int i) {/;"	f	line:62
+setSkyRelightFullHeight	src/world/World.h	/^void setSkyRelightFullHeight(bool on) { skyRelightFullHeight_ = on; }/;"	f	line:228
+setSolidFn	src/player/PlayerController.h	/^void setSolidFn(SolidFn fn) { isSolid_ = std::move(fn); }/;"	f	line:60
+setSource	src/render/CompositeRenderer.h	/^void setSource(VkImageView sceneView, VkImageView depthView);/;"	f	line:67
+setSprites	src/core/Ui.h	/^void setSprites(const UiSpriteLayers& s) { sprites_ = s; haveSprites_ = true; }/;"	f	line:43
+setStarBrightness	src/core/DayNight.h	/^void setStarBrightness(float v) { starBrightness_ = v; }/;"	f	line:124
+setTerrace	src/utilities/noise/NoiseStack.h	/^void setTerrace(int levels, float sharpness) {/;"	f	line:137
+setViewBob	src/player/PlayerController.h	/^void setViewBob(bool v)            { viewBob_ = v; }/;"	f	line:126
+setVoxelize	src/clouds/CloudSystem.h	/^void setVoxelize(float v)     { voxelize_ = v; }/;"	f	line:114
+setWaterFn	src/player/PlayerController.h	/^void setWaterFn(WaterFn fn) { isWater_ = std::move(fn); }/;"	f	line:62
+setWindSpeed	src/clouds/CloudSystem.h	/^void setWindSpeed(float v);/;"	f	line:120
+setupDebugMessenger	src/render/VulkanContext.cpp	/^setupDebugMessenger();/;"	f	line:115
+setupDebugMessenger	src/render/VulkanContext.h	/^void setupDebugMessenger();/;"	f	line:109
+sha1_of	tools/codeindex/codeindex.py	/^def sha1_of(path: Path) -> str:/;"	f	line:103
+shade	scripts/gen_icons.py	/^def shade(img, factor):/;"	f	line:113
+shade	scripts/gen_textures.py	/^def shade(rgb, factor):/;"	f	line:90
+shade	tools/gen_critter_model.py	/^def shade(col, f):/;"	f	line:40
+shade	tools/gen_tool_models.py	/^def shade(col, f):/;"	f	line:45
+shape	src/utilities/noise/NoiseStack.cpp	/^return shape(c.type, v);/;"	f	line:130
+shape	src/utilities/noise/NoiseStack.cpp	/^return shape(c.type, v);/;"	f	line:147
+shapeBoxes	src/world/ChunkMesher.cpp	/^shapeBoxes(shape, shapeOrientOf(cell.metadata), wallMask, boxes);/;"	f	line:715
+shapeBoxes	src/world/Shape.cpp	/^int shapeBoxes(ShapeKind kind, uint8_t orient, uint8_t wallMask, ShapeBox out[]) {/;"	f	line:59
+shapeBoxes	src/world/Shape.h	/^int shapeBoxes(ShapeKind kind, uint8_t orient, uint8_t wallMask, ShapeBox out[]);/;"	f	line:86
+shapeIndex	src/core/ShapePicker.h	/^inline int shapeIndex(ShapeKind k) {/;"	f	line:34
+shapeKindOf	src/world/ChunkMesher.cpp	/^shapeKindOf(nb.metadata) == ShapeKind::Wall);/;"	f	line:691
+shapeKindOf	src/world/Shape.h	/^constexpr ShapeKind shapeKindOf(uint8_t metadata) {/;"	f	line:61
+shapeKindOf	src/world/World.cpp	/^shapeKindOf(nb.metadata) == ShapeKind::Wall);/;"	f	line:1578
+shapeName	src/core/AppUi.cpp	/^shapeName(kPickerShapes[i]), 0.5f, on ? kCharcoal : kCream);/;"	f	line:380
+shapeName	src/core/ShapePicker.h	/^inline const char* shapeName(ShapeKind k) {/;"	f	line:46
+shapeOrientCount	src/world/Shape.cpp	/^int shapeOrientCount(ShapeKind kind) {/;"	f	line:47
+shapeOrientOf	src/core/App.cpp	/^shapeOrientOf(hb.metadata) != (orient & 1)) {/;"	f	line:556
+shapeOrientOf	src/world/Shape.h	/^constexpr uint8_t shapeOrientOf(uint8_t metadata) {/;"	f	line:64
+shiftColumn	src/world/World.cpp	/^shiftColumn(dir, alongX, dirty, relightBoxesOut, &strip);/;"	f	line:2608
+shiftColumn	src/world/World.cpp	/^shiftColumn(targetX > originChunk_.x ? 1 : -1, true, dirty, relightBoxesOut);/;"	f	line:2506
+shiftColumn	src/world/World.cpp	/^shiftColumn(targetZ > originChunk_.z ? 1 : -1, false, dirty, relightBoxesOut);/;"	f	line:2509
+shootingStars	assets/sky.yaml	/^shootingStars/;"	m	line:174
+sideHalf	src/world/Shape.cpp	/^ShapeBox sideHalf(int s) {/;"	f	line:25
+siderealRate	assets/sky.yaml	/^siderealRate/;"	m	line:157
+size	assets/features/birch_tree.yaml	/^size/;"	m	line:4
+size	assets/features/oak_tree.yaml	/^size/;"	m	line:6
+size	assets/features/pine_tree.yaml	/^size/;"	m	line:5
+size	assets/textures.yaml	/^size/;"	m	line:33
+size_	src/render/Buffer.cpp	/^size_(other.size_) {/;"	f	line:66
+skinArray	shaders/entity.frag	/^uniform: layout(set = 0, binding = 2) uniform sampler2DArray skinArray;/;"	v	line:7
+skyOpacityAt	src/world/World.cpp	/^skyOpacityAt(x, y1 + 1, z));/;"	f	line:1912
+sky_blue	assets/colors.yaml	/^sky_blue/;"	m	line:23
+sliderRow	src/core/AppUi.cpp	/^sliderRow("Cave darkness", static_cast<float>(settings_.skyFalloff), 1.0f, 5.0f, 4, -1)));/;"	f	line:1013
+sliderRow	src/core/AppUi.cpp	/^sliderRow("Colour bits", static_cast<float>(settings_.retroColorBits), 3.0f, 8.0f, 5, -1)));/;"	f	line:1060
+sliderRow	src/core/AppUi.cpp	/^sliderRow("Glow falloff", static_cast<float>(settings_.blockFalloff), 1.0f, 5.0f, 4, -1)));/;"	f	line:1015
+sliderRow	src/core/AppUi.cpp	/^sliderRow("Pixelate", static_cast<float>(settings_.pixelate), 0.0f, 16.0f, 16, -1)));/;"	f	line:954
+slotOrigin	src/render/LightAtlas.cpp	/^slotOrigin(slot, ox, oy, oz);/;"	f	line:150
+slotOrigin	src/render/LightAtlas.h	/^void slotOrigin(int slot, int& ox, int& oy, int& oz) const {/;"	f	line:106
+smooth	src/main.cpp	/^vg::PlayerController smooth(glm::vec3(0.5f, 0.0f, 0.5f));/;"	f	line:688
+smoothstepf	src/core/DayNight.cpp	/^float smoothstepf(float lo, float hi, float x) {/;"	f	line:26
+solid	src/entity/Critters.cpp	/^return solid(ifloor(x), ifloor(y), ifloor(z));/;"	f	line:40
+solidAt	src/entity/Critters.cpp	/^solidAt(nx, c.pos.y + 1.1f, nz);/;"	f	line:59
+spawn	src/entity/Critters.h	/^void spawn(const glm::vec3& feet);/;"	f	line:49
+spawnCritters	src/core/App.cpp	/^spawnCritters();/;"	f	line:327
+spawnEffect	src/entity/Particles.h	/^void spawnEffect(const ParticleEffect& fx, const glm::vec3& center, uint32_t layer);/;"	f	line:84
+srgbToLinear	src/core/DayNight.cpp	/^float srgbToLinear(float c) {/;"	f	line:58
+srgbToLinear	src/core/DayNight.cpp	/^return srgbToLinear(static_cast<float>(std::stoi(v.substr(o, 2), nullptr, 16)) \/ 255.0f);/;"	f	line:98
+srgbToLinear	src/core/Palette.cpp	/^float srgbToLinear(float c) {/;"	f	line:21
+stack	src/world/World.cpp	/^std::vector<Chunk*>   stack(static_cast<size_t>(counts_.y));/;"	f	line:255
+stack	src/world/World.cpp	/^std::vector<Chunk*>   stack(static_cast<size_t>(counts_.y));/;"	f	line:2555
+stageMesh	src/render/WorldRenderer.cpp	/^stageMesh(m, stage, vtxDst, vtxSize, idxSrc, idxDst, idxSize);/;"	f	line:617
+stageMesh	src/render/WorldRenderer.cpp	/^stageMesh(r.data, up.stage, up.vtxDst, up.vtxSize, up.idxSrc, up.idxDst, up.idxSize);/;"	f	line:439
+stampTree	src/world/World.cpp	/^stampTree(kind, trunkId, leafId, rootX, rootZ, surfY, hgt);/;"	f	line:1357
+starBrightness	assets/sky.yaml	/^starBrightness/;"	m	line:160
+starExtinction	assets/sky.yaml	/^starExtinction/;"	m	line:168
+startHour	assets/sky.yaml	/^startHour/;"	m	line:14
+startWorkers	src/render/WorldRenderer.cpp	/^startWorkers(world_.streamWorkers());/;"	f	line:162
+startWorkers	src/render/WorldRenderer.h	/^void startWorkers(int n);/;"	f	line:295
+start_tool	tools/hub.py	/^def start_tool(tool):/;"	f	line:86
+stbi_image_free	src/core/App.cpp	/^stbi_image_free(data);/;"	f	line:111
+stbi_image_free	src/core/AppUi.cpp	/^stbi_image_free(px);/;"	f	line:744
+stbi_image_free	src/render/TextureArray.cpp	/^stbi_image_free(data);/;"	f	line:65
+stbi_image_free	src/render/TextureArray.cpp	/^stbi_image_free(data);/;"	f	line:71
+stbtt_GetFontVMetrics	src/render/UiRenderer.cpp	/^stbtt_GetFontVMetrics(&info, &asc, &desc, &gap);/;"	f	line:104
+stepBox	src/world/Shape.cpp	/^ShapeBox stepBox(int s, float ylo, float yhi) {/;"	f	line:36
+stepFor	src/main.cpp	/^stepFor(airborne, idle, 2.0f);/;"	f	line:393
+stepFor	src/main.cpp	/^stepFor(climb, walkFwd, 1.0f);/;"	f	line:680
+stepFor	src/main.cpp	/^stepFor(crouch, sneakFwd, 0.5f);/;"	f	line:407
+stepFor	src/main.cpp	/^stepFor(drown, idle, drown.maxAir() + 3.0f);/;"	f	line:387
+stepFor	src/main.cpp	/^stepFor(dry, idle, 1.0f);/;"	f	line:369
+stepFor	src/main.cpp	/^stepFor(fell, diag, 1.0f);/;"	f	line:423
+stepFor	src/main.cpp	/^stepFor(held, sneakDiag, 1.0f);/;"	f	line:426
+stepFor	src/main.cpp	/^stepFor(onSlab, idle, 2.0f);/;"	f	line:659
+stepFor	src/main.cpp	/^stepFor(rise, jumpIn, 0.5f);/;"	f	line:382
+stepFor	src/main.cpp	/^stepFor(smooth, idle, 0.2f);/;"	f	line:692
+stepFor	src/main.cpp	/^stepFor(smooth, walkFwd, 1.5f);/;"	f	line:705
+stepFor	src/main.cpp	/^stepFor(walk, fwd, 0.5f);/;"	f	line:403
+stepFor	src/main.cpp	/^stepFor(wet, idle, 1.0f);/;"	f	line:374
+stockCreative	src/core/App.cpp	/^stockCreative();/;"	f	line:348
+stockCreative	src/core/App.cpp	/^stockCreative();/;"	f	line:504
+stockCreative	src/core/App.h	/^void stockCreative();/;"	f	line:191
+stone_gray	assets/colors.yaml	/^stone_gray/;"	m	line:14
+stopWorkers	src/render/WorldRenderer.cpp	/^stopWorkers();/;"	f	line:176
+stopWorkers	src/render/WorldRenderer.h	/^void stopWorkers();/;"	f	line:296
+streamBarrier	src/render/WorldRenderer.h	/^void streamBarrier();/;"	f	line:136
+streamPump	src/render/WorldRenderer.h	/^void streamPump(int budget);/;"	f	line:148
+streamRemesh	src/render/WorldRenderer.cpp	/^streamRemesh(all);/;"	f	line:719
+streamRemesh	src/render/WorldRenderer.cpp	/^streamRemesh(deferredStartup_);/;"	f	line:168
+streamRemesh	src/render/WorldRenderer.h	/^void streamRemesh(const std::vector<glm::ivec3>& chunks);/;"	f	line:142
+streamWindow	src/core/App.h	/^void streamWindow();/;"	f	line:134
+stream_tuning	assets/world.yaml	/^stream_tuning/;"	m	line:85
+stream_tuning	assets/world1.yaml	/^stream_tuning/;"	m	line:79
+stream_workers	assets/world.yaml	/^stream_workers/;"	m	line:42
+stream_workers	assets/world1.yaml	/^stream_workers/;"	m	line:42
+streaming	assets/world.yaml	/^streaming/;"	m	line:36
+streaming	assets/world1.yaml	/^streaming/;"	m	line:36
+strip_block_comments_stateful	tools/codeindex/codeindex.py	/^def strip_block_comments_stateful(lines):/;"	f	line:113
+strip_comments	tools/codeindex/verify_comments.py	/^def strip_comments(src: str) -> str:/;"	f	line:38
+struct_list	tools/structure_tool.py	/^def struct_list():/;"	f	line:87
+struct_to_cells	tools/structure_tool.py	/^def struct_to_cells(doc):/;"	f	line:94
+structures	assets/world1.yaml	/^structures/;"	m	line:138
+sum	src/core/AppUi.cpp	/^glm::vec3 sum(0.0f);/;"	f	line:731
+sunColor	assets/sky.yaml	/^sunColor/;"	m	line:119
+sunGlow	assets/sky.yaml	/^sunGlow/;"	m	line:122
+sunIntensity	assets/clouds.yaml	/^sunIntensity/;"	m	line:63
+sunIntensity	assets/sky.yaml	/^sunIntensity/;"	m	line:45
+sunSizeDeg	assets/sky.yaml	/^sunSizeDeg/;"	m	line:120
+sunlightDay	assets/sky.yaml	/^sunlightDay/;"	m	line:138
+sunlightSunset	assets/sky.yaml	/^sunlightSunset/;"	m	line:139
+sunsetDrama	assets/sky.yaml	/^sunsetDrama/;"	m	line:96
+sunsetHigh	assets/sky.yaml	/^sunsetHigh/;"	m	line:77
+sunsetHorizon	assets/sky.yaml	/^sunsetHorizon/;"	m	line:68
+sunsetHueVary	assets/sky.yaml	/^sunsetHueVary/;"	m	line:101
+sunsetMid	assets/sky.yaml	/^sunsetMid/;"	m	line:76
+sunsetPresets	assets/sky.yaml	/^sunsetPresets/;"	m	line:83
+sunsetStrength	assets/sky.yaml	/^sunsetStrength/;"	m	line:50
+surfNoise	src/world/World.cpp	/^vg::Noise surfNoise  (config_.seed + 6006u);/;"	f	line:534
+surface	assets/structures/boulder.yaml	/^surface/;"	m	line:5
+surface	assets/structures/pillar.yaml	/^surface/;"	m	line:5
+surface	assets/structures/well.yaml	/^surface/;"	m	line:6
+swapChunkBuffers	src/render/WorldRenderer.cpp	/^swapChunkBuffers(c.x, c.y, c.z, p, false);/;"	f	line:627
+swapChunkBuffers	src/render/WorldRenderer.cpp	/^swapChunkBuffers(cx, cy, cz, p, deferOldBuffers);/;"	f	line:416
+swapChunkBuffers	src/render/WorldRenderer.cpp	/^swapChunkBuffers(r.cx, r.cy, r.cz, p, true);/;"	f	line:441
+sweep	src/world/ChunkMesher.cpp	/^sweep(fillOpaque, emitAny, mesh.vertices, mesh.indices);/;"	f	line:504
+sweep	src/world/ChunkMesher.cpp	/^sweep(fillWater, emitWater, mesh.waterVertices, mesh.waterIndices);/;"	f	line:508
+swing	src/core/App.cpp	/^swing(3, -1.0f);/;"	f	line:1131
+swing	src/core/App.cpp	/^swing(4, +1.0f);/;"	f	line:1132
+swing	src/core/App.cpp	/^swing(5, +1.0f);/;"	f	line:1129
+swing	src/core/App.cpp	/^swing(6, -1.0f);/;"	f	line:1130
+swingLeg	src/core/App.cpp	/^swingLeg("legFL", +1.0f); swingLeg("legBR", +1.0f);/;"	f	line:1180
+swingLeg	src/core/App.cpp	/^swingLeg("legFR", -1.0f); swingLeg("legBL", -1.0f);/;"	f	line:1181
+syncCameraToBody	src/player/PlayerController.cpp	/^syncCameraToBody();/;"	f	line:145
+syncCameraToBody	src/player/PlayerController.cpp	/^syncCameraToBody();/;"	f	line:73
+syncCameraToBody	src/player/PlayerController.cpp	/^syncCameraToBody();/;"	f	line:90
+syncCameraToBody	src/player/PlayerController.h	/^void syncCameraToBody();/;"	f	line:150
+takeFromSelected	src/player/Inventory.h	/^uint16_t takeFromSelected();/;"	f	line:74
+taupe	assets/colors.yaml	/^taupe/;"	m	line:13
+teleport	src/player/PlayerController.h	/^void teleport(glm::vec3 feet);/;"	f	line:69
+test_alignment_exhausts_range	tests/span_allocator_test.cpp	/^static void test_alignment_exhausts_range() {/;"	f	line:209
+test_alignment_exhausts_range	tests/span_allocator_test.cpp	/^test_alignment_exhausts_range();/;"	f	line:356
+test_alignment_padding	tests/span_allocator_test.cpp	/^static void test_alignment_padding() {/;"	f	line:93
+test_alignment_padding	tests/span_allocator_test.cpp	/^test_alignment_padding();/;"	f	line:353
+test_fragmentation_coalescing	tests/span_allocator_test.cpp	/^static void test_fragmentation_coalescing() {/;"	f	line:138
+test_fragmentation_coalescing	tests/span_allocator_test.cpp	/^test_fragmentation_coalescing();/;"	f	line:354
+test_fuzz	tests/span_allocator_test.cpp	/^static void test_fuzz() {/;"	f	line:264
+test_fuzz	tests/span_allocator_test.cpp	/^test_fuzz();/;"	f	line:358
+test_out_of_space	tests/span_allocator_test.cpp	/^static void test_out_of_space() {/;"	f	line:178
+test_out_of_space	tests/span_allocator_test.cpp	/^test_out_of_space();/;"	f	line:355
+test_reset	tests/span_allocator_test.cpp	/^static void test_reset() {/;"	f	line:230
+test_reset	tests/span_allocator_test.cpp	/^test_reset();/;"	f	line:357
+test_simple_roundtrip	tests/span_allocator_test.cpp	/^static void test_simple_roundtrip() {/;"	f	line:59
+test_simple_roundtrip	tests/span_allocator_test.cpp	/^test_simple_roundtrip();/;"	f	line:352
+texArray	shaders/chunk.frag	/^uniform: layout(set = 0, binding = 1) uniform sampler2DArray texArray;/;"	v	line:5
+texArray	shaders/entity.frag	/^uniform: layout(set = 0, binding = 1) uniform sampler2DArray texArray;/;"	v	line:6
+texHits	src/entity/BlockbenchModel.cpp	/^std::vector<int> texHits(texNames.size(), 0);/;"	f	line:124
+textOutlined	src/core/Ui.cpp	/^textOutlined(r_, cx - w * 0.5f, y, s, scale, color);/;"	f	line:211
+textOutlined	src/core/Ui.cpp	/^textOutlined(r_, x + (w - tw) * 0.5f, y + (h - th) * 0.5f, label, kFontScale, kCream);/;"	f	line:224
+textOutlined	src/core/Ui.cpp	/^textOutlined(r_, x, y, s, scale, color);/;"	f	line:205
+textures	assets/textures.yaml	/^textures/;"	m	line:116
+tick	src/core/AppUi.cpp	/^tick(cx + g, cy - th * 0.5f, len, th);/;"	f	line:152
+tick	src/core/AppUi.cpp	/^tick(cx - g - len, cy - th * 0.5f, len, th);/;"	f	line:151
+tick	src/core/AppUi.cpp	/^tick(cx - th * 0.5f, cy + g, th, len);/;"	f	line:154
+tick	src/core/AppUi.cpp	/^tick(cx - th * 0.5f, cy - g - len, th, len);/;"	f	line:153
+tick	src/render/LightAtlas.h	/^void tick();/;"	f	line:94
+tickRetired	src/render/WorldRenderer.cpp	/^tickRetired();/;"	f	line:1150
+tickRetired	src/render/WorldRenderer.h	/^void tickRetired();/;"	f	line:292
+tileable	src/clouds/CloudNoise.cpp	/^float tileable(glm::vec3 p, int period, Sample sample) {/;"	f	line:56
+tileable	src/clouds/CloudNoise.cpp	/^return tileable(p, period, [&](float x, float y, float z) {/;"	f	line:83
+tint	src/render/Vertex.h	/^tint(tnt) {}/;"	f	line:94
+toDistFn	src/utilities/noise/Noise.cpp	/^FastNoise::CellularDistanceFunction toDistFn(Noise::Metric m) {/;"	f	line:18
+toReturnType	src/utilities/noise/Noise.cpp	/^FastNoise::CellularReturnType toReturnType(Noise::Cell c) {/;"	f	line:26
+toggle	src/core/Ui.h	/^bool toggle(float x, float y, float w, float h, const std::string& label, bool value);/;"	f	line:88
+toggleChest	src/core/App.cpp	/^toggleChest();/;"	f	line:1454
+toggleChest	src/core/App.h	/^void toggleChest();/;"	f	line:161
+toggleGameMode	src/core/App.cpp	/^toggleGameMode();/;"	f	line:1490
+toggleGameMode	src/core/App.h	/^void toggleGameMode();/;"	f	line:189
+toggleGameMode	src/core/AppUi.cpp	/^toggleGameMode();/;"	f	line:990
+toggleInventory	src/core/App.cpp	/^else toggleInventory();/;"	f	line:1467
+toggleInventory	src/core/App.cpp	/^toggleInventory();/;"	f	line:1456
+toggleInventory	src/core/App.h	/^void toggleInventory();/;"	f	line:186
+togglePause	src/core/App.cpp	/^togglePause();/;"	f	line:1461
+togglePause	src/core/App.h	/^void togglePause();/;"	f	line:185
+triggerWeatherChange	src/clouds/CloudSystem.h	/^void triggerWeatherChange()     { if (forcedState_ < 0 && !transitioning_) weatherTimer_ = 0.0f; }/;"	f	line:121
+trim	src/core/ColorPalette.cpp	/^std::string trim(const std::string& s) {/;"	f	line:23
+ttf	src/render/UiRenderer.cpp	/^std::vector<unsigned char> ttf(size);/;"	f	line:94
+turbidity	assets/sky.yaml	/^turbidity/;"	m	line:39
+twinkleSpeed	assets/sky.yaml	/^twinkleSpeed/;"	m	line:165
+typeVariation	assets/clouds.yaml	/^typeVariation/;"	m	line:88
+u	src/core/App.cpp	/^glm::vec3 u(0.0f); u[f.u] = 1.0f;/;"	f	line:183
+u	src/core/App.cpp	/^glm::vec3 u(0.0f); u[f.u] = 1.0f;/;"	f	line:210
+u	src/entity/Armature.cpp	/^glm::vec3 u(0.0f); u[f.u] = 1.0f;/;"	f	line:161
+ui	src/core/AppUi.cpp	/^Ui ui(ui_, in.cursor.x, in.cursor.y, in.pointerDown, in.pointerPressed);/;"	f	line:65
+unmap	src/render/Buffer.h	/^void unmap();/;"	f	line:57
+unpack	src/player/ChestStore.cpp	/^glm::ivec3 unpack(int64_t k) {/;"	f	line:18
+unpackLightColor	src/world/World.cpp	/^inline glm::vec3 unpackLightColor(uint32_t p) {/;"	f	line:52
+up	src/core/App.cpp	/^const glm::vec3 up(view[0][1], view[1][1], view[2][1]);/;"	f	line:1801
+update	src/clouds/CloudSystem.h	/^void update(float dt, const DayNight& dn);/;"	f	line:78
+update	src/entity/Critters.h	/^void update(float dt, const SolidFn& solid);/;"	f	line:53
+update	src/entity/ItemEntity.h	/^int update(float dt, const SolidFn& solid, const glm::vec3& playerFeet, Inventory& inv);/;"	f	line:53
+update	src/entity/Particles.h	/^void update(float dt, const SolidFn& solid);/;"	f	line:87
+update	src/player/PlayerController.h	/^void update(float dt, const InputState& input);/;"	f	line:65
+updateSurvival	src/core/App.cpp	/^updateSurvival(dt);/;"	f	line:1522
+updateSurvival	src/core/App.h	/^void updateSurvival(float dt);/;"	f	line:118
+upload	src/render/Buffer.h	/^void upload(const void* src, VkDeviceSize size);/;"	f	line:51
+upload3D	src/clouds/CloudNoise.cpp	/^upload3D(base_, kBaseSize, baseImage_, baseMem_, baseView_);/;"	f	line:103
+upload3D	src/clouds/CloudNoise.cpp	/^upload3D(detail_, kDetailSize, detailImage_, detailMem_, detailView_);/;"	f	line:104
+uploadChunkMesh	src/render/WorldRenderer.h	/^void uploadChunkMesh(int cx, int cy, int cz);/;"	f	line:261
+uploadPixels	src/render/TextureArray.cpp	/^uploadPixels(pixels, width, height, layerCount);/;"	f	line:74
+uploadPixels	src/render/TextureArray.cpp	/^uploadPixels(pixels, width, height, layerCount);/;"	f	line:96
+useAnalyticSky	assets/sky.yaml	/^useAnalyticSky/;"	m	line:32
+uv	shaders/composite.frag	/^in: layout(location = 0) in  vec2 uv;/;"	v	line:42
+uv	shaders/composite.vert	/^out: layout(location = 0) out vec2 uv;/;"	v	line:5
+uvOff	src/entity/BlockbenchModel.cpp	/^glm::vec2 uvOff(0.0f);/;"	f	line:188
+v	src/core/App.cpp	/^glm::vec3 v(0.0f); v[f.v] = 1.0f;/;"	f	line:184
+v	src/core/App.cpp	/^glm::vec3 v(0.0f); v[f.v] = 1.0f;/;"	f	line:211
+v	src/entity/Armature.cpp	/^glm::vec3 v(0.0f); v[f.v] = 1.0f;/;"	f	line:162
+validate	tools/recipe_tool.py	/^def validate(output, count, inputs, names):/;"	f	line:99
+validationLayersSupported	src/render/VulkanContext.cpp	/^bool validationLayersSupported() {/;"	f	line:80
+valueNoise	src/clouds/WeatherMap.cpp	/^float valueNoise(glm::vec2 p, int period, uint32_t seed) {/;"	f	line:32
+valueOr	src/world/BlockRegistry.cpp	/^T valueOr(const YAML::Node& node, const char* key, T fallback) {/;"	f	line:27
+valueOr	src/world/BlockRegistry.cpp	/^valueOr(entry, "light_opacity", props.opaque ? 15 : 0))));/;"	f	line:140
+variantHash	src/world/ChunkMesher.cpp	/^uint32_t variantHash(int x, int y, int z) {/;"	f	line:48
+vec3Of	src/entity/BlockbenchModel.cpp	/^glm::vec3 vec3Of(const YAML::Node& n, glm::vec3 fallback = glm::vec3(0.0f)) {/;"	f	line:27
+vendor	tools/feature_tool.py	/^def vendor(fn):  # locally-served three.js etc. -> the 3D editor works offline/;"	f	line:352
+vg	src/clouds/CloudNoise.cpp	/^vg/;"	n	line:26
+vg	src/clouds/CloudNoise.h	/^vg/;"	n	line:20
+vg	src/clouds/CloudSystem.cpp	/^vg/;"	n	line:19
+vg	src/clouds/CloudSystem.h	/^vg/;"	n	line:23
+vg	src/clouds/WeatherMap.cpp	/^vg/;"	n	line:18
+vg	src/clouds/WeatherMap.h	/^vg/;"	n	line:21
+vg	src/core/App.cpp	/^vg/;"	n	line:49
+vg	src/core/App.h	/^vg/;"	n	line:46
+vg	src/core/AppUi.cpp	/^vg/;"	n	line:39
+vg	src/core/ColorPalette.cpp	/^vg/;"	n	line:18
+vg	src/core/ColorPalette.h	/^vg/;"	n	line:18
+vg	src/core/DayNight.cpp	/^vg/;"	n	line:20
+vg	src/core/DayNight.h	/^vg/;"	n	line:19
+vg	src/core/Input.cpp	/^vg/;"	n	line:14
+vg	src/core/Input.h	/^vg/;"	n	line:14
+vg	src/core/Palette.cpp	/^vg/;"	n	line:16
+vg	src/core/Palette.h	/^vg/;"	n	line:18
+vg	src/core/Settings.cpp	/^vg/;"	n	line:16
+vg	src/core/Settings.h	/^vg/;"	n	line:15
+vg	src/core/ShapePicker.h	/^vg/;"	n	line:17
+vg	src/core/Ui.cpp	/^vg/;"	n	line:18
+vg	src/core/Ui.h	/^vg/;"	n	line:18
+vg	src/core/Window.cpp	/^vg/;"	n	line:10
+vg	src/core/Window.h	/^vg/;"	n	line:20
+vg	src/entity/Armature.cpp	/^vg/;"	n	line:13
+vg	src/entity/Armature.h	/^vg/;"	n	line:20
+vg	src/entity/BlockbenchModel.cpp	/^vg/;"	n	line:23
+vg	src/entity/BlockbenchModel.h	/^vg/;"	n	line:18
+vg	src/entity/Critters.cpp	/^vg/;"	n	line:11
+vg	src/entity/Critters.h	/^vg/;"	n	line:20
+vg	src/entity/ItemEntity.cpp	/^vg/;"	n	line:11
+vg	src/entity/ItemEntity.h	/^vg/;"	n	line:19
+vg	src/entity/Particles.cpp	/^vg/;"	n	line:15
+vg	src/entity/Particles.h	/^vg/;"	n	line:21
+vg	src/player/Camera.cpp	/^vg/;"	n	line:14
+vg	src/player/Camera.h	/^vg/;"	n	line:15
+vg	src/player/ChestStore.cpp	/^vg/;"	n	line:11
+vg	src/player/ChestStore.h	/^vg/;"	n	line:22
+vg	src/player/Crafting.cpp	/^vg/;"	n	line:13
+vg	src/player/Crafting.h	/^vg/;"	n	line:21
+vg	src/player/Equipment.h	/^vg/;"	n	line:20
+vg	src/player/Inventory.cpp	/^vg/;"	n	line:9
+vg	src/player/Inventory.h	/^vg/;"	n	line:17
+vg	src/player/PlayerController.cpp	/^vg/;"	n	line:18
+vg	src/player/PlayerController.h	/^vg/;"	n	line:23
+vg	src/player/PlayerSave.h	/^vg/;"	n	line:21
+vg	src/render/Buffer.cpp	/^vg/;"	n	line:19
+vg	src/render/Buffer.h	/^vg/;"	n	line:19
+vg	src/render/CompositeRenderer.cpp	/^vg/;"	n	line:26
+vg	src/render/CompositeRenderer.h	/^vg/;"	n	line:23
+vg	src/render/EntityRenderer.cpp	/^vg/;"	n	line:15
+vg	src/render/EntityRenderer.h	/^vg/;"	n	line:24
+vg	src/render/GpuAllocator.cpp	/^vg/;"	n	line:18
+vg	src/render/GpuAllocator.h	/^vg/;"	n	line:25
+vg	src/render/LightAtlas.cpp	/^vg/;"	n	line:21
+vg	src/render/LightAtlas.h	/^vg/;"	n	line:33
+vg	src/render/MeshArena.cpp	/^vg/;"	n	line:17
+vg	src/render/MeshArena.h	/^vg/;"	n	line:29
+vg	src/render/OffscreenTarget.cpp	/^vg/;"	n	line:19
+vg	src/render/OffscreenTarget.h	/^vg/;"	n	line:18
+vg	src/render/Pipeline.cpp	/^vg/;"	n	line:20
+vg	src/render/Pipeline.h	/^vg/;"	n	line:19
+vg	src/render/Renderer.cpp	/^vg/;"	n	line:25
+vg	src/render/Renderer.h	/^vg/;"	n	line:32
+vg	src/render/Screenshot.h	/^vg/;"	n	line:16
+vg	src/render/SkyRenderer.cpp	/^vg/;"	n	line:19
+vg	src/render/SkyRenderer.h	/^vg/;"	n	line:25
+vg	src/render/Swapchain.cpp	/^vg/;"	n	line:17
+vg	src/render/Swapchain.h	/^vg/;"	n	line:19
+vg	src/render/TextureArray.cpp	/^vg/;"	n	line:36
+vg	src/render/TextureArray.h	/^vg/;"	n	line:24
+vg	src/render/UiRenderer.cpp	/^vg/;"	n	line:35
+vg	src/render/UiRenderer.h	/^vg/;"	n	line:25
+vg	src/render/Vertex.h	/^vg/;"	n	line:26
+vg	src/render/VulkanContext.cpp	/^vg/;"	n	line:17
+vg	src/render/VulkanContext.h	/^vg/;"	n	line:22
+vg	src/render/VulkanUtils.h	/^vg/;"	n	line:18
+vg	src/render/WorldRenderer.cpp	/^vg/;"	n	line:47
+vg	src/render/WorldRenderer.h	/^vg/;"	n	line:35
+vg	src/utilities/alloc/SpanAllocator.cpp	/^vg/;"	n	line:13
+vg	src/utilities/alloc/SpanAllocator.h	/^vg/;"	n	line:18
+vg	src/utilities/hash/Hash.h	/^vg/;"	n	line:30
+vg	src/utilities/noise/Noise.cpp	/^vg/;"	n	line:12
+vg	src/utilities/noise/Noise.h	/^vg/;"	n	line:18
+vg	src/utilities/noise/NoiseLoad.h	/^vg/;"	n	line:24
+vg	src/utilities/noise/NoiseMask.cpp	/^vg/;"	n	line:12
+vg	src/utilities/noise/NoiseMask.h	/^vg/;"	n	line:18
+vg	src/utilities/noise/NoiseStack.cpp	/^vg/;"	n	line:12
+vg	src/utilities/noise/NoiseStack.h	/^vg/;"	n	line:22
+vg	src/world/Block.h	/^vg/;"	n	line:15
+vg	src/world/BlockRegistry.cpp	/^vg/;"	n	line:21
+vg	src/world/BlockRegistry.h	/^vg/;"	n	line:24
+vg	src/world/Chunk.h	/^vg/;"	n	line:18
+vg	src/world/ChunkMesher.cpp	/^vg/;"	n	line:23
+vg	src/world/ChunkMesher.h	/^vg/;"	n	line:22
+vg	src/world/Feature.cpp	/^vg/;"	n	line:24
+vg	src/world/Feature.h	/^vg/;"	n	line:23
+vg	src/world/Raycast.cpp	/^vg/;"	n	line:18
+vg	src/world/Raycast.h	/^vg/;"	n	line:21
+vg	src/world/Shape.cpp	/^vg/;"	n	line:13
+vg	src/world/Shape.h	/^vg/;"	n	line:20
+vg	src/world/Structure.cpp	/^vg/;"	n	line:23
+vg	src/world/Structure.h	/^vg/;"	n	line:20
+vg	src/world/World.cpp	/^vg/;"	n	line:35
+vg	src/world/World.h	/^vg/;"	n	line:29
+vg	src/world/WorldConfig.cpp	/^vg/;"	n	line:19
+vg	src/world/WorldConfig.h	/^vg/;"	n	line:17
+view_radius	assets/world.yaml	/^view_radius/;"	m	line:62
+view_radius	assets/world1.yaml	/^view_radius/;"	m	line:62
+vkAllocateCommandBuffers	src/render/VulkanContext.cpp	/^vkAllocateCommandBuffers(device_, &alloc, &cmd);/;"	f	line:365
+vkBeginCommandBuffer	src/render/VulkanContext.cpp	/^vkBeginCommandBuffer(cmd, &begin);/;"	f	line:370
+vkBindBufferMemory	src/render/Buffer.cpp	/^vkBindBufferMemory(ctx_->device(), buffer_, alloc_.memory, alloc_.offset);/;"	f	line:41
+vkBindImageMemory	src/clouds/CloudNoise.cpp	/^vkBindImageMemory(device, image, memory, 0);/;"	f	line:262
+vkBindImageMemory	src/render/LightAtlas.cpp	/^vkBindImageMemory(ctx.device(), image_, memory_, 0);/;"	f	line:65
+vkBindImageMemory	src/render/VulkanUtils.cpp	/^vkBindImageMemory(ctx.device(), outImage, outMemory, 0);/;"	f	line:52
+vkCmdBeginRenderPass	src/render/Renderer.cpp	/^vkCmdBeginRenderPass(cmd, &rpInfo, VK_SUBPASS_CONTENTS_INLINE);/;"	f	line:258
+vkCmdBeginRenderPass	src/render/Renderer.cpp	/^vkCmdBeginRenderPass(cmd, &uiInfo, VK_SUBPASS_CONTENTS_INLINE);/;"	f	line:280
+vkCmdBindIndexBuffer	src/render/WorldRenderer.cpp	/^vkCmdBindIndexBuffer(cmd, arena_->indexBuffer(), 0, VK_INDEX_TYPE_UINT32);/;"	f	line:1194
+vkCmdBindPipeline	src/render/CompositeRenderer.cpp	/^vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_);/;"	f	line:296
+vkCmdBindPipeline	src/render/EntityRenderer.cpp	/^vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_);/;"	f	line:304
+vkCmdBindPipeline	src/render/SkyRenderer.cpp	/^vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_);/;"	f	line:275
+vkCmdBindPipeline	src/render/UiRenderer.cpp	/^vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_);/;"	f	line:499
+vkCmdBindPipeline	src/render/WorldRenderer.cpp	/^vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cullPipeline_);/;"	f	line:1128
+vkCmdBindPipeline	src/render/WorldRenderer.cpp	/^vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_->handle());/;"	f	line:1163
+vkCmdBindPipeline	src/render/WorldRenderer.cpp	/^vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, waterPipeline_->handle());/;"	f	line:1214
+vkCmdBindPipeline	src/render/WorldRenderer.cpp	/^vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, waterPipeline_->handle());/;"	f	line:1284
+vkCmdBindVertexBuffers	src/render/EntityRenderer.cpp	/^vkCmdBindVertexBuffers(cmd, 0, 1, &vb, &zero);/;"	f	line:320
+vkCmdBindVertexBuffers	src/render/UiRenderer.cpp	/^vkCmdBindVertexBuffers(cmd, 0, 1, &vb, &offset);/;"	f	line:515
+vkCmdBindVertexBuffers	src/render/WorldRenderer.cpp	/^vkCmdBindVertexBuffers(cmd, 0, 1, &arenaVtx, &zero);/;"	f	line:1193
+vkCmdCopyBuffer	src/render/Buffer.cpp	/^vkCmdCopyBuffer(cmd, staging.handle(), local.handle(), 1, &copy);/;"	f	line:121
+vkCmdCopyBuffer	src/render/WorldRenderer.cpp	/^vkCmdCopyBuffer(cmd, p.stage.handle(), arena_->indexBuffer(), 1, &c);/;"	f	line:458
+vkCmdCopyBuffer	src/render/WorldRenderer.cpp	/^vkCmdCopyBuffer(cmd, p.stage.handle(), arena_->vertexBuffer(), 1, &c);/;"	f	line:454
+vkCmdCopyBuffer	src/render/WorldRenderer.cpp	/^vkCmdCopyBuffer(cmd, stage.handle(), arena_->indexBuffer(), 1, &c);/;"	f	line:413
+vkCmdCopyBuffer	src/render/WorldRenderer.cpp	/^vkCmdCopyBuffer(cmd, stage.handle(), arena_->indexBuffer(), 1, &cp);/;"	f	line:624
+vkCmdCopyBuffer	src/render/WorldRenderer.cpp	/^vkCmdCopyBuffer(cmd, stage.handle(), arena_->vertexBuffer(), 1, &c);/;"	f	line:409
+vkCmdCopyBuffer	src/render/WorldRenderer.cpp	/^vkCmdCopyBuffer(cmd, stage.handle(), arena_->vertexBuffer(), 1, &cp);/;"	f	line:620
+vkCmdCopyBufferToImage	src/render/LightAtlas.cpp	/^vkCmdCopyBufferToImage(cmd, staging.handle(), image_, VK_IMAGE_LAYOUT_GENERAL, 1, &c);/;"	f	line:156
+vkCmdDispatch	src/render/WorldRenderer.cpp	/^vkCmdDispatch(cmd, (slotCount + 63) \/ 64, 1, 1);/;"	f	line:1135
+vkCmdDraw	src/render/CompositeRenderer.cpp	/^vkCmdDraw(cmd, 3, 1, 0, 0);/;"	f	line:339
+vkCmdDraw	src/render/EntityRenderer.cpp	/^vkCmdDraw(cmd, s.count, 1, s.first, 0);/;"	f	line:329
+vkCmdDraw	src/render/SkyRenderer.cpp	/^vkCmdDraw(cmd, 3, 1, 0, 0);/;"	f	line:285
+vkCmdDraw	src/render/UiRenderer.cpp	/^vkCmdDraw(cmd, count, 1, 0, 0);/;"	f	line:516
+vkCmdEndRenderPass	src/render/Renderer.cpp	/^vkCmdEndRenderPass(cmd);/;"	f	line:266
+vkCmdEndRenderPass	src/render/Renderer.cpp	/^vkCmdEndRenderPass(cmd);/;"	f	line:285
+vkCmdPipelineBarrier	src/render/VulkanUtils.cpp	/^vkCmdPipelineBarrier(cmd, srcStage, dstStage, 0, 0, nullptr, 0, nullptr, 1, &barrier);/;"	f	line:115
+vkCmdPushConstants	src/render/CompositeRenderer.cpp	/^vkCmdPushConstants(cmd, pipelineLayout_, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pc), &pc);/;"	f	line:316
+vkCmdPushConstants	src/render/EntityRenderer.cpp	/^vkCmdPushConstants(cmd, pipelineLayout_, pcStages, 0, sizeof(glm::mat4), &s.model);/;"	f	line:326
+vkCmdPushConstants	src/render/WorldRenderer.cpp	/^vkCmdPushConstants(cmd, cullPipelineLayout_, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pc), &pc);/;"	f	line:1134
+vkCmdSetScissor	src/render/CompositeRenderer.cpp	/^vkCmdSetScissor(cmd, 0, 1, &scissor);/;"	f	line:302
+vkCmdSetScissor	src/render/EntityRenderer.cpp	/^vkCmdSetScissor(cmd, 0, 1, &scissor);/;"	f	line:314
+vkCmdSetScissor	src/render/SkyRenderer.cpp	/^vkCmdSetScissor(cmd, 0, 1, &scissor);/;"	f	line:281
+vkCmdSetScissor	src/render/UiRenderer.cpp	/^vkCmdSetScissor(cmd, 0, 1, &scissor);/;"	f	line:505
+vkCmdSetScissor	src/render/WorldRenderer.cpp	/^vkCmdSetScissor(cmd, 0, 1, &scissor);/;"	f	line:1175
+vkCmdSetViewport	src/render/CompositeRenderer.cpp	/^vkCmdSetViewport(cmd, 0, 1, &viewport);/;"	f	line:300
+vkCmdSetViewport	src/render/EntityRenderer.cpp	/^vkCmdSetViewport(cmd, 0, 1, &viewport);/;"	f	line:310
+vkCmdSetViewport	src/render/SkyRenderer.cpp	/^vkCmdSetViewport(cmd, 0, 1, &viewport);/;"	f	line:279
+vkCmdSetViewport	src/render/UiRenderer.cpp	/^vkCmdSetViewport(cmd, 0, 1, &viewport);/;"	f	line:503
+vkCmdSetViewport	src/render/WorldRenderer.cpp	/^vkCmdSetViewport(cmd, 0, 1, &viewport);/;"	f	line:1170
+vkCreateFence	src/render/Renderer.cpp	/^vkCreateFence(device, &fenceInfo, nullptr, &inFlight_[i]) != VK_SUCCESS) {/;"	f	line:199
+vkCreateGraphicsPipelines	src/render/SkyRenderer.cpp	/^vkCreateGraphicsPipelines(ctx_.device(), VK_NULL_HANDLE, 1, &info, nullptr, &pipeline_);/;"	f	line:236
+vkDestroyBuffer	src/render/Buffer.cpp	/^vkDestroyBuffer(ctx_->device(), buffer_, nullptr);/;"	f	line:55
+vkDestroyCommandPool	src/render/Renderer.cpp	/^vkDestroyCommandPool(ctx_.device(), commandPool_, nullptr);/;"	f	line:75
+vkDestroyCommandPool	src/render/VulkanContext.cpp	/^vkDestroyCommandPool(device_, transientPool_, nullptr);/;"	f	line:129
+vkDestroyDevice	src/render/VulkanContext.cpp	/^vkDestroyDevice(device_, nullptr);/;"	f	line:132
+vkDestroyFence	src/render/Renderer.cpp	/^vkDestroyFence(device, f, nullptr);/;"	f	line:219
+vkDestroyFramebuffer	src/render/Renderer.cpp	/^vkDestroyFramebuffer(ctx_.device(), fb, nullptr);/;"	f	line:142
+vkDestroyFramebuffer	src/render/Swapchain.cpp	/^vkDestroyFramebuffer(device, fb, nullptr);/;"	f	line:244
+vkDestroyImageView	src/render/Swapchain.cpp	/^vkDestroyImageView(device, view, nullptr);/;"	f	line:249
+vkDestroyInstance	src/render/VulkanContext.cpp	/^vkDestroyInstance(instance_, nullptr);/;"	f	line:141
+vkDestroyRenderPass	src/render/Renderer.cpp	/^vkDestroyRenderPass(ctx_.device(), uiRenderPass_, nullptr);/;"	f	line:70
+vkDestroyRenderPass	src/render/Swapchain.cpp	/^vkDestroyRenderPass(ctx_.device(), renderPass_, nullptr);/;"	f	line:29
+vkDestroySemaphore	src/render/Renderer.cpp	/^vkDestroySemaphore(device, s, nullptr);/;"	f	line:213
+vkDestroySemaphore	src/render/Renderer.cpp	/^vkDestroySemaphore(device, s, nullptr);/;"	f	line:216
+vkDestroyShaderModule	src/render/CompositeRenderer.cpp	/^vkDestroyShaderModule(ctx_.device(), frag, nullptr);/;"	f	line:288
+vkDestroyShaderModule	src/render/CompositeRenderer.cpp	/^vkDestroyShaderModule(ctx_.device(), vert, nullptr);/;"	f	line:287
+vkDestroyShaderModule	src/render/EntityRenderer.cpp	/^vkDestroyShaderModule(ctx_.device(), frag, nullptr);/;"	f	line:203
+vkDestroyShaderModule	src/render/EntityRenderer.cpp	/^vkDestroyShaderModule(ctx_.device(), vert, nullptr);/;"	f	line:202
+vkDestroyShaderModule	src/render/Pipeline.cpp	/^vkDestroyShaderModule(ctx_->device(), frag, nullptr);/;"	f	line:241
+vkDestroyShaderModule	src/render/Pipeline.cpp	/^vkDestroyShaderModule(ctx_->device(), frag, nullptr);/;"	f	line:247
+vkDestroyShaderModule	src/render/Pipeline.cpp	/^vkDestroyShaderModule(ctx_->device(), vert, nullptr);/;"	f	line:240
+vkDestroyShaderModule	src/render/Pipeline.cpp	/^vkDestroyShaderModule(ctx_->device(), vert, nullptr);/;"	f	line:246
+vkDestroyShaderModule	src/render/SkyRenderer.cpp	/^vkDestroyShaderModule(ctx_.device(), frag, nullptr);/;"	f	line:238
+vkDestroyShaderModule	src/render/SkyRenderer.cpp	/^vkDestroyShaderModule(ctx_.device(), vert, nullptr);/;"	f	line:237
+vkDestroyShaderModule	src/render/UiRenderer.cpp	/^vkDestroyShaderModule(ctx_.device(), frag, nullptr);/;"	f	line:368
+vkDestroyShaderModule	src/render/UiRenderer.cpp	/^vkDestroyShaderModule(ctx_.device(), vert, nullptr);/;"	f	line:367
+vkDestroyShaderModule	src/render/WorldRenderer.cpp	/^vkDestroyShaderModule(ctx_.device(), module, nullptr);/;"	f	line:1083
+vkDestroySurfaceKHR	src/render/VulkanContext.cpp	/^vkDestroySurfaceKHR(instance_, surface_, nullptr);/;"	f	line:135
+vkDestroySwapchainKHR	src/render/Swapchain.cpp	/^vkDestroySwapchainKHR(device, swapchain_, nullptr);/;"	f	line:254
+vkDeviceWaitIdle	src/render/Renderer.cpp	/^vkDeviceWaitIdle(ctx_.device());/;"	f	line:148
+vkDeviceWaitIdle	src/render/Renderer.cpp	/^vkDeviceWaitIdle(ctx_.device());/;"	f	line:63
+vkDeviceWaitIdle	src/render/Swapchain.cpp	/^vkDeviceWaitIdle(ctx_.device());/;"	f	line:37
+vkDeviceWaitIdle	src/render/UiRenderer.cpp	/^vkDeviceWaitIdle(device);/;"	f	line:237
+vkEndCommandBuffer	src/render/VulkanContext.cpp	/^vkEndCommandBuffer(cmd);/;"	f	line:375
+vkEnumerateDeviceExtensionProperties	src/render/VulkanContext.cpp	/^vkEnumerateDeviceExtensionProperties(device, nullptr, &count, available.data());/;"	f	line:315
+vkEnumerateDeviceExtensionProperties	src/render/VulkanContext.cpp	/^vkEnumerateDeviceExtensionProperties(device, nullptr, &count, nullptr);/;"	f	line:313
+vkEnumerateInstanceLayerProperties	src/render/VulkanContext.cpp	/^vkEnumerateInstanceLayerProperties(&count, available.data());/;"	f	line:84
+vkEnumerateInstanceLayerProperties	src/render/VulkanContext.cpp	/^vkEnumerateInstanceLayerProperties(&count, nullptr);/;"	f	line:82
+vkEnumeratePhysicalDevices	src/render/VulkanContext.cpp	/^vkEnumeratePhysicalDevices(instance_, &count, devices.data());/;"	f	line:204
+vkEnumeratePhysicalDevices	src/render/VulkanContext.cpp	/^vkEnumeratePhysicalDevices(instance_, &count, nullptr);/;"	f	line:199
+vkFreeCommandBuffers	src/render/VulkanContext.cpp	/^vkFreeCommandBuffers(device_, transientPool_, 1, &cmd);/;"	f	line:387
+vkFreeMemory	src/render/GpuAllocator.cpp	/^vkFreeMemory(ctx_.device(), b->memory, nullptr);/;"	f	line:39
+vkFreeMemory	src/render/GpuAllocator.cpp	/^vkFreeMemory(ctx_.device(), blk->memory, nullptr);/;"	f	line:60
+vkGetBufferMemoryRequirements	src/render/Buffer.cpp	/^vkGetBufferMemoryRequirements(ctx_->device(), buffer_, &memReq);/;"	f	line:35
+vkGetDeviceQueue	src/render/VulkanContext.cpp	/^vkGetDeviceQueue(device_, queueFamilies_.graphics.value(), 0, &graphicsQueue_);/;"	f	line:270
+vkGetDeviceQueue	src/render/VulkanContext.cpp	/^vkGetDeviceQueue(device_, queueFamilies_.present.value(), 0, &presentQueue_);/;"	f	line:271
+vkGetImageMemoryRequirements	src/clouds/CloudNoise.cpp	/^vkGetImageMemoryRequirements(device, image, &req);/;"	f	line:253
+vkGetImageMemoryRequirements	src/render/LightAtlas.cpp	/^vkGetImageMemoryRequirements(ctx.device(), image_, &req);/;"	f	line:57
+vkGetImageMemoryRequirements	src/render/VulkanUtils.cpp	/^vkGetImageMemoryRequirements(ctx.device(), outImage, &memReq);/;"	f	line:42
+vkGetInstanceProcAddr	src/render/VulkanContext.cpp	/^vkGetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT"));/;"	f	line:53
+vkGetInstanceProcAddr	src/render/VulkanContext.cpp	/^vkGetInstanceProcAddr(instance, "vkDestroyDebugUtilsMessengerEXT"));/;"	f	line:63
+vkGetPhysicalDeviceFormatProperties	src/render/TextureArray.cpp	/^vkGetPhysicalDeviceFormatProperties(ctx.physicalDevice(), format, &fmtProps);/;"	f	line:118
+vkGetPhysicalDeviceFormatProperties	src/render/VulkanUtils.cpp	/^vkGetPhysicalDeviceFormatProperties(physical, format, &props);/;"	f	line:146
+vkGetPhysicalDeviceMemoryProperties	src/render/VulkanContext.cpp	/^vkGetPhysicalDeviceMemoryProperties(physicalDevice_, &memProps);/;"	f	line:393
+vkGetPhysicalDeviceProperties	src/render/VulkanContext.cpp	/^vkGetPhysicalDeviceProperties(physicalDevice_, &props);/;"	f	line:217
+vkGetPhysicalDeviceQueueFamilyProperties	src/render/VulkanContext.cpp	/^vkGetPhysicalDeviceQueueFamilyProperties(device, &count, families.data());/;"	f	line:280
+vkGetPhysicalDeviceQueueFamilyProperties	src/render/VulkanContext.cpp	/^vkGetPhysicalDeviceQueueFamilyProperties(device, &count, nullptr);/;"	f	line:278
+vkGetPhysicalDeviceSurfaceCapabilitiesKHR	src/render/VulkanContext.cpp	/^vkGetPhysicalDeviceSurfaceCapabilitiesKHR(device, surface_, &details.capabilities);/;"	f	line:331
+vkGetPhysicalDeviceSurfaceFormatsKHR	src/render/VulkanContext.cpp	/^vkGetPhysicalDeviceSurfaceFormatsKHR(device, surface_, &formatCount, details.formats.data());/;"	f	line:336
+vkGetPhysicalDeviceSurfaceFormatsKHR	src/render/VulkanContext.cpp	/^vkGetPhysicalDeviceSurfaceFormatsKHR(device, surface_, &formatCount, nullptr);/;"	f	line:334
+vkGetPhysicalDeviceSurfacePresentModesKHR	src/render/VulkanContext.cpp	/^vkGetPhysicalDeviceSurfacePresentModesKHR(device, surface_, &presentModeCount, nullptr);/;"	f	line:339
+vkGetPhysicalDeviceSurfaceSupportKHR	src/render/VulkanContext.cpp	/^vkGetPhysicalDeviceSurfaceSupportKHR(device, i, surface_, &presentSupport);/;"	f	line:287
+vkGetSwapchainImagesKHR	src/render/Swapchain.cpp	/^vkGetSwapchainImagesKHR(ctx_.device(), swapchain_, &actualCount, images_.data());/;"	f	line:105
+vkGetSwapchainImagesKHR	src/render/Swapchain.cpp	/^vkGetSwapchainImagesKHR(ctx_.device(), swapchain_, &actualCount, nullptr);/;"	f	line:103
+vkQueueSubmit	src/render/VulkanContext.cpp	/^vkQueueSubmit(graphicsQueue_, 1, &submit, VK_NULL_HANDLE);/;"	f	line:384
+vkQueueWaitIdle	src/render/VulkanContext.cpp	/^vkQueueWaitIdle(graphicsQueue_);/;"	f	line:385
+vkResetCommandBuffer	src/render/Renderer.cpp	/^vkResetCommandBuffer(cmd, 0);/;"	f	line:335
+vkResetFences	src/render/Renderer.cpp	/^vkResetFences(device, 1, &inFlight_[currentFrame_]);/;"	f	line:356
+vkUnmapMemory	src/render/GpuAllocator.cpp	/^vkUnmapMemory(ctx_.device(), b->memory);/;"	f	line:37
+vkUpdateDescriptorSets	src/render/UiRenderer.cpp	/^vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);/;"	f	line:257
+vkUpdateDescriptorSets	src/render/WorldRenderer.cpp	/^vkUpdateDescriptorSets(ctx_.device(), 3, w, 0, nullptr);/;"	f	line:1117
+vkutil	src/render/VulkanUtils.h	/^vkutil/;"	n	line:25
+vm	src/core/App.cpp	/^glm::mat4 vm(1.0f);/;"	f	line:1716
+voxelKey	src/world/Feature.h	/^static uint32_t voxelKey(int x, int y, int z) {/;"	f	line:64
+voxelize	assets/clouds.yaml	/^voxelize/;"	m	line:42
+w	src/main.cpp	/^vg::World w(wcfg, assetDir + "\/blocks.yaml");/;"	f	line:728
+w	src/main.cpp	/^vg::World w(wcfg, assetDir + "\/blocks.yaml");/;"	f	line:814
+w	src/main.cpp	/^vg::World w(wcfg, assetDir + "\/blocks.yaml");/;"	f	line:955
+waitIdle	src/render/Renderer.h	/^void waitIdle() const;/;"	f	line:88
+waitWhileMinimized	src/core/Window.h	/^void waitWhileMinimized() const;/;"	f	line:52
+walk	src/main.cpp	/^vg::PlayerController walk(glm::vec3(0.5f, 100.0f, 0.5f));/;"	f	line:401
+warpNoise	src/world/World.cpp	/^vg::Noise warpNoise    (config_.seed + 1234u);/;"	f	line:535
+weatherJitter	src/core/DayNight.cpp	/^float weatherJitter(int day, uint32_t salt, uint32_t seed) {/;"	f	line:38
+weatherLerpSec	assets/clouds.yaml	/^weatherLerpSec/;"	m	line:103
+weatherMap	shaders/sky.frag	/^uniform: layout(set = 0, binding = 3) uniform sampler2D weatherMap;/;"	v	line:58
+weatherTileSize	assets/clouds.yaml	/^weatherTileSize/;"	m	line:86
+weight	assets/structures/boulder.yaml	/^weight/;"	m	line:4
+weight	assets/structures/pillar.yaml	/^weight/;"	m	line:4
+weight	assets/structures/well.yaml	/^weight/;"	m	line:5
+wet	src/main.cpp	/^vg::PlayerController wet(glm::vec3(0.0f, 100.0f, 0.0f));/;"	f	line:372
+wind	assets/clouds.yaml	/^wind/;"	m	line:37
+wine	assets/colors.yaml	/^wine/;"	m	line:19
+workerLoop	src/render/WorldRenderer.h	/^void workerLoop();/;"	f	line:297
+world	src/entity/Armature.cpp	/^std::vector<glm::mat4> world(n, glm::mat4(1.0f));/;"	f	line:125
+worldConfigWithSettings	src/core/App.cpp	/^WorldConfig worldConfigWithSettings(const std::string& path, const Settings& s) {/;"	f	line:230
+worldMatrices	src/entity/Armature.cpp	/^std::vector<glm::mat4> worldMatrices(const Skeleton& skel, const LocalPose& pose) {/;"	f	line:123
+worley	src/clouds/CloudNoise.cpp	/^float worley(glm::vec3 p, int period, uint32_t seed) {/;"	f	line:81
+worleyFractal	src/utilities/noise/NoiseStack.cpp	/^float worleyFractal(const Noise& n, const NoiseStack::Layer& c, float sx, float sz) {/;"	f	line:28
+writeBlob	src/render/WorldRenderer.cpp	/^void writeBlob(char* p, const MeshData& m, const MeshLayout& L) {/;"	f	line:121
+writeBlob	src/render/WorldRenderer.cpp	/^writeBlob(static_cast<char*>(stage.map()), mesh, L);/;"	f	line:293
+write_json	tools/codeindex/codeindex.py	/^def write_json(entries):/;"	f	line:321
+write_manifest	tools/codeindex/codeindex.py	/^def write_manifest(entries):/;"	f	line:406
+write_png	scripts/gen_cracks.py	/^def write_png(path, img):/;"	f	line:55
+write_png	scripts/gen_textures.py	/^def write_png(path, pixels, size):/;"	f	line:248
+write_png	scripts/gen_ui.py	/^def write_png(path, img):/;"	f	line:54
+write_prtcl	tools/particle_tool.py	/^def write_prtcl(p):/;"	f	line:87
+write_symbols_md	tools/codeindex/codeindex.py	/^def write_symbols_md(entries):/;"	f	line:373
+write_tags	tools/codeindex/codeindex.py	/^def write_tags(entries):/;"	f	line:345
+zis	src/world/World.cpp	/^std::vector<int> zis(static_cast<size_t>(s.z));/;"	f	line:1681
+zis	src/world/World.cpp	/^std::vector<int> zis(static_cast<size_t>(s.z));/;"	f	line:1791
+zs	src/world/World.cpp	/^std::vector<int> zs(static_cast<size_t>(s.z));/;"	f	line:1655
+~Buffer	src/render/Buffer.h	/^~Buffer();/;"	f	line:43
+~CloudNoise	src/clouds/CloudNoise.h	/^~CloudNoise();/;"	f	line:43
+~CompositeRenderer	src/render/CompositeRenderer.h	/^~CompositeRenderer();/;"	f	line:38
+~EntityRenderer	src/render/EntityRenderer.h	/^~EntityRenderer();/;"	f	line:62
+~GpuAllocator	src/render/GpuAllocator.h	/^~GpuAllocator();/;"	f	line:83
+~LightAtlas	src/render/LightAtlas.h	/^~LightAtlas();/;"	f	line:75
+~OffscreenTarget	src/render/OffscreenTarget.h	/^~OffscreenTarget();/;"	f	line:40
+~Pipeline	src/render/Pipeline.h	/^~Pipeline();/;"	f	line:53
+~Renderer	src/render/Renderer.h	/^~Renderer();/;"	f	line:71
+~SkyRenderer	src/render/SkyRenderer.h	/^~SkyRenderer();/;"	f	line:53
+~Swapchain	src/render/Swapchain.h	/^~Swapchain();/;"	f	line:45
+~TextureArray	src/render/TextureArray.h	/^~TextureArray();/;"	f	line:60
+~UiRenderer	src/render/UiRenderer.h	/^~UiRenderer();/;"	f	line:65
+~VulkanContext	src/render/VulkanContext.h	/^~VulkanContext();/;"	f	line:73
+~WeatherMap	src/clouds/WeatherMap.h	/^~WeatherMap();/;"	f	line:43
+~Window	src/core/Window.h	/^~Window();/;"	f	line:31
+~World	src/world/World.h	/^~World();/;"	f	line:48
+~WorldRenderer	src/render/WorldRenderer.h	/^~WorldRenderer();/;"	f	line:73

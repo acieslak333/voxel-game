@@ -1,4 +1,16 @@
-﻿#include "core/App.h"
+/**
+ * @file main.cpp
+ * @brief CLI entry point and headless test runners for the voxel game.
+ *
+ * Parses command-line flags and dispatches to one of three modes:
+ * normal windowed play (vg::App::run), --selftest (headless worldgen
+ * determinism check, no GPU), or --logictest (headless game-logic suite
+ * covering mining, crafting, physics, save round-trips, and more).
+ * VG_* debug env vars (VG_MESH_TIME, VG_FRAME_TIME, VG_AUTOWALK,
+ * VG_STREAM_TIME, etc.) are read and applied inside vg::App.
+ * @see docs/CODE_INDEX.md
+ */
+#include "core/App.h"
 #include "core/Input.h"
 #include "entity/Armature.h"
 #include "entity/BlockbenchModel.h"
@@ -39,7 +51,7 @@
 
 namespace {
 
-// FNV-1a over 8 bytes â€” a cheap, stable spatial hash for snapshot testing.
+/// FNV-1a over 8 bytes — a cheap, stable spatial hash for snapshot testing.
 inline uint64_t fnv1a(uint64_t h, uint64_t v) {
     for (int i = 0; i < 8; ++i) {
         h = (h ^ (v & 0xffu)) * 0x100000001b3ull;
@@ -48,7 +60,9 @@ inline uint64_t fnv1a(uint64_t h, uint64_t v) {
     return h;
 }
 
-// Hash a world's generated blocks + baked lighting through the public accessors.
+/// Hash a world's generated blocks and baked lighting via public accessors.
+/// @param w The world to hash (all block ids, metadata, sky light, block light).
+/// @return FNV-1a digest over the entire block + light field.
 uint64_t hashWorld(const vg::World& w) {
     const glm::ivec3 s = w.sizeInBlocks();
     uint64_t h = 0xcbf29ce484222325ull;
@@ -66,21 +80,15 @@ uint64_t hashWorld(const vg::World& w) {
     return h;
 }
 
-// Headless world-generation self-test (no window/Vulkan). Uses a FIXED config
-// (independent of assets/world.yaml) so the result is config-stable, generates the
-// world twice, and checks that regeneration is bit-identical (h1 == h2) within the
-// process.
-//
-// NO GOLDEN (REVIEW R10). A recorded golden hash used to live here too, but it was
-// dead weight: (1) it goes stale every time biomes.yaml / the splines are tuned, and
-// (2) worldgen is cross-PROCESS non-deterministic — the hash can vary run-to-run
-// even though the in-process h1 == h2 holds — so a golden can never pass reliably and
-// everyone learned to ignore the failure, eroding the test's authority. The within-
-// process regen check is the meaningful invariant (worldgen is a pure function of
-// (seed, coords) for a given build), so that is all this asserts. The hash is still
-// printed for manual A/B comparison across builds in one environment. If the cross-
-// process non-determinism is ever hunted down (it also implies saved worlds may not
-// regenerate identically), a golden can be reinstated then — but as its own session.
+/**
+ * @brief Headless worldgen determinism test (no window, no Vulkan).
+ *
+ * Uses a fixed WorldConfig (independent of assets/world.yaml) and generates
+ * the world twice, asserting h1 == h2 (in-process regen is deterministic).
+ * No golden hash is maintained — REVIEW R10 explains why.
+ * @param assetDir Path to the assets directory (blocks.yaml must exist there).
+ * @return EXIT_SUCCESS if h1 == h2, EXIT_FAILURE otherwise.
+ */
 int runWorldGenSelfTest(const std::string& assetDir) {
     vg::WorldConfig cfg;
     cfg.seed          = 1337u;
@@ -115,10 +123,17 @@ int runWorldGenSelfTest(const std::string& assetDir) {
     return EXIT_SUCCESS;
 }
 
-// Headless game-logic tests (no window/Vulkan). A growing set of assertions over the
-// pure data/logic systems (mining time & tools today; crafting, save round-trips,
-// etc. as they land) so the parts that DON'T need a GPU stay verifiable in CI.
-// Exit 0 = all pass. Run with `voxelgame --logictest`.
+/**
+ * @brief Headless game-logic test suite (no window, no Vulkan).
+ *
+ * Exercises pure data/logic systems: NoiseStack primitives, Perlin analytic
+ * gradient, BlockRegistry (mining times, tool tiers, light opacity), player
+ * physics (fall damage, health, swim/drown, sneak, edge-stop, auto-step),
+ * save round-trips, crafting, chest store, equipment stats, dropped items,
+ * block shapes, lighting consistency, and the Blockbench loader.
+ * @param assetDir Path to the assets directory.
+ * @return EXIT_SUCCESS if all assertions pass, EXIT_FAILURE on any failure.
+ */
 int runLogicTest(const std::string& assetDir) {
     int failures = 0;
     auto check = [&](bool ok, const std::string& what) {
@@ -1056,17 +1071,22 @@ int runLogicTest(const std::string& assetDir) {
 
 } // namespace
 
-// Entry point. Everything interesting lives in vg::App; main() parses a few
-// optional flags, runs it, and turns any uncaught exception into a clean
-// non-zero exit + error message.
-//
-// Flags:
-//   --frames N        Run N frames then exit (headless smoke-testing / CI).
-//   --screenshot PATH Render some frames, write PATH as a PNG, then exit.
-//   --flycam          Start in free-fly looking down over the whole world
-//                     (a bird's-eye view of the procedural terrain).
-//   --selftest        Run the headless world-generation determinism test and exit
-//                     (no window). Exit code 0 = pass.
+/**
+ * @brief Program entry point.
+ *
+ * Parses optional flags and delegates to vg::App (normal play), or the
+ * headless test runners. Uncaught exceptions produce a clean non-zero exit.
+ *
+ * Flags:
+ *   --frames N        Run N frames then exit (headless smoke-testing / CI).
+ *   --screenshot PATH Render some frames, write PATH as PNG, then exit.
+ *   --flycam          Start in free-fly bird's-eye overview mode.
+ *   --selftest        Headless worldgen determinism check (no GPU). Exit 0=pass.
+ *   --logictest       Headless game-logic suite (no GPU). Exit 0=all pass.
+ * @param argc Argument count.
+ * @param argv Argument vector.
+ * @return EXIT_SUCCESS or EXIT_FAILURE.
+ */
 int main(int argc, char** argv) {
     long maxFrames = -1; // run until the window is closed
     bool framesSet = false;

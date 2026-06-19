@@ -1,3 +1,9 @@
+/**
+ * @file Noise.cpp
+ * @brief Noise method implementations: gradient and derivative-attenuated fBm, Worley remapping.
+ * @see docs/CODE_INDEX.md
+ */
+
 #include "utilities/noise/Noise.h"
 
 #include <algorithm>

@@ -1,3 +1,9 @@
+/**
+ * @file NoiseMask.cpp
+ * @brief Falloff curve evaluation (including Perlin gain and Bezier LUT) and NoiseMask::weight.
+ * @see docs/CODE_INDEX.md
+ */
+
 #include "utilities/noise/NoiseMask.h"
 
 #include <algorithm>

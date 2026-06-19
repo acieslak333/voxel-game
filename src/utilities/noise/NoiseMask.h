@@ -1,5 +1,15 @@
 #pragma once
 
+/**
+ * @file NoiseMask.h
+ * @brief NoiseMask: threshold-band + Falloff curve that converts a NoiseStack to a [0,1] weight.
+ *
+ * A NoiseMask layers a threshold band (centre + half-width) and a steepness Falloff on top
+ * of a NoiseStack, yielding a per-column probability weight used for biome block selection and
+ * feature scatter. Empty stack -> weight 1 (inert, never gates). Pure function of (seed, coords).
+ * @see docs/CODE_INDEX.md
+ */
+
 #include "utilities/noise/NoiseStack.h"
 
 #include <cstdint>
@@ -13,6 +23,7 @@ namespace vg {
 //  block fades in across the threshold edge (hard cut, linear ramp, smooth S, …).
 //  Five built-in shapes plus a user-authored Bezier curve (sampled into a LUT).
 // -----------------------------------------------------------------------------
+/** @brief Transfer curve applied across the mask's transition band. */
 enum class Falloff : uint8_t {
     Step,         // hard cutoff at 0.5 (the old boolean threshold)
     Linear,       // straight ramp
@@ -35,6 +46,7 @@ enum class Falloff : uint8_t {
 //  biome block selection (patches). Pure function of (seed, coords); empty stack =
 //  inert (weight 1), so an unauthored mask never gates anything.
 // -----------------------------------------------------------------------------
+/** @brief A NoiseStack put through a threshold band + Falloff to produce a [0,1] scatter weight. */
 struct NoiseMask {
     NoiseStack stack;             // the noise field (one or many layers)
     float   threshold = 0.0f;     // band centre, in noise units (~[-1,1])

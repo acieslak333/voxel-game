@@ -1,3 +1,13 @@
+/**
+ * @file BlockbenchModel.cpp
+ * @brief .bbmodel JSON parsing: outliner walk, box-UV cross, base64 PNG decode.
+ *
+ * Uses yaml-cpp (which parses JSON, a strict subset of YAML) to read the .bbmodel
+ * format. Walks the outliner tree recursively, creating joints for bone groups and
+ * rotated elements. Texture selection picks the most-referenced texture index.
+ * @see docs/CODE_INDEX.md
+ */
+
 #include "entity/BlockbenchModel.h"
 
 #include <yaml-cpp/yaml.h>
@@ -76,6 +86,7 @@ void boxUVRects(const glm::vec3& from, const glm::vec3& to, const glm::vec2& uv,
 
 } // namespace
 
+/// Load a .bbmodel at `path` into a BlockbenchModel. Throws std::runtime_error on failure.
 BlockbenchModel loadBlockbenchModel(const std::string& path) {
     YAML::Node root;
     try {

@@ -1,5 +1,15 @@
 #pragma once
 
+/**
+ * @file Block.h
+ * @brief Core voxel type and block-geometry enumerations.
+ *
+ * Defines the minimal per-voxel storage (Block), the geometry classification
+ * (RenderType) that controls which mesher pass emits a block's geometry, and
+ * the Face enum that indexes per-face texture layers in BlockRegistry.
+ * @see docs/CODE_INDEX.md
+ */
+
 #include <cstdint>
 
 namespace vg {
@@ -13,6 +23,15 @@ namespace vg {
 //  Keep this struct small (it is stored one-per-voxel, 4096 per chunk): more
 //  fields *may* be added, but think hard before doing so.
 // -----------------------------------------------------------------------------
+/**
+ * @brief A single voxel cell stored in a Chunk.
+ *
+ * Designed to remain small (two bytes of meaningful data per voxel, 4096 per
+ * chunk). Add fields only with care — every extra byte multiplies across the
+ * entire world window.
+ * @note id 0 is always air (the default-constructed Block). BlockRegistry
+ *       validates this invariant at load time.
+ */
 struct Block {
     uint16_t id = 0;       // block type; 0 == air, always (the default voxel)
     uint8_t  metadata = 0; // TODO(future): orientation / state (furnace lit, log axis, ...)
@@ -30,6 +49,13 @@ struct Block {
 // what lets non-cube blocks (plants, thin posts) exist alongside the voxel grid.
 // Non-cube blocks must be non-opaque so the greedy pass treats their cell as open
 // space (the ground under them still meshes, and they don't cull neighbour faces).
+/**
+ * @brief Geometry strategy used by ChunkMesher for a block type.
+ *
+ * Cube blocks go through the greedy merge pass. All other values cause
+ * ChunkMesher to emit explicit quads in a second, non-cube pass. Non-cube
+ * variants must be non-opaque so neighbouring faces are not culled.
+ */
 enum class RenderType : uint8_t {
     Cube  = 0, // full voxel cube, greedy-meshed (the default)
     Cross = 1, // two intersecting vertical quads (an X): leaves/plants. Double-sided cutout.
@@ -46,6 +72,11 @@ enum class RenderType : uint8_t {
 
 // The six faces of a cube, ordered so that index = axis*2 + (positive ? 1 : 0).
 // Used to look up per-face texture layers in the block registry.
+/**
+ * @brief Indices of the six cube faces, ordered as axis*2 + (positive ? 1 : 0).
+ *
+ * Used to index BlockProperties::faceLayers and related per-face data.
+ */
 enum Face : int {
     FaceNegX = 0,
     FacePosX = 1,

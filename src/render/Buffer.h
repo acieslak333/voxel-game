@@ -1,5 +1,17 @@
 #pragma once
 
+/**
+ * @file Buffer.h
+ * @brief RAII VkBuffer backed by a sub-allocation from the shared GpuAllocator pool.
+ *
+ * Every Buffer's device memory is a sub-allocation from one of the GpuAllocator's
+ * large VkDeviceMemory blocks (not a per-buffer vkAllocateMemory call). Host-visible
+ * blocks are kept persistently mapped by the pool, so map() is a pointer lookup and
+ * unmap() is a no-op. Move-only; copying is deleted.
+ * @warning Must be created and destroyed on the main thread only.
+ * @see docs/CODE_INDEX.md
+ */
+
 #include "render/GpuAllocator.h"
 
 #include <vulkan/vulkan.h>
@@ -20,6 +32,9 @@ class VulkanContext;
 //    * createDeviceLocal(), which uploads CPU data into fast device-local memory
 //      via a temporary staging buffer (e.g. static vertex/index buffers).
 // -----------------------------------------------------------------------------
+/**
+ * @brief Move-only RAII owner of a VkBuffer and its GpuAllocator sub-allocation.
+ */
 class Buffer {
 public:
     Buffer() = default;

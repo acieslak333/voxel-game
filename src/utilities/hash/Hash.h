@@ -1,5 +1,17 @@
 #pragma once
 
+/**
+ * @file Hash.h
+ * @brief Canonical integer hashes for worldgen: floordiv, floormod, and hash01.
+ *
+ * These formulas are the single authoritative definition of worldgen randomness.
+ * floordiv/floormod give correct negative results for placement grids straddling
+ * the origin. hash01() maps an integer cell + salt to a deterministic [0,1)
+ * value — the backbone of every scatter/placement gate and ore-vein decision.
+ * @warning Changing any constant re-rolls every generated world.
+ * @see docs/CODE_INDEX.md
+ */
+
 #include <cstdint>
 
 // -----------------------------------------------------------------------------

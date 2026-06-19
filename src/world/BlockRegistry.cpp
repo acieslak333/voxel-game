@@ -1,3 +1,14 @@
+/**
+ * @file BlockRegistry.cpp
+ * @brief YAML loader and runtime query implementation for BlockRegistry.
+ *
+ * Parses assets/blocks.yaml (world blocks) and the optional assets/items.yaml
+ * (non-placeable items) into BlockProperties, interns texture filenames into a
+ * deduplicated layer list, and resolves tool/equip/render enumerations. Also
+ * implements the mining-time and harvest-tier helpers exercised by --logictest.
+ * @see docs/CODE_INDEX.md
+ */
+
 #include "world/BlockRegistry.h"
 
 #include <yaml-cpp/yaml.h>
@@ -11,7 +22,7 @@ namespace vg {
 
 namespace {
 
-// Read an optional scalar with a default if the key is absent.
+/// Read an optional scalar with a default if the key is absent.
 template <typename T>
 T valueOr(const YAML::Node& node, const char* key, T fallback) {
     return node[key] ? node[key].as<T>() : fallback;

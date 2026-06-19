@@ -1,3 +1,12 @@
+/**
+ * @file Input.cpp
+ * @brief Input::poll() — reads GLFW keyboard/mouse state into an InputState.
+ *
+ * Handles WASD movement, modifier keys (Ctrl/Shift/C), edge-detected key
+ * presses (Esc/E/G/Q/F/F1/F11), mouse button edge detection with hold
+ * support, hotbar wheel scrolling, and mouse-delta computation for camera look.
+ * @see docs/CODE_INDEX.md
+ */
 #include "core/Input.h"
 
 #include "core/Window.h"

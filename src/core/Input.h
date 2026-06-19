@@ -1,13 +1,27 @@
 #pragma once
 
+/**
+ * @file Input.h
+ * @brief Per-frame input snapshot and GLFW input poller.
+ *
+ * InputState is a plain aggregate that carries the fully decoded input for
+ * one frame (movement axes, edge-detected key presses, mouse look delta,
+ * cursor position). Input::poll() fills one each frame from GLFW state.
+ * @see docs/CODE_INDEX.md
+ */
 #include <glm/glm.hpp>
 
 namespace vg {
 
 class Window;
 
-// Snapshot of player input for one frame, decoupled from GLFW so the player
-// controller does not depend on the windowing library.
+/**
+ * @brief Snapshot of all player input for one frame.
+ *
+ * Decoupled from GLFW so the player controller and UI have no windowing
+ * dependency. Edge-detected fields (toggleMenu, breakBlock, etc.) are true
+ * only on the single frame the transition occurs.
+ */
 struct InputState {
     glm::vec2 move{0.0f};       // x: strafe (+ = right), y: forward (+ = forward)
     bool jump          = false; // walking: jump
@@ -39,12 +53,13 @@ struct InputState {
     bool pointerPressed = false; // left mouse pressed this frame (UI click)
 };
 
-// -----------------------------------------------------------------------------
-//  Input
-// -----------------------------------------------------------------------------
-//  Polls keyboard + mouse from a Window once per frame into an InputState. Owns
-//  the small amount of state needed for mouse deltas and key edge detection.
-// -----------------------------------------------------------------------------
+/**
+ * @brief Polls keyboard and mouse from a Window into an InputState each frame.
+ *
+ * Owns the per-frame state for mouse delta computation and key edge detection
+ * (previous-frame button/key booleans). Construct once; call poll() once per
+ * frame after Window::pollEvents().
+ */
 class Input {
 public:
     explicit Input(Window& window);

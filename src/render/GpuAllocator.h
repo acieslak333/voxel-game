@@ -1,5 +1,21 @@
 #pragma once
 
+/**
+ * @file GpuAllocator.h
+ * @brief Shared block sub-allocator that backs all VkBuffer device memory (REVIEW O5).
+ *
+ * Vulkan's maxMemoryAllocationCount (typically 4096) limits live vkAllocateMemory
+ * calls. GpuAllocator sidesteps this by owning a small number of large VkDeviceMemory
+ * blocks and handing out sub-allocations (GpuAlloc) at offsets within them. Thousands
+ * of chunk buffers therefore require only a handful of device allocations. Freed ranges
+ * coalesce back into the block's free-list; blocks are retained for the allocator's
+ * lifetime. Host-visible blocks are persistently mapped.
+ *
+ * Stats are printed at teardown and when VG_MESH_TIME=1 is set.
+ * @warning Must be used on the main thread only (no internal locking).
+ * @see docs/CODE_INDEX.md
+ */
+
 #include <vulkan/vulkan.h>
 
 #include <cstdint>
@@ -33,7 +49,14 @@ class VulkanContext;
 //  locking.
 // -----------------------------------------------------------------------------
 
-// A handle to a sub-allocation: a byte range within a shared VkDeviceMemory block.
+/**
+ * @brief Handle to one sub-allocation: a byte range inside a shared VkDeviceMemory block.
+ *
+ * `spanOffset`/`spanSize` describe the full reserved range returned to the free-list on
+ * free() (it may start before `offset` when alignment forced front padding, ensuring
+ * adjacent freed spans coalesce cleanly). `mapped` is non-null for host-visible sub-
+ * allocations and points directly into the block's persistent mapping.
+ */
 struct GpuAlloc {
     static constexpr uint32_t kInvalid = 0xFFFFFFFFu;
 
@@ -50,6 +73,10 @@ struct GpuAlloc {
     [[nodiscard]] bool valid() const { return blockId != kInvalid; }
 };
 
+/**
+ * @brief Block-level GPU memory allocator; all Buffers sub-allocate from its blocks.
+ * @warning Main-thread only. No internal locking.
+ */
 class GpuAllocator {
 public:
     explicit GpuAllocator(VulkanContext& ctx);

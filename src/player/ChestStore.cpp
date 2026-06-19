@@ -1,3 +1,9 @@
+/**
+ * @file ChestStore.cpp
+ * @brief ChestStore binary serialisation and position-key unpack helper.
+ * @see docs/CODE_INDEX.md
+ */
+
 #include "player/ChestStore.h"
 
 #include <cstring>
@@ -19,6 +25,7 @@ glm::ivec3 unpack(int64_t k) {
 }
 } // namespace
 
+/// Serialise all non-empty chests to a self-describing byte buffer (magic + version + payload).
 std::vector<uint8_t> ChestStore::serialize() const {
     std::vector<uint8_t> b;
     auto put = [&](const void* p, size_t n) {
@@ -52,6 +59,7 @@ std::vector<uint8_t> ChestStore::serialize() const {
     return b;
 }
 
+/// Parse a buffer written by serialize(); returns false on bad magic, wrong version, or truncation.
 bool ChestStore::deserialize(const uint8_t* data, size_t len) {
     size_t off = 0;
     auto get = [&](void* p, size_t n) {

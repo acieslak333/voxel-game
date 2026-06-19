@@ -28,6 +28,16 @@
 
 // VERSION: 0.4.1
 
+/**
+ * @file FastNoise.h
+ * @brief VENDORED third-party noise library (Jordan Peck FastNoise v0.4.1, MIT).
+ *
+ * Not maintained or documented per-symbol by this project; it is wrapped by the
+ * deterministic adapter in utilities/noise/Noise.h. Excluded from the Doxygen
+ * build and the machine code index. Do not add project documentation here.
+ * @see docs/CODE_INDEX.md
+ */
+
 #ifndef FASTNOISE_H
 #define FASTNOISE_H
 

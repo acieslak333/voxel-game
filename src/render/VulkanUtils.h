@@ -1,5 +1,15 @@
 #pragma once
 
+/**
+ * @file VulkanUtils.h
+ * @brief Stateless image/format helper functions shared by the render subsystems.
+ *
+ * Provides createImage, createImageView, transitionImageLayout, copyBufferToImage,
+ * findSupportedFormat, and findDepthFormat. Kept separate from VulkanContext so
+ * that class stays focused on device setup and queue management.
+ * @see docs/CODE_INDEX.md
+ */
+
 #include <vulkan/vulkan.h>
 
 #include <cstdint>

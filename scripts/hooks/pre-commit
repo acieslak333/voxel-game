@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# =============================================================================
+#  pre-commit — warn (or block) when the code index is stale.
+# =============================================================================
+#  Install once per clone:   git config core.hooksPath scripts/hooks
+#  Behaviour:
+#    * Warns by default (never blocks a commit) so it can't get in your way.
+#    * Set CODEINDEX_HOOK_STRICT=1 to make a stale index BLOCK the commit.
+#  Fix a warning with:   python tools/codeindex/codeindex.py gen && git add docs/index
+#  See docs/CODE_INDEX_GUIDE.md.
+# =============================================================================
+set -u
+
+# Find a Python interpreter.
+PY=""
+for cand in python3 python; do
+    if command -v "$cand" >/dev/null 2>&1; then PY="$cand"; break; fi
+done
+if [ -z "$PY" ]; then
+    echo "[pre-commit] python not found; skipping code-index check." >&2
+    exit 0
+fi
+
+# Run the staleness check (quiet body; we print our own guidance).
+if "$PY" tools/codeindex/codeindex.py check --quiet; then
+    exit 0
+fi
+
+echo "" >&2
+echo "[pre-commit] The code index (docs/index/) is STALE relative to the source." >&2
+echo "             Regenerate and stage it:" >&2
+echo "               $PY tools/codeindex/codeindex.py gen && git add docs/index" >&2
+
+if [ "${CODEINDEX_HOOK_STRICT:-0}" = "1" ]; then
+    echo "[pre-commit] CODEINDEX_HOOK_STRICT=1 -> blocking the commit." >&2
+    exit 1
+fi
+echo "[pre-commit] (warning only; commit allowed. Set CODEINDEX_HOOK_STRICT=1 to enforce.)" >&2
+exit 0

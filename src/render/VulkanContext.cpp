@@ -1,3 +1,8 @@
+/**
+ * @file VulkanContext.cpp
+ * @brief Implements VulkanContext: instance, validation, surface, device, queues, allocator.
+ */
+
 #include "render/VulkanContext.h"
 
 #include "core/Window.h"

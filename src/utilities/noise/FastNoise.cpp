@@ -26,6 +26,16 @@
 // off every 'zix'.)
 //
 
+/**
+ * @file FastNoise.cpp
+ * @brief VENDORED third-party noise library (Jordan Peck FastNoise, MIT).
+ *
+ * Implementation of FastNoise.h. Not maintained or documented per-symbol by
+ * this project (it is wrapped by utilities/noise/Noise.h); excluded from the
+ * Doxygen build and the machine code index.
+ * @see docs/CODE_INDEX.md
+ */
+
 #include "FastNoise.h"
 
 #include <math.h>

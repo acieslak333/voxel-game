@@ -9,6 +9,10 @@ cmake-build-*/
 # Compiled shader output (generated at build time)
 *.spv
 
+# Generated API docs (Doxygen output; regenerate with `--target docs`).
+# The hand-written index under docs/ (CODE_INDEX*, index/*) IS tracked.
+/docs/doxygen/
+
 # Editor / IDE
 .vscode/
 .idea/

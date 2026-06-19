@@ -1,5 +1,16 @@
 #pragma once
 
+/**
+ * @file Swapchain.h
+ * @brief Vulkan swapchain and its size-dependent resources (image views, depth, framebuffers).
+ *
+ * Wraps the VkSwapchainKHR plus one framebuffer and image view per swapchain image.
+ * The render pass is created once (its format is stable) so pipelines remain compatible
+ * across window resizes; only the extent-dependent objects are torn down and rebuilt by
+ * recreate(). A shared depth buffer (single image, reused per framebuffer) is also managed here.
+ * @see docs/CODE_INDEX.md
+ */
+
 #include <vulkan/vulkan.h>
 
 #include <cstdint>
@@ -21,6 +32,13 @@ class Window;
 //  format does not change), so graphics pipelines built against it in later
 //  milestones stay valid. Only the size-dependent objects are recreated.
 // -----------------------------------------------------------------------------
+/**
+ * @brief Manages the VkSwapchainKHR and all per-image resources.
+ *
+ * Call recreate() after a window resize; the render pass handle remains stable
+ * across recreations so scene pipelines stay valid.
+ * @warning Must be used on the main thread only.
+ */
 class Swapchain {
 public:
     Swapchain(VulkanContext& ctx, const Window& window);

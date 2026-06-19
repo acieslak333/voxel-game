@@ -1,3 +1,15 @@
+/**
+ * @file TextureArray.cpp
+ * @brief Implements TextureArray: layer loading, staging upload, mip chain generation, sampler.
+ *
+ * uploadPixels() stages all layers into a device-local 2D_ARRAY image. If the format
+ * supports linear blit filtering, generateMipmaps() blit-downsizes each level per layer
+ * in a single command buffer (level i-1 -> TRANSFER_SRC, blit, -> SHADER_READ_ONLY).
+ * The sampler uses NEAREST mag/min (crisp voxel look) with LINEAR mipmap blending capped
+ * at LOD 3 to avoid washing distant terrain to flat average colour.
+ * stb_image is compiled in this translation unit.
+ */
+
 #include "render/TextureArray.h"
 
 #include "render/Buffer.h"

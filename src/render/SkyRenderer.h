@@ -1,5 +1,17 @@
 #pragma once
 
+/**
+ * @file SkyRenderer.h
+ * @brief Declares SkyRenderer, the procedural sky and volumetric cloud renderer.
+ *
+ * Draws a fullscreen triangle at the start of the scene pass with depth test and
+ * write disabled, so world geometry simply renders over it. Per-frame state (view
+ * ray reconstruction, DayNight colours, and the CloudSystem parameter block) is
+ * packed into one UBO per frame in flight. Cloud noise and the weather texture are
+ * bound once at construction and remain static for the session.
+ * @see docs/CODE_INDEX.md
+ */
+
 #include "clouds/CloudSystem.h"
 #include "core/DayNight.h"
 #include "render/Buffer.h"
@@ -14,18 +26,26 @@ namespace vg {
 
 class VulkanContext;
 
-// -----------------------------------------------------------------------------
-//  SkyRenderer
-// -----------------------------------------------------------------------------
-//  Draws the procedural sky (atmosphere gradient + sun + moon + the volumetric
-//  cloud layer) as a fullscreen triangle at the start of the low-res scene
-//  pass, with depth test/write disabled so the world geometry simply draws over
-//  it. Per-frame state (view ray reconstruction matrix, the DayNight colours,
-//  and the cloud system's parameter block) goes in one UBO per frame in flight;
-//  the cloud noise / weather textures are bound once at construction.
-// -----------------------------------------------------------------------------
+/**
+ * @brief Procedural sky renderer: analytic atmosphere, sun/moon discs, stars, and volumetric clouds.
+ *
+ * Renders a fullscreen triangle (sky.vert / sky.frag) at the start of the scene pass.
+ * Depth test and write are both disabled; the world draws over it afterwards. The
+ * SkyUBO packs the full DayNight::SkyState plus 13 vec4s of CloudSystem::GpuParams.
+ */
 class SkyRenderer {
 public:
+    /**
+     * @brief Construct the sky pipeline and bind the cloud noise textures.
+     * @param ctx               Vulkan device context.
+     * @param sceneRenderPass   The scene render pass the sky draws into.
+     * @param framesInFlight    Number of frames in flight.
+     * @param shaderDir         Directory containing sky.vert/frag SPIR-V.
+     * @param cloudBaseNoise    3D Perlin-Worley base noise image view (64^3).
+     * @param cloudDetailNoise  3D Worley-fBm detail noise image view (32^3).
+     * @param weatherMap        2D R8G8 weather coverage/type image view (64^2).
+     * @param cloudSampler      Repeating trilinear sampler shared by all three cloud textures.
+     */
     SkyRenderer(VulkanContext& ctx, VkRenderPass sceneRenderPass, uint32_t framesInFlight,
                 const std::string& shaderDir, VkImageView cloudBaseNoise,
                 VkImageView cloudDetailNoise, VkImageView weatherMap,
@@ -35,9 +55,22 @@ public:
     SkyRenderer(const SkyRenderer&) = delete;
     SkyRenderer& operator=(const SkyRenderer&) = delete;
 
-    // Record the sky draw. Call first inside the scene render pass. `view`/`proj`
-    // are the camera matrices used for the world (translation is stripped for the
-    // ray reconstruction; `camPos` seeds the cloud raymarch).
+    /**
+     * @brief Record the sky draw. Must be called first inside the scene render pass.
+     *
+     * Builds and uploads the SkyUBO, then issues vkCmdDraw for the fullscreen triangle.
+     * Translation is stripped from @p view for the ray reconstruction; the cloud raymarch
+     * uses @p camPos directly.
+     *
+     * @param cmd       Command buffer (inside the scene render pass).
+     * @param frameIndex Current frame-in-flight index.
+     * @param extent    Render extent.
+     * @param view      Camera view matrix (translation stripped internally).
+     * @param proj      Camera projection matrix.
+     * @param camPos    World-space camera position for the cloud raymarch.
+     * @param state     DayNight sky state (sun/moon directions, colours, etc.).
+     * @param clouds    CloudSystem GPU parameter block (13 vec4s).
+     */
     void record(VkCommandBuffer cmd, uint32_t frameIndex, VkExtent2D extent,
                 const glm::mat4& view, const glm::mat4& proj, const glm::vec3& camPos,
                 const DayNight::SkyState& state, const CloudSystem::GpuParams& clouds);

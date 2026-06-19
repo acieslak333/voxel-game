@@ -1,16 +1,25 @@
 #pragma once
 
+/**
+ * @file Settings.h
+ * @brief Player-adjustable options persisted to build/bin/assets/settings.yaml.
+ *
+ * Settings is a plain aggregate with sensible defaults. App loads it at
+ * startup (Settings::load), applies each field to the relevant subsystem via
+ * applySettings(), and writes it back when the menu closes (Settings::save).
+ * A missing or unreadable file silently keeps all defaults.
+ * @see docs/CODE_INDEX.md
+ */
 #include <string>
 
 namespace vg {
 
-// -----------------------------------------------------------------------------
-//  Settings
-// -----------------------------------------------------------------------------
-//  Player-adjustable options, persisted to a small YAML file so they survive
-//  across runs (and rebuilds). App loads this at startup, applies each field to
-//  the relevant subsystem, and writes it back when the menu closes.
-// -----------------------------------------------------------------------------
+/**
+ * @brief All player-adjustable options for one play session.
+ *
+ * Each field documents its range and effect. Tunables that belong in YAML
+ * but currently live as code constants are noted as REVIEW R7 violations.
+ */
 struct Settings {
     int         pixelate       = 4;          // 0/1 = off .. 16
     // Light lost per block while spreading (levels are 0..15, so reach ~= 15 /

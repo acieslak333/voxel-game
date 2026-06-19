@@ -1,5 +1,16 @@
 #pragma once
 
+/**
+ * @file WorldRenderer.h
+ * @brief Declares WorldRenderer, the main chunk-geometry renderer for the voxel world.
+ *
+ * Owns the shared vertex/index MeshArena, opaque + water indirect-draw pipelines,
+ * per-slot ChunkMesh metadata, and the streaming worker pool that greedy-meshes
+ * chunks off the main thread. All Vulkan object creation and draw-command recording
+ * happen on the main thread; workers only read the World.
+ * @see docs/CODE_INDEX.md
+ */
+
 #include "render/Buffer.h"
 #include "render/MeshArena.h"
 #include "world/ChunkMesher.h"
@@ -29,23 +40,33 @@ class TextureArray;
 class LightAtlas;
 class World;
 
-// -----------------------------------------------------------------------------
-//  WorldRenderer
-// -----------------------------------------------------------------------------
-//  Renders a whole World: greedy-meshes every chunk once, keeps a vertex/index
-//  buffer per chunk (indexed by chunk coordinate), and draws each non-empty one
-//  each frame with a per-chunk model matrix (its world-space translation). The
-//  pipeline, texture array and per-frame camera UBO/descriptor sets are shared
-//  across all chunks.
-//
-//  remeshChunk() rebuilds a single chunk's geometry in place — the seam for
-//  block editing and chunk streaming, so neither has to re-mesh the whole world.
-//
-//  TODO(future): stream chunks in/out as the player moves rather than meshing
-//  the entire (fixed) world up front.
-// -----------------------------------------------------------------------------
+/**
+ * @brief Renders the voxel world by greedy-meshing every chunk and issuing
+ *        GPU-indirect draw calls from a shared MeshArena.
+ *
+ * Chunk geometry (opaque + water) lives in one shared vertex arena and one index
+ * arena; record() binds them once and issues vkCmdDrawIndexedIndirect per pass.
+ * A background worker pool (stream_workers > 0 in world.yaml) meshes chunks off
+ * the main thread; workers only READ the World — all Vulkan work happens on the
+ * main thread.
+ *
+ * @warning streamBarrier() MUST be called before any World mutation (recenter,
+ *          setBlock) to ensure no worker is mid-read of the World at that point.
+ * @note    Per-slot meshVersion_ makes the newest request win; stale worker
+ *          results are silently discarded, so re-requesting a mesh is always safe.
+ * @see     CLAUDE.md "Threading invariants"
+ */
 class WorldRenderer {
 public:
+    /**
+     * @brief Construct and upload all chunk meshes. Starts the worker pool if configured.
+     * @param ctx            Vulkan device context.
+     * @param renderPass     The scene render pass these chunks draw into.
+     * @param framesInFlight Number of frames in flight (double/triple buffering).
+     * @param world          The world to render; held by reference — must outlive this.
+     * @param shaderDir      Directory containing compiled SPIR-V shaders.
+     * @param textureDir     Directory containing block texture images.
+     */
     WorldRenderer(VulkanContext& ctx, VkRenderPass renderPass, uint32_t framesInFlight,
                   const World& world, const std::string& shaderDir,
                   const std::string& textureDir);
@@ -54,92 +75,125 @@ public:
     WorldRenderer(const WorldRenderer&) = delete;
     WorldRenderer& operator=(const WorldRenderer&) = delete;
 
-    // `sunDirAmbient` = xyz: direction toward the active celestial light (sun by
-    // day, moon at night), w: ambient floor. `sunColIntensity` = rgb: linear
-    // light tint, a: sky-light intensity (1 noon .. ~0.16 midnight). Both come
-    // from DayNight::state() and feed the chunk shader's directional lighting.
-    // `heldLight` is a dynamic point light that travels with the player when they
-    // hold an emitter (a lit torch, glowstone, ...): xyz = world position, w =
-    // radius in blocks (0 = no held light). `heldLightCol` = rgb linear colour,
-    // a = intensity (0..1). Lit per-fragment in the chunk shader (no relight).
+    /**
+     * @brief Record opaque + water chunk draw commands into @p cmd for this frame.
+     *
+     * Updates the camera UBO, builds the indirect command arrays, and issues
+     * vkCmdDrawIndexedIndirect for the opaque pass then (if needed) the water pass.
+     *
+     * @param cmd              Command buffer to record into (must be inside the scene render pass).
+     * @param frameIndex       Current frame-in-flight index.
+     * @param extent           Swapchain / offscreen render extent.
+     * @param view             Camera view matrix.
+     * @param proj             Camera projection matrix.
+     * @param sunDirAmbient    xyz = direction toward the active celestial light; w = ambient floor.
+     * @param sunColIntensity  rgb = linear light tint; a = sky-light intensity (1 at noon).
+     * @param heldLight        xyz = world position of held emitter; w = radius in blocks (0 = off).
+     * @param heldLightCol     rgb = linear colour of held light; a = intensity (0..1).
+     */
     void record(VkCommandBuffer cmd, uint32_t frameIndex, VkExtent2D extent,
                 const glm::mat4& view, const glm::mat4& proj,
                 const glm::vec4& sunDirAmbient, const glm::vec4& sunColIntensity,
                 const glm::vec4& heldLight, const glm::vec4& heldLightCol);
 
-    // Affine texture-warp flag (folded into the chunk UBO's `misc.z`; 0/1).
+    /// Affine texture-warp flag (PS1 style), folded into the chunk UBO's misc.z (0 = off, 1 = on).
     void setRetro(float affine) { retroAffine_ = affine; }
 
-    // Rebuild one chunk's mesh and swap its GPU buffers, leaving every other
-    // chunk untouched. Call after the world's blocks change (see World::setBlock,
-    // which returns exactly the chunk coordinates to pass here). Meshes on the
-    // main thread (immediate, low-latency) and installs via the deferred path —
-    // no GPU drain (REVIEW R4).
+    /**
+     * @brief Remesh a single chunk after a block edit. Main-thread, no GPU drain.
+     * @param cx  Chunk X coordinate.
+     * @param cy  Chunk Y coordinate.
+     * @param cz  Chunk Z coordinate.
+     * @note Uses the deferred upload path (recordPendingUploads) — no vkDeviceWaitIdle (REVIEW R4).
+     */
     void remeshChunk(int cx, int cy, int cz);
 
-    // Remesh several chunks after an edit. Meshes them on the main thread now (so
-    // the edit shows this frame) and installs via the deferred buffer + frame-
-    // integrated upload path (installMeshBatch -> recordPendingUploads), so there
-    // is NO vkDeviceWaitIdle per edit (REVIEW R4). Pass the list World::setBlock
-    // returns after an edit.
+    /**
+     * @brief Remesh a set of chunks after a block edit. Main-thread, no GPU drain.
+     * @param chunks  List of chunk coordinates returned by World::setBlock.
+     * @note Uses the deferred upload path — no vkDeviceWaitIdle per edit (REVIEW R4).
+     */
     void remeshChunks(const std::vector<glm::ivec3>& chunks);
 
-    // Rebuild every chunk's mesh (one GPU drain for the lot). Needed when
-    // something baked into the vertex data changes globally — e.g. the light
-    // falloff (lighting lives in per-vertex attributes, not a shader uniform).
+    /**
+     * @brief Rebuild every chunk's mesh with a single GPU drain.
+     *
+     * Required when baked vertex data changes globally, e.g. light falloff tunables,
+     * since lighting lives in per-vertex attributes rather than a shader uniform.
+     */
     void remeshAll();
 
     // --- Streaming remesh API (App calls these) ------------------------------
-    // A window step dirties a whole edge column (~2*chunksZ*chunksY chunks);
-    // remeshing them all at once freezes the frame. These spread the work:
-    // with stream_workers > 0 greedy meshing runs on background threads and the
-    // main thread only uploads finished meshes; with 0 it falls back to a single-
-    // thread backlog drained a budget at a time. Block edits stay immediate
-    // (remeshChunks) — a handful of chunks.
-    //
-    //   streamBarrier(): block until no worker is mid-read of the World. MUST be
-    //     called before any World mutation (recenter / setBlock) so workers never
-    //     read torn chunk/light data. No-op without workers.
-    //   streamRemesh(chunks): (re)mesh these chunks (worker jobs or backlog).
-    //   streamPump(budget): apply up to `budget` finished meshes this frame.
+
+    /**
+     * @brief Block until all mesh workers have finished their current job.
+     *
+     * MUST be called before any World mutation (recenter, setBlock) to prevent
+     * workers reading torn chunk or light data. No-op when no workers are running.
+     *
+     * @warning Skipping this call before a World mutation is a data race.
+     */
     void streamBarrier();
+
+    /**
+     * @brief Enqueue chunks for (re)meshing via the worker pool or the single-thread backlog.
+     * @param chunks  Chunk coordinates to remesh.
+     */
     void streamRemesh(const std::vector<glm::ivec3>& chunks);
+
+    /**
+     * @brief Install up to @p budget finished worker meshes into the arena this frame.
+     * @param budget  Maximum number of meshes to process this call.
+     */
     void streamPump(int budget);
 
-    // True when no mesh worker has an outstanding job. The app gates recenter() on
-    // this so streamBarrier() never actually *blocks* the frame (it only drains an
-    // already-idle pool) — the per-boundary hitch was the barrier waiting out the
-    // previous crossing's backlog. Always true (idle) when there are no workers.
+    /**
+     * @brief Return true when all worker jobs have completed (pool is idle).
+     *
+     * App gates recenter() on this so streamBarrier() never blocks the frame —
+     * it only drains an already-idle pool. Always true when stream_workers == 0.
+     */
     [[nodiscard]] bool streamWorkersIdle() const { return jobsOutstanding_.load() == 0; }
 
-    // Record the queued streamed-mesh staging->device copies (built by streamPump)
-    // into `cmd`. MUST be called before any render pass — it's the frame's pre-pass
-    // hook (Renderer::drawFrame's recordPre), so uploads ride the frame's own submit
-    // with zero extra GPU sync. No-op if nothing is queued.
+    /**
+     * @brief Record pending staging->arena copy commands into @p cmd.
+     *
+     * Must be called BEFORE the render pass (Renderer::drawFrame's pre-pass hook) so
+     * uploads ride the frame's own submit with zero extra GPU sync. No-op if the
+     * queue is empty.
+     *
+     * @param cmd  Pre-pass command buffer, outside any render pass.
+     * @note Staging buffers are retired for framesInFlight_+1 frames to avoid
+     *       freeing a buffer that an in-flight frame is still reading.
+     */
     void recordPendingUploads(VkCommandBuffer cmd);
 
-    // GPU frustum cull (opt-in VG_GPUCULL): dispatch chunk_cull.comp to write this
-    // frame's indirect commands. MUST be called before the render pass (compute can't
-    // run inside one) — pair it with recordPendingUploads in the frame's pre-pass hook.
-    // Uses the frustum record() stored last frame (one frame stale is harmless for a
-    // conservative AABB cull). No-op when GPU cull is off.
+    /**
+     * @brief Dispatch the GPU frustum-cull compute shader (opt-in, VG_GPUCULL).
+     *
+     * Writes this frame's indirect draw commands by testing each slot's AABB against
+     * the frustum stored during the previous record() call. Must be called before
+     * the render pass. No-op when GPU cull is disabled.
+     *
+     * @param cmd        Pre-pass command buffer, outside any render pass.
+     * @param frameIndex Current frame-in-flight index.
+     */
     void recordCull(VkCommandBuffer cmd, uint32_t frameIndex);
 
+    /// Total slots with resident geometry (opaque or water).
     [[nodiscard]] std::size_t drawnChunkCount() const { return drawnChunks_; }
+    /// Total triangle count across all resident chunk meshes.
     [[nodiscard]] std::size_t triangleCount()   const { return totalTriangles_; }
-    // Per-frame culling telemetry (updated by record(), read by the VG_FRAME_TIME
-    // profiler). `visibleChunks` = slots that survived frustum culling and issued a
-    // draw this frame; `culledChunks` = slots in drawList_ skipped as off-screen;
-    // `drawCalls` = vkCmdDrawIndexed/Indirect calls recorded (opaque + water). These
-    // are what tell you whether record() is paying for too many draws (rec-bound) —
-    // drawnChunkCount() counts resident geometry, this counts what actually drew.
+    /// Slots that passed frustum culling and issued a draw this frame.
     [[nodiscard]] std::size_t visibleChunkCount() const { return lastVisibleChunks_; }
+    /// Slots skipped as off-screen this frame (VG_FRAME_TIME telemetry).
     [[nodiscard]] std::size_t culledChunkCount()  const { return lastCulledChunks_; }
+    /// vkCmdDraw* calls recorded this frame (opaque + water).
     [[nodiscard]] std::size_t drawCallCount()     const { return lastDrawCalls_; }
 
-    // The block texture array's image view + sampler, so other passes (the HUD,
-    // which draws isometric block icons) can sample the same textures.
+    /// Block texture array image view, exposed so the UI can draw isometric block icons.
     [[nodiscard]] VkImageView blockTextureView() const;
+    /// Block texture array sampler, paired with blockTextureView().
     [[nodiscard]] VkSampler   blockTextureSampler() const;
 
 private:

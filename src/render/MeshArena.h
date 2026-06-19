@@ -1,5 +1,23 @@
 #pragma once
 
+/**
+ * @file MeshArena.h
+ * @brief Shared vertex+index arena for GPU-driven chunk drawing.
+ *
+ * All chunk geometry is packed into two large device-local Buffers (one for
+ * vertices, one for indices) instead of a separate VkBuffer per chunk. The
+ * renderer binds them once and issues a single vkCmdDrawIndexedIndirect per pass.
+ *
+ * SpanAllocators track free element ranges in units of elements (not bytes), so
+ * returned offsets are directly usable as `vertexOffset` / `firstIndex` in draw
+ * commands. Capacity is fixed at construction; allocate() throws std::runtime_error
+ * on overflow (raise settings.yaml arenaVertsPerSlot or lower renderDistance).
+ *
+ * @note DRAFT: authored without a live Vulkan toolchain. See docs/GPU_DRIVEN_RENDERING.md.
+ * @warning Main-thread only (no internal locking); mesh workers produce CPU data only.
+ * @see docs/CODE_INDEX.md
+ */
+
 #include "render/Buffer.h"
 #include "utilities/alloc/SpanAllocator.h"
 #include "render/Vertex.h"
@@ -41,6 +59,10 @@ class VulkanContext;
 //  bounded, so a generous budget avoids it. Main-thread only (like GpuAllocator):
 //  all alloc/free happens on the main thread; mesh workers only produce CPU data.
 // -----------------------------------------------------------------------------
+/**
+ * @brief Two-arena (vertex + index) GPU buffer manager for all resident chunk meshes.
+ * @warning Main-thread only.
+ */
 class MeshArena {
 public:
     // A chunk's placement in the arena. baseVertex/firstIndex are element offsets

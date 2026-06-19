@@ -1,5 +1,16 @@
 #pragma once
 
+/**
+ * @file NoiseLoad.h
+ * @brief YAML parsing helpers that build NoiseStack, NoiseMask, and Bezier falloff LUTs.
+ *
+ * Header-only (all functions are inline). loadStack() parses a `layers:` sequence into a
+ * NoiseStack; loadMask() adds a threshold band + Falloff on top; buildFalloffLut() samples
+ * a Catmull-Rom curve through control points into a uniform-x LUT. Shared by
+ * TerrainGenerator and any other YAML-driven noise consumer so layer syntax is consistent.
+ * @see docs/CODE_INDEX.md
+ */
+
 #include "utilities/noise/NoiseMask.h"
 #include "utilities/noise/NoiseStack.h"
 
@@ -18,6 +29,9 @@ namespace vg {
 // empty stack if there is no `layers:` node. baseSeed salts each layer independently.
 // Shared by TerrainGenerator (shape fields) and NoiseMask (scatter / block masks) so a
 // layer is authored identically everywhere.
+/// @brief Parse a `layers:` YAML sequence into a NoiseStack; returns empty stack if absent.
+/// @param fieldNode  YAML node that may contain a `layers:` key and optional transfer fields.
+/// @param baseSeed   Salted per-layer to make each layer's noise independent.
 inline NoiseStack loadStack(const YAML::Node& fieldNode, uint32_t baseSeed) {
     NoiseStack stack;
     if (!fieldNode || !fieldNode["layers"] || !fieldNode["layers"].IsSequence()) {
@@ -81,6 +95,9 @@ inline NoiseStack loadStack(const YAML::Node& fieldNode, uint32_t baseSeed) {
 // Sample a smooth (Catmull-Rom) curve through sorted [x,y] control points into a
 // uniform-x LUT over [0,1] — the Bezier falloff's evaluation table. Points are clamped
 // to [0,1]; <2 points yields an empty LUT (the falloff then falls back to identity).
+/// @brief Build a Catmull-Rom uniform-x LUT from sorted (x, y) control points for Bezier falloff.
+/// @param pts      Control points sorted by x in [0,1]; fewer than 2 yields an empty LUT.
+/// @param samples  Number of uniformly-spaced x samples (default 65).
 inline std::vector<float> buildFalloffLut(const std::vector<std::pair<float, float>>& pts,
                                           int samples = 65) {
     std::vector<float> lut;
@@ -115,6 +132,7 @@ inline std::vector<float> buildFalloffLut(const std::vector<std::pair<float, flo
 // Parse a NoiseMask: a `layers:` stack (via loadStack) plus the threshold band and
 // steepness curve. Returns an empty mask (weight() == 1, inert) when no `layers:` are
 // authored, so a feature/biome without a mask gates nothing.
+/// @brief Parse a NoiseMask from a YAML node (layers + threshold + falloff); inert when no layers.
 inline NoiseMask loadMask(const YAML::Node& node, uint32_t seed) {
     NoiseMask m;
     if (!node) return m;

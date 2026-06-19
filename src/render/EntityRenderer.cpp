@@ -1,3 +1,8 @@
+/**
+ * @file EntityRenderer.cpp
+ * @brief EntityRenderer implementation: pipeline creation, per-frame vertex buffer
+ *        fill from baked entity meshes, and draw-call recording.
+ */
 #include "render/EntityRenderer.h"
 
 #include "render/VulkanContext.h"

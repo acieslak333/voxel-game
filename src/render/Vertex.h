@@ -1,5 +1,20 @@
 #pragma once
 
+/**
+ * @file Vertex.h
+ * @brief Packed 24-byte chunk vertex layout and helper packing utilities.
+ *
+ * Defines the Vertex struct used by the greedy mesher and the chunk draw pipeline.
+ * The layout (pos, uv, layer, light, normal, blockColor, tint) is fixed and MUST
+ * match the attribute descriptions returned by attributeDescriptions(); any change
+ * to the struct fields requires a matching update to that function and to the shaders.
+ *
+ * Also provides toHalf(), toUnorm8(), packColorRGBA8(), and withAlpha() — small
+ * inline helpers for packing linear float values into the GPU-friendly formats.
+ * @warning The Vertex memory layout must stay byte-identical to attributeDescriptions().
+ * @see docs/CODE_INDEX.md
+ */
+
 #include <vulkan/vulkan.h>
 
 #include <glm/glm.hpp>
@@ -10,11 +25,13 @@
 
 namespace vg {
 
+/// @brief Convert a 32-bit float to IEEE 754 half precision (16-bit).
 // Float -> IEEE half (16-bit). packHalf2x16 packs (x,y) with x in the low 16 bits,
 // so masking off the low half gives the half-encoding of a single float.
 [[nodiscard]] inline uint16_t toHalf(float f) {
     return static_cast<uint16_t>(glm::packHalf2x16(glm::vec2(f, 0.0f)) & 0xFFFFu);
 }
+/// @brief Clamp a float to [0,1] and quantise to an 8-bit unsigned normalised integer.
 [[nodiscard]] inline uint8_t toUnorm8(float f) {
     const float c = f < 0.0f ? 0.0f : (f > 1.0f ? 1.0f : f);
     return static_cast<uint8_t>(c * 255.0f + 0.5f);
@@ -43,6 +60,14 @@ namespace vg {
 //   * tint — biome vegetation tint, packed RGBA8 (white = none; alpha < 1 marks
 //     swayable foliage).
 // -----------------------------------------------------------------------------
+/**
+ * @brief Packed 24-byte chunk vertex consumed by the chunk draw pipeline.
+ *
+ * Fields are packed to GPU-native formats (half-float, UNORM8, UINT8, RGBA8).
+ * The packing constructor accepts the same float/vec arguments the mesher
+ * already uses, converting them transparently.
+ * @warning The struct layout must stay byte-identical to attributeDescriptions().
+ */
 struct Vertex {
     uint16_t pos[3];      // half-float chunk-local position
     uint16_t uv[2];       // half-float block-unit UV

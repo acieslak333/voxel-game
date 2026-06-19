@@ -1,3 +1,15 @@
+/**
+ * @file App.cpp
+ * @brief App subsystem construction, main loop, world mutation, and streaming.
+ *
+ * Implements App construction (member initialisation in dependency order),
+ * App::run (the per-frame poll/update/render loop), the block-edit pipeline
+ * (editBlocks, breakBlockAt, placeBlockAt, reshapeBlockAt, flushPendingEdits),
+ * world-mutation safety (drainBeforeWorldMutation, tryPrepareWorldMutation),
+ * the streaming window step (streamWindow), survival upkeep (updateSurvival),
+ * player/chest persistence, and settings application.
+ * @see docs/CODE_INDEX.md
+ */
 #include "core/App.h"
 
 #include "core/ColorPalette.h"
@@ -37,10 +49,13 @@
 namespace vg {
 
 namespace {
-// Discover Blockbench models: every assets/models/<name>/ subdir that contains a
-// <name>.bbmodel. Sorted by name so the skin-atlas order is stable and shared by
-// the entitySkins_ texture array and buildModels() (layer index == position here).
-// Adding a model is just dropping a new <name>/<name>.bbmodel + <name>.png folder.
+/**
+ * @brief Enumerate Blockbench model names from assets/models/ subdirectories.
+ *
+ * Returns directory names (sorted) for every subdirectory that contains a
+ * matching <name>.bbmodel file. The sorted order fixes the skin-atlas layer
+ * index shared between entitySkins_ and buildModels().
+ */
 std::vector<std::string> discoverModelNames(const std::string& modelsDir) {
     std::vector<std::string> names;
     std::error_code ec;
@@ -56,11 +71,14 @@ std::vector<std::string> discoverModelNames(const std::string& modelsDir) {
 // (preserving their [0,1] UV layout), so models needn't share a texture resolution.
 constexpr int kModelAtlasSize = 256;
 
-// Build the skin atlas (layer i == discoverModelNames()[i]): for each model, load the
-// texture its faces reference (any name, from the model's own dir; falls back to
-// <name>.png), nearest-resize it to kModelAtlasSize, and return the RGBA layers. This
-// is what removes the "same size / named <name>.png" rules — drop any .bbmodel + the
-// texture it points at, any size, and it works.
+/**
+ * @brief Build the entity skin texture-array atlas for all discovered models.
+ *
+ * Each model's skin is nearest-resampled to kModelAtlasSize x kModelAtlasSize,
+ * preferring an embedded base64 PNG, then the skin filename the model declares,
+ * then the <name>.png convention. Returns at least one (transparent) layer so
+ * the TextureArray always has valid data.
+ */
 std::vector<std::vector<unsigned char>> buildModelAtlas(const std::string& modelsDir) {
     const int size = kModelAtlasSize;
     const size_t bytes = static_cast<size_t>(size) * size * 4;
@@ -202,11 +220,13 @@ std::vector<EntityVertex> makeCubeMeshLayer(uint32_t layer, float half) {
     return out;
 }
 
-// Load the world config, but pre-apply the player's saved light falloff so the
-// world is generated AND meshed with the FINAL lighting. Without this,
-// applySettings() calls setLightFalloff() right after construction, and a changed
-// falloff forces a redundant full relight + remeshAll() of the entire window —
-// re-meshing every chunk a second time (seconds of startup) right after buildMeshes.
+/**
+ * @brief Load world.yaml and pre-apply player settings that affect world construction.
+ *
+ * Merges light falloff, render distance, and arena size from Settings into the
+ * WorldConfig before the World is created, avoiding a redundant full relight
+ * and remeshAll that would otherwise occur in applySettings() at startup.
+ */
 WorldConfig worldConfigWithSettings(const std::string& path, const Settings& s) {
     WorldConfig c = WorldConfig::load(path);
     c.skyFalloff   = std::clamp(s.skyFalloff, 1, 15);

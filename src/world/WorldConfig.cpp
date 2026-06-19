@@ -1,3 +1,13 @@
+/**
+ * @file WorldConfig.cpp
+ * @brief YAML loader for WorldConfig.
+ *
+ * Parses assets/world.yaml into a WorldConfig struct. Any absent or malformed key
+ * keeps the struct's compile-time default so the game always starts successfully.
+ * Derives chunksX/Y/Z from viewRadius/heightChunks after loading.
+ * @see docs/CODE_INDEX.md
+ */
+
 #include "world/WorldConfig.h"
 
 #include <yaml-cpp/yaml.h>

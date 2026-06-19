@@ -1,5 +1,16 @@
 #pragma once
 
+/**
+ * @file Noise.h
+ * @brief Deterministic noise adapter: Perlin, fBm, fbmEroded, and Worley over FastNoise.
+ *
+ * Wraps the vendored FastNoise (Jordan Peck, MIT) behind a stable, seed-bound interface.
+ * Every call is a pure function of (seed, world coords) — streaming and pregen safe.
+ * The instance sets FastNoise frequency to 1; callers scale coordinates themselves.
+ * @note FastNoise.h/cpp are vendored; do not edit them.
+ * @see docs/CODE_INDEX.md
+ */
+
 #include "utilities/noise/FastNoise.h"
 
 #include <cstdint>
@@ -31,8 +42,10 @@ namespace vg {
 //  The instance fixes FastNoise frequency to 1 so callers scale coordinates
 //  themselves (matching the old hand-rolled class, which NoiseStack relies on).
 // -----------------------------------------------------------------------------
+/** @brief Seed-bound noise adapter providing Perlin, fBm, fbmEroded, and Worley primitives. */
 class Noise {
 public:
+    /// @brief Construct with a fixed seed; all subsequent calls are deterministic for that seed.
     explicit Noise(uint32_t seed);
 
     [[nodiscard]] float perlin(float x, float y) const;
@@ -59,9 +72,11 @@ public:
 
     // Distance metric for the cellular search. Chebyshev has no direct FastNoise
     // equivalent and maps to FastNoise's "Natural" distance (see Noise.cpp).
+    /// @brief Distance metric for Worley cellular search (Chebyshev maps to FastNoise Natural).
     enum class Metric : uint8_t { Euclidean, Manhattan, Chebyshev };
     // Which cellular value to return: F1 (nearest → rounded cells), F2 (second
     // nearest), or F2-F1 (cell boundaries → cracks/fluting/spire walls).
+    /// @brief Which cellular distance to return: nearest, second-nearest, or their difference.
     enum class Cell : uint8_t { F1, F2, F2mF1 };
 
     // Single-octave Worley/cellular noise, remapped to ~[-1, 1]. Pure function of

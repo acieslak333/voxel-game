@@ -1,5 +1,16 @@
 #pragma once
 
+/**
+ * @file Structure.h
+ * @brief Hand-authored voxel templates (wells, boulders, ruins) stamped during worldgen.
+ *
+ * A Structure is a fixed grid of block ids loaded from YAML under assets/structures/.
+ * The `anchor` cell aligns to the terrain surface at the placement origin, keeping
+ * stamping a pure function of the surface height — identical regardless of which
+ * chunk streams in first. kSkip leaves existing terrain in place; "air" carves.
+ * @see docs/CODE_INDEX.md
+ */
+
 #include <glm/glm.hpp>
 
 #include <cstdint>
@@ -68,8 +79,10 @@ public:
     [[nodiscard]] int maxReachXZ() const { return maxReachXZ_; }
     [[nodiscard]] float totalWeight() const { return totalWeight_; }
 
-    // Pick a structure index for a placement roll r in [0,1) weighted by `weight`.
-    // Returns -1 if empty.
+    /**
+     * @brief Pick a structure index for a placement roll r in [0,1), weighted by `weight`.
+     * @return Index into all(), or -1 if the set is empty.
+     */
     [[nodiscard]] int pick(float r) const;
 
 private:

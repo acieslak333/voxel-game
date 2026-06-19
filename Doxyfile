@@ -1,0 +1,62 @@
+# =============================================================================
+#  Doxyfile — API documentation for the voxel-game C++ sources.
+# =============================================================================
+#  Generate with:   cmake --build build --target docs      (or)   doxygen Doxyfile
+#  Output:          docs/doxygen/html/index.html            (git-ignored)
+#  Doxygen is NOT required to build or run the game — this is documentation only.
+#  Tuned subset of the full Doxygen config; unspecified options use defaults.
+# =============================================================================
+
+# --- Project -----------------------------------------------------------------
+PROJECT_NAME           = "Voxel Survival Game"
+PROJECT_NUMBER         = 0.3.0
+PROJECT_BRIEF          = "First-person voxel survival game (Vulkan + C++20)"
+OUTPUT_DIRECTORY       = docs/doxygen
+CREATE_SUBDIRS         = NO
+
+# --- Input -------------------------------------------------------------------
+# src (recursively) plus the curated index as the rendered main page.
+INPUT                  = src docs/CODE_INDEX.md
+RECURSIVE              = YES
+FILE_PATTERNS          = *.h *.hpp *.hh *.cpp *.cc *.cxx *.inl *.md
+USE_MDFILE_AS_MAINPAGE = docs/CODE_INDEX.md
+
+# Vendored third-party (Jordan Peck FastNoise, MIT) is intentionally NOT
+# documented; the per-subsystem READMEs are surfaced by the curated index, so
+# exclude them as standalone pages (avoids duplicate "README" page names).
+EXCLUDE                = src/utilities/noise/FastNoise.h \
+                         src/utilities/noise/FastNoise.cpp
+EXCLUDE_PATTERNS       = */README.md */build/* */third_party/*
+
+# --- Extraction --------------------------------------------------------------
+EXTRACT_ALL            = YES
+EXTRACT_PRIVATE        = NO
+EXTRACT_STATIC         = YES
+EXTRACT_LOCAL_CLASSES  = YES
+JAVADOC_AUTOBRIEF      = YES
+QT_AUTOBRIEF           = YES
+MARKDOWN_SUPPORT       = YES
+BUILTIN_STL_SUPPORT    = YES
+OPTIMIZE_OUTPUT_FOR_C  = NO
+TAB_SIZE               = 4
+
+# --- Warnings (keep quiet; this is a bulk pass, not a lint gate) -------------
+QUIET                  = YES
+WARN_IF_UNDOCUMENTED   = NO
+WARN_IF_DOC_ERROR      = YES
+WARN_NO_PARAMDOC       = NO
+
+# --- Output ------------------------------------------------------------------
+GENERATE_HTML          = YES
+GENERATE_LATEX         = NO
+GENERATE_TREEVIEW      = YES
+SOURCE_BROWSER         = YES
+INLINE_SOURCES         = NO
+REFERENCED_BY_RELATION = YES
+REFERENCES_RELATION    = YES
+
+# --- Diagrams ----------------------------------------------------------------
+# Graphviz (dot) is optional; built-in class diagrams work without it. Set
+# HAVE_DOT = YES if you have Graphviz installed for call/collaboration graphs.
+CLASS_DIAGRAMS         = YES
+HAVE_DOT               = NO

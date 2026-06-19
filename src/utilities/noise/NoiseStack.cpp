@@ -1,3 +1,9 @@
+/**
+ * @file NoiseStack.cpp
+ * @brief Layer evaluation (domain warp, multifractal, Worley fractal) and transfer stage.
+ * @see docs/CODE_INDEX.md
+ */
+
 #include "utilities/noise/NoiseStack.h"
 
 #include <algorithm>

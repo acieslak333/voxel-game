@@ -1,5 +1,14 @@
 #pragma once
 
+/**
+ * @file Window.h
+ * @brief RAII wrapper around a Vulkan-configured GLFW window.
+ *
+ * Owns GLFW init/termination, the GLFWwindow handle, framebuffer-resize
+ * signalling, scroll accumulation, and fullscreen toggling. One instance
+ * per process — GLFW init/terminate are tied to its lifetime.
+ * @see docs/CODE_INDEX.md
+ */
 // GLFW_INCLUDE_VULKAN is defined by the build system; it makes <GLFW/glfw3.h>
 // pull in the Vulkan headers and expose glfwCreateWindowSurface etc.
 #include <GLFW/glfw3.h>
@@ -10,14 +19,12 @@
 
 namespace vg {
 
-// -----------------------------------------------------------------------------
-//  Window
-// -----------------------------------------------------------------------------
-//  Thin RAII wrapper around a GLFW window configured for Vulkan (no OpenGL
-//  context). Owns GLFW initialisation/termination for the lifetime of the
-//  single window we create. If we ever need multiple windows this would move
-//  to a separate "platform" object, but one window is plenty for the game.
-// -----------------------------------------------------------------------------
+/**
+ * @brief RAII GLFW window configured for Vulkan (no OpenGL context).
+ *
+ * Handles resize callbacks, scroll accumulation between Input::poll() calls,
+ * and borderless-fullscreen toggling with windowed-rect save/restore.
+ */
 class Window {
 public:
     Window(int width, int height, std::string title);

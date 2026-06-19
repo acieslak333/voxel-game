@@ -1,5 +1,16 @@
 #pragma once
 
+/**
+ * @file CompositeRenderer.h
+ * @brief Declares CompositeRenderer, the full-screen post-processing pass.
+ *
+ * Upscales the low-res offscreen scene with NEAREST sampling (chunky pixelation),
+ * applies ordered-dither posterisation, fog, a retro palette/interlace effect, and
+ * optionally remaps colours to the nearest swatch in a user-chosen palette. Drawn
+ * first in the swapchain (UI) render pass; the UI layer then blends on top.
+ * @see docs/CODE_INDEX.md
+ */
+
 #include "render/Buffer.h"
 
 #include <vulkan/vulkan.h>
@@ -13,19 +24,14 @@ namespace vg {
 
 class VulkanContext;
 
-// -----------------------------------------------------------------------------
-//  CompositeRenderer
-// -----------------------------------------------------------------------------
-//  The full-screen "post" pass that replaces the old upscale blit. It samples the
-//  low-res offscreen scene (NEAREST -> the chunky pixelation) and applies one
-//  ordered-dither posterisation over the whole frame, so the sky and the world
-//  share the same dithered look. Drawn first in the swapchain (UI) render pass;
-//  the UI then blends on top.
-//
-//  Owns its pipeline + a single descriptor pointing at the offscreen colour image,
-//  which is re-pointed via setSource() whenever the offscreen is rebuilt (resize /
-//  pixel-scale change).
-// -----------------------------------------------------------------------------
+/**
+ * @brief Full-screen post pass: upscale + dither + fog + optional retro palette.
+ *
+ * Owns the composite pipeline and a single descriptor set pointing at the offscreen
+ * scene colour and depth images. Call setSource() whenever the offscreen is rebuilt
+ * (window resize or pixel-scale change). Fog and retro parameters are passed as a
+ * push constant + host-coherent UBO each frame.
+ */
 class CompositeRenderer {
 public:
     CompositeRenderer(VulkanContext& ctx, VkRenderPass targetRenderPass);
@@ -34,7 +40,7 @@ public:
     CompositeRenderer(const CompositeRenderer&) = delete;
     CompositeRenderer& operator=(const CompositeRenderer&) = delete;
 
-    // Per-frame fog inputs (issue #10 E), consumed by composite.frag (push const).
+    /// Per-frame fog and retro-post parameters consumed by composite.frag as a push constant.
     struct Fog {
         glm::mat4 invViewProj;   // NDC -> world (inverse of the scene's proj*view)
         glm::vec4 camPos;        // xyz camera world position
@@ -49,19 +55,35 @@ public:
         float     retroInterlace = 0.0f;  // scanline dim amount (0..1, PS2)
         float     retroParity    = 0.0f;  // 0/1 frame parity, flips the interlace field
     };
-    // Point the pass at the offscreen colour + depth images to read this frame.
-    // Call once up front and again after the offscreen is recreated.
+    /**
+     * @brief Point the descriptor at the offscreen colour and depth images.
+     *
+     * Must be called once at startup and again after the offscreen is recreated
+     * (resize or pixel-scale change).
+     *
+     * @param sceneView  Low-res offscreen colour image view (NEAREST sampled).
+     * @param depthView  Low-res offscreen depth image view (for depth fog).
+     */
     void setSource(VkImageView sceneView, VkImageView depthView);
 
-    // Bind a retro colour palette (sRGB swatches): the whole frame is remapped to
-    // the nearest entry in composite.frag. Pass an empty list to disable (fall back
-    // to the per-channel "Colour bits" quantiser). Stored and re-uploaded into the
-    // post UBO each frame; only changes when the player picks a palette. Extra
-    // swatches beyond kMaxPaletteColors are dropped.
+    /**
+     * @brief Set the active retro palette (sRGB swatches).
+     *
+     * When non-empty, composite.frag remaps every pixel to the nearest palette swatch.
+     * Pass an empty vector to disable and fall back to the per-channel quantiser.
+     * Swatches beyond kMaxPaletteColors are silently dropped.
+     *
+     * @param srgbColors  Palette swatches in sRGB space.
+     */
     void setPalette(const std::vector<glm::vec3>& srgbColors);
 
-    // Draw the full-screen composite into the bound render pass. `screen` is the
-    // swapchain extent; `lowRes` is the offscreen extent (drives the dither cell).
+    /**
+     * @brief Record the full-screen composite draw.
+     * @param cmd     Command buffer (inside the swapchain/UI render pass).
+     * @param screen  Swapchain extent (output resolution).
+     * @param lowRes  Offscreen extent (drives the dither cell size).
+     * @param fog     Per-frame fog and retro-post parameters.
+     */
     void record(VkCommandBuffer cmd, VkExtent2D screen, VkExtent2D lowRes, const Fog& fog);
 
 private:

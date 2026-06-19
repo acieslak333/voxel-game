@@ -1,5 +1,17 @@
 #pragma once
 
+/**
+ * @file PlayerController.h
+ * @brief First-person player controller: locomotion, physics, health, and inventory.
+ *
+ * Drives both walking mode (gravity, AABB collision, swim/drown) and free-fly
+ * mode. Collision is queried through caller-supplied predicates (SolidFn,
+ * BoxesFn, WaterFn) so the class has no direct dependency on world storage.
+ * Health, fall damage, air/drowning, and equipment modifiers are also managed
+ * here. Headless-testable via `--logictest` (fallDamage is a pure static).
+ * @see docs/CODE_INDEX.md
+ */
+
 #include "player/Camera.h"
 #include "player/Inventory.h"
 #include "world/Shape.h"
@@ -24,8 +36,10 @@ struct InputState;
 //  class has no dependency on how the world is stored (single chunk now,
 //  streamed chunks later).
 // -----------------------------------------------------------------------------
+/** @brief First-person player controller: locomotion, physics, health, and inventory. */
 class PlayerController {
 public:
+    /// @brief Two locomotion modes: physics-based walking or collision-free flight.
     enum class Mode { Walking, FreeFly };
 
     // Returns true if the block at integer coords (x,y,z) is solid.
@@ -40,6 +54,7 @@ public:
     // buoyant swim physics + drowning. Optional; absent = no water anywhere.
     using WaterFn = std::function<bool(int x, int y, int z)>;
 
+    /// @brief Construct with the initial feet (bottom-centre of AABB) position.
     explicit PlayerController(glm::vec3 feetPosition);
 
     void setSolidFn(SolidFn fn) { isSolid_ = std::move(fn); }

@@ -1,3 +1,8 @@
+/**
+ * @file Window.cpp
+ * @brief Window construction, fullscreen toggle, and GLFW callback implementations.
+ * @see docs/CODE_INDEX.md
+ */
 #include "core/Window.h"
 
 #include <stdexcept>

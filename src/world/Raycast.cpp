@@ -1,3 +1,14 @@
+/**
+ * @file Raycast.cpp
+ * @brief Amanatides & Woo DDA implementation for raycastVoxel().
+ *
+ * Steps voxel-by-voxel using tMax/tDelta per axis; when a solid block is
+ * entered, optionally refines against per-cell sub-boxes via rayBox() (slab
+ * method). Continues marching if the ray misses every sub-box so aiming over
+ * a slab hits the block behind it.
+ * @see docs/CODE_INDEX.md
+ */
+
 #include "world/Raycast.h"
 
 #include <algorithm>
@@ -7,9 +18,18 @@
 namespace vg {
 
 namespace {
-// Ray vs axis-aligned box (slab method). On a hit within [0, maxT] returns true
-// with `tNear` (entry distance) and the entry-face normal pointing back toward the
-// ray origin (matching the DDA's normal convention). `d` must be normalized.
+/**
+ * @brief Ray vs AABB intersection using the slab method.
+ *
+ * @param o     Ray origin.
+ * @param d     Normalised ray direction.
+ * @param bmin  Box minimum corner (world space).
+ * @param bmax  Box maximum corner (world space).
+ * @param maxT  Maximum t to consider a hit.
+ * @param tNear Out: entry distance along the ray.
+ * @param normal Out: face normal at entry, pointing back toward the ray origin.
+ * @return true if the ray enters the box within [0, maxT].
+ */
 bool rayBox(const glm::vec3& o, const glm::vec3& d, const glm::vec3& bmin,
             const glm::vec3& bmax, float maxT, float& tNear, glm::ivec3& normal) {
     float tmin = 0.0f, tmax = maxT;

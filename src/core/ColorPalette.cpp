@@ -1,3 +1,12 @@
+/**
+ * @file ColorPalette.cpp
+ * @brief loadColorPalette and listColorPalettes implementations.
+ *
+ * loadColorPalette parses a Lospec .hex file line-by-line (RRGGBB or #RRGGBB),
+ * skipping blank lines and comment lines (';' or '//'). listColorPalettes
+ * enumerates .hex files in a directory and returns their stems sorted alphabetically.
+ * @see docs/CODE_INDEX.md
+ */
 #include "core/ColorPalette.h"
 
 #include <algorithm>

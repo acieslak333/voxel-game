@@ -1,3 +1,13 @@
+/**
+ * @file PlayerController.cpp
+ * @brief Implementation of walking physics, free-fly, collision sweep, and health.
+ *
+ * Contains the per-axis swept AABB collision (moveAxis), auto-step onto slabs/stairs,
+ * sneak edge-stop, swim/drown physics, passive health regen, and view-bob smoothing.
+ * All tunables are anonymous-namespace constants (see CLAUDE.md — REVIEW R7).
+ * @see docs/CODE_INDEX.md
+ */
+
 #include "player/PlayerController.h"
 
 #include "core/Input.h"
@@ -58,6 +68,7 @@ constexpr float kBobVert     = 0.028f; // vertical bob amplitude (small)
 constexpr float kBobHoriz    = 0.020f; // lateral bob amplitude (small)
 } // namespace
 
+/// Initialise feet position and snap the camera to the body (no smoothing lag on spawn).
 PlayerController::PlayerController(glm::vec3 feetPosition) : feet_(feetPosition) {
     syncCameraToBody();
 }
@@ -70,6 +81,7 @@ void PlayerController::syncCameraToBody() {
     camera_.position = glm::vec3(feet_.x, camEyeY_, feet_.z);
 }
 
+/// Move to a new feet position and reset velocity; restores full breath and clears bob.
 void PlayerController::teleport(glm::vec3 feet) {
     feet_ = feet;
     velocity_ = glm::vec3(0.0f);
@@ -78,11 +90,13 @@ void PlayerController::teleport(glm::vec3 feet) {
     syncCameraToBody();
 }
 
+/// Switch locomotion mode and zero velocity so there is no residual drift.
 void PlayerController::setMode(Mode m) {
     mode_ = m;
     velocity_ = glm::vec3(0.0f);
 }
 
+/// Pure fall-damage calculation: converts impact speed to height, subtracts safe-fall, scales.
 float PlayerController::fallDamage(float impactSpeed) {
     if (impactSpeed <= 0.0f) return 0.0f;
     // Height the impact speed corresponds to (v^2 = 2 g h).
@@ -90,6 +104,7 @@ float PlayerController::fallDamage(float impactSpeed) {
     return std::max(0.0f, h - kSafeFall) * kFallDmgPerBlock;
 }
 
+/// Apply damage after armour reduction; no-op when invulnerable or amount <= 0.
 void PlayerController::damage(float amount) {
     if (invulnerable_ || amount <= 0.0f) return;
     amount *= (1.0f - armorReduction_); // armour soaks a fraction of every hit
@@ -278,6 +293,7 @@ void PlayerController::update(float dt, const InputState& input) {
     camera_.position = glm::vec3(feet_.x, camEyeY_, feet_.z) + bob;
 }
 
+/// Scan the block layer immediately under the AABB footprint; used by the sneak edge-stop.
 bool PlayerController::hasGroundSupport() const {
     if (!isSolid_) return true; // no world knowledge -> assume supported
     // The block layer just under the feet, scanned across the AABB footprint
@@ -293,6 +309,7 @@ bool PlayerController::hasGroundSupport() const {
     return false;
 }
 
+/// True when the player AABB overlaps the unit cube at (bx, by, bz); guards block placement.
 bool PlayerController::occupies(int bx, int by, int bz) const {
     // The player AABB vs the unit cube [b, b+1] on each axis: overlap on all
     // three axes means the block would intersect the player.
@@ -301,6 +318,10 @@ bool PlayerController::occupies(int bx, int by, int bz) const {
            feet_.z - kHalfWidth < bz + 1.0f && feet_.z + kHalfWidth > bz;
 }
 
+/// Sweep the player AABB one axis at a time, stopping at the nearest contact plane.
+/// @param feet  Current feet position, modified in place.
+/// @param delta Signed displacement (blocks) along `axis`.
+/// @param axis  0 = X, 1 = Y, 2 = Z.
 void PlayerController::moveAxis(glm::vec3& feet, float delta, int axis) {
     if (delta == 0.0f || !isSolid_) {
         feet[axis] += delta;

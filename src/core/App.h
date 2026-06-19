@@ -1,5 +1,16 @@
 #pragma once
 
+/**
+ * @file App.h
+ * @brief Top-level application class that owns all subsystems and runs the main loop.
+ *
+ * App constructs and connects every subsystem (window, Vulkan stack, world,
+ * renderer, player, UI) in dependency order and drives the per-frame poll ->
+ * input -> update -> stream -> render cycle. Threading invariants for the four
+ * concurrent actors (main thread, mesh workers, async relight, strip pregen)
+ * are enforced in streamWindow() and the drainBeforeWorldMutation() family.
+ * @see docs/CODE_INDEX.md
+ */
 #include "clouds/CloudSystem.h"
 #include "core/DayNight.h"
 #include "entity/Armature.h"
@@ -34,19 +45,22 @@
 
 namespace vg {
 
-// -----------------------------------------------------------------------------
-//  App
-// -----------------------------------------------------------------------------
-//  Top-level object that owns the window, the Vulkan stack, the world (data),
-//  the world renderer and the player, and runs the main loop. Member
-//  declaration order matters: each subsystem depends on the ones declared above
-//  it, and members are constructed top-to-bottom / destroyed bottom-to-top,
-//  which is exactly the order Vulkan requires.
-// -----------------------------------------------------------------------------
+/**
+ * @brief Top-level game object: owns every subsystem and runs the main loop.
+ *
+ * Member declaration order is significant — each subsystem depends on those
+ * declared above it, and construction/destruction follows that order, which
+ * is the order Vulkan requires.
+ */
 class App {
 public:
     App();
 
+    /**
+     * @brief Run the main loop until the window closes or maxFrames is reached.
+     * @param maxFrames Stop after this many frames (-1 = run until closed).
+     * @param screenshotPath If non-empty, write a PNG to this path and exit.
+     */
     void run(long maxFrames = -1, const std::string& screenshotPath = "");
 
     // Debug: start in free-fly looking down over the whole world. Handy for a
@@ -185,6 +199,8 @@ private:
     // Where the persisted settings live (next to the game's assets).
     [[nodiscard]] static std::string settingsPath();
 
+    /// @note kWidth/kHeight/kReach/kLavaDamagePerSec are tunables held in code
+    ///       rather than YAML — known REVIEW R7 violations.
     static constexpr int kWidth  = 1600;
     static constexpr int kHeight = 900;
 

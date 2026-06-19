@@ -1,3 +1,9 @@
+/**
+ * @file Particles.cpp
+ * @brief ParticleEffect YAML loader, burst spawner, and per-frame physics update.
+ * @see docs/CODE_INDEX.md
+ */
+
 #include "entity/Particles.h"
 
 #include <yaml-cpp/yaml.h>
@@ -8,6 +14,7 @@
 
 namespace vg {
 
+/// Parse a .prtcl YAML file into a ParticleEffect; throws std::runtime_error on failure.
 ParticleEffect ParticleEffect::load(const std::string& path) {
     ParticleEffect fx;
     YAML::Node n;
@@ -46,6 +53,8 @@ float Particles::rand01() {
     return static_cast<float>(rng_ & 0xFFFFFFu) / static_cast<float>(0x1000000u);
 }
 
+/// Spawn one burst of `fx` centred at `center`, sampling texture-array `layer`.
+/// Drops the oldest particle when the pool is at kMaxParticles.
 void Particles::spawnEffect(const ParticleEffect& fx, const glm::vec3& center,
                             uint32_t layer) {
     auto lerp = [](float a, float b, float t) { return a + (b - a) * t; };
@@ -76,6 +85,7 @@ void Particles::spawnEffect(const ParticleEffect& fx, const glm::vec3& center,
     }
 }
 
+/// Advance all particles: gravity, drag, size interpolation, ground settle, then expire aged-out ones.
 void Particles::update(float dt, const SolidFn& solid) {
     for (Particle& p : particles_) {
         p.life -= dt;

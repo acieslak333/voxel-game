@@ -5,6 +5,13 @@ FetchContent). Endless streamed world, data-driven worldgen, survival loop.
 `ISSUES.md` is the living backlog; `REVIEW.md` is the current code-review fix
 list (R1-R12); design docs live in `docs/`.
 
+> **Architecture & code map → [`docs/CODE_INDEX.md`](docs/CODE_INDEX.md)** (canonical:
+> per-subsystem file/symbol maps, frame graph, worldgen, threading, shaders, asset
+> catalog). Each `src/<dir>/` has a `README.md`; the exhaustive symbol list is the
+> generated [`docs/index/SYMBOLS.md`](docs/index/SYMBOLS.md). This file holds the
+> **operating rules** only. To refresh the index or document new code, run
+> **`/skill code-index`** (method: [`docs/CODE_INDEX_GUIDE.md`](docs/CODE_INDEX_GUIDE.md)).
+
 ## Build, test, run (Windows / VS 2022)
 
 cmake is NOT on PATH; use the VS bundled one:
@@ -77,7 +84,7 @@ visit order, thread timing, or mutable state.
 - Heavy-cost gotcha: editor-authored noise stacks can explode generation cost.
   `NoiseStack::addLayer` clamps invisible octaves, but `terrain3d.amplitude`
   near world height makes every cell pay the density path (the 145s-startup
-  incident). Watch generate-time stamps after biomes.yaml changes. For a big
+  incident). Watch generate-time stamps after `world.yaml` changes. For a big
   view_radius, `terrain3d.interpolate` (REVIEW O6) approximates the density on a
   coarse lattice — ~4x faster generate — at the cost of smoothed sub-cell detail;
   off by default (default terrain stays byte-identical).
@@ -87,14 +94,24 @@ visit order, thread timing, or mutable state.
 
 ## Layout
 
+Full per-subsystem maps (files → responsibilities → key symbols), the frame
+graph, the worldgen pipeline, and the asset catalog live in
+**[`docs/CODE_INDEX.md`](docs/CODE_INDEX.md)** (with a `README.md` in each
+`src/<dir>/`). Orientation only:
+
 `src/core` app/input/UI/settings · `src/world` chunks, worldgen
-(TerrainGenerator + NoiseStack + Feature), lighting, persistence ·
-`src/render` Vulkan, WorldRenderer (meshing/streaming/workers), far-terrain
+(`World::generateColumnInto` + `NoiseStack` + `Feature`), lighting, persistence ·
+`src/render` Vulkan, `WorldRenderer` (meshing/streaming/workers), far-terrain
 LOD, composite/pixelate; every `Buffer`'s memory is sub-allocated from
 `GpuAllocator`'s shared blocks (not a per-buffer `vkAllocateMemory` — REVIEW O5) ·
-`src/entity` Blockbench models, armature ·
-`src/player` controller/camera · `tools/` Python editors (`tools/hub.py`
-launches them) · `assets/` all game data (YAML + textures + models).
+`src/clouds` volumetric clouds · `src/entity` Blockbench models, armature ·
+`src/player` controller/camera · `src/utilities` alloc/hash/noise · `tools/`
+Python editors (`tools/hub.py` launches them) + `tools/codeindex/` (the index
+generator) · `assets/` all game data (YAML + textures + models).
+
+> Note: worldgen is in `World.cpp` (there is **no** `TerrainGenerator` class) and
+> its config is `assets/world.yaml` (**no** `biomes.yaml`); some older `docs/`
+> still reference those — see CODE_INDEX.md → *Documentation drift*.
 
 ## Claude Code tooling (`.claude/`, checked in)
 
@@ -107,6 +124,9 @@ when the task matches — don't reinvent what they cover.
   bottlenecks, scaling — sonnet), `refactoring-specialist` (behavior-preserving
   cleanups — sonnet), `code-reviewer` (quality + security review — opus).
 - **Skills** (`.claude/skills/`, invoke via the Skill tool):
+  - `code-index` — build/refresh the code index (machine symbol index, the
+    `CODE_INDEX.md` map, in-source Doxygen). Use after changing source or to
+    document code (method: `docs/CODE_INDEX_GUIDE.md`).
   - `renderdoc-gpu-debug` — GPU frame capture/inspection via `rdc-cli`
     (Vulkan/D3D/GL). Use for rendering artifacts, shadow/z-fighting/blend bugs,
     pixel history, shader debugging. Needs RenderDoc + `pip install rdc-cli`

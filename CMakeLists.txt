@@ -321,4 +321,24 @@ target_compile_definitions(voxelgame PRIVATE
     $<$<CONFIG:Debug>:VG_ENABLE_VALIDATION>
 )
 
+# -----------------------------------------------------------------------------
+#  API documentation (Doxygen) — OPTIONAL. `cmake --build build --target docs`.
+#  Doxygen is not required to build or run the game; if it is missing the target
+#  just prints how to get it. Config lives in the repo-root Doxyfile; output goes
+#  to docs/doxygen/html (git-ignored). See docs/CODE_INDEX_GUIDE.md.
+# -----------------------------------------------------------------------------
+find_package(Doxygen QUIET)
+if(DOXYGEN_FOUND)
+    add_custom_target(docs
+        COMMAND ${DOXYGEN_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/Doxyfile
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        COMMENT "Generating API docs with Doxygen -> docs/doxygen/html"
+        VERBATIM)
+else()
+    add_custom_target(docs
+        COMMAND ${CMAKE_COMMAND} -E echo
+            "Doxygen not found. Install it from https://www.doxygen.nl and re-run, or use tools/codeindex/codeindex.py for the lightweight index."
+        VERBATIM)
+endif()
+
 message(STATUS "Configured ${PROJECT_NAME} v${PROJECT_VERSION}")

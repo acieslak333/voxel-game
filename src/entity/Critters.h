@@ -1,5 +1,16 @@
 #pragma once
 
+/**
+ * @file Critters.h
+ * @brief Simple wandering mob simulation: wander AI, obstacle turns, gravity.
+ *
+ * Each Critter ambles on a random heading, pauses, picks a new direction, avoids
+ * obstacles, and falls under gravity. Collision is through a caller-supplied SolidFn
+ * predicate. Pure CPU state — no Vulkan — rendering is handled by the caller using
+ * animTime to drive a shared box rig.
+ * @see docs/CODE_INDEX.md
+ */
+
 #include <glm/glm.hpp>
 
 #include <cstdint>
@@ -17,6 +28,7 @@ namespace vg {
 //  rig at the critter's own walk phase. A stand-in until the glTF loader (E3) and
 //  real mob models land; the AI/spawn/update seam stays the same.
 // -----------------------------------------------------------------------------
+/** @brief State for one wandering mob: position, facing, velocity, and animation phase. */
 struct Critter {
     glm::vec3 pos{0.0f};      // feet position in world space
     float     yaw      = 0.0f; // facing (radians; 0 = +Z)
@@ -27,6 +39,7 @@ struct Critter {
     float     animTime = 0.0f; // walk-clip phase (advances only while walking)
 };
 
+/** @brief Collection of wandering Critter entities updated each frame via a SolidFn. */
 class Critters {
 public:
     // Is the block at integer (x,y,z) solid (collision)? Supplied by World.

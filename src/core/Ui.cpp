@@ -1,3 +1,13 @@
+/**
+ * @file Ui.cpp
+ * @brief Ui widget implementations: panels, rounded rects, buttons, sliders, labels.
+ *
+ * All widgets delegate drawing to UiRenderer (rects, text, sprites). Rounded
+ * corners use a pixel-art stepped quarter-circle snapped to the kUnit grid.
+ * 9-patch sprites are used when setSprites() has been called, otherwise the
+ * procedural rounded-rect look is the fallback.
+ * @see docs/CODE_INDEX.md
+ */
 #include "core/Ui.h"
 
 #include "render/UiRenderer.h"

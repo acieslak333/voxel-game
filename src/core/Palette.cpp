@@ -1,3 +1,11 @@
+/**
+ * @file Palette.cpp
+ * @brief Palette YAML loader and colour lookup implementation.
+ *
+ * Parses a name -> "#RRGGBB" YAML map, stores sRGB values, and provides
+ * srgb() / linear() accessors. Invalid hex strings throw std::runtime_error.
+ * @see docs/CODE_INDEX.md
+ */
 #include "core/Palette.h"
 
 #include <yaml-cpp/yaml.h>

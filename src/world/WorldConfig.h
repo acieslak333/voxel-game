@@ -1,5 +1,16 @@
 #pragma once
 
+/**
+ * @file WorldConfig.h
+ * @brief World-size, seed, and terrain-shaping knobs loaded from assets/world.yaml.
+ *
+ * WorldConfig is authored data, not player settings: it is read once at startup
+ * and never written back. All defaults match the shipped assets/world.yaml so a
+ * missing or malformed file still produces a playable world. Per-project convention
+ * (docs/CONFIGURATION.md), every tunable lives in YAML, not as a magic number.
+ * @see docs/CODE_INDEX.md
+ */
+
 #include <cstdint>
 #include <string>
 
@@ -95,8 +106,10 @@ struct WorldConfig {
     int skyFalloff   = 2; // higher => caves go dark faster
     int blockFalloff = 1; // higher => smaller glow radius around emitters
 
-    // Load from `path`; any missing field (or a missing/unreadable file) keeps
-    // its default above, so the game still runs with a sensible world.
+    /**
+     * @brief Load from `path`; any missing field (or a missing/unreadable file)
+     *        keeps its default above, so the game still runs with a sensible world.
+     */
     [[nodiscard]] static WorldConfig load(const std::string& path);
 };
 

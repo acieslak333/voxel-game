@@ -1,5 +1,26 @@
 #pragma once
 
+/**
+ * @file LightAtlas.h
+ * @brief 3D light texture atlas providing per-chunk sky/block/hue data to the fragment shader.
+ *
+ * A single VK_IMAGE_TYPE_3D texture tiled into PAD=18 voxel slots (16 chunk cells
+ * plus one-voxel border on each side). Chunk shaders sample it per-pixel so lighting
+ * is decoupled from mesh geometry: greedy quads can merge across light gradients
+ * without triggering a remesh.
+ *
+ * Slot rotation for GPU safety: on relight a chunk is written to a freshly allocated
+ * slot; the old slot is retired via freeDeferred() and recycled after framesInFlight+1
+ * calls to tick() — ensuring the GPU never reads a slot while it is being overwritten.
+ * This mirrors WorldRenderer's deferred mesh-arena free scheme. Staging Buffers for
+ * each write are owned and retired the same way.
+ *
+ * The image stays in VK_IMAGE_LAYOUT_GENERAL for its entire lifetime (permits both
+ * sampling and transfer writes), so slot updates need only an ordering barrier
+ * inside recordWrite(), never a layout transition.
+ * @see docs/CODE_INDEX.md
+ */
+
 #include "render/Buffer.h"
 
 #include <vulkan/vulkan.h>
@@ -39,6 +60,11 @@ class VulkanContext;
 //  transition. Staging buffers for each write are owned here and retired the same
 //  deferred way, so callers just hand over the PAD³ pixel block.
 // -----------------------------------------------------------------------------
+/**
+ * @brief 3D light-data atlas; per-chunk slots are rotated on relight to avoid GPU races.
+ * @warning Main-thread only for alloc/free/tick. recordWrite() is called from the
+ * main thread during frame recording.
+ */
 class LightAtlas {
 public:
     static constexpr int kPad = 18; // 16 chunk cells + 1 border voxel each side
