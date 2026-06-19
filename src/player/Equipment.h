@@ -1,5 +1,15 @@
 #pragma once
 
+/**
+ * @file Equipment.h
+ * @brief Player equipment slots (1 armour + 4 trinkets) and stat aggregation.
+ *
+ * Pure data + a pure stat aggregator (computeStats). No renderer or world
+ * dependency; App pushes the resulting Stats scalars onto PlayerController.
+ * Headlessly testable.
+ * @see docs/CODE_INDEX.md
+ */
+
 #include "player/Inventory.h" // ItemStack
 #include "world/BlockRegistry.h"
 
@@ -18,6 +28,7 @@ namespace vg {
 //  renderer/world dependency and is headlessly testable. App pushes the resulting
 //  scalars onto PlayerController.
 // -----------------------------------------------------------------------------
+/** @brief Equipped items (boots + trinkets) and their aggregated stat effect. */
 struct Equipment {
     static constexpr int kArmorSlots   = 1; // 0 = feet (boots); helmet/chest/legs removed
     static constexpr int kTrinketSlots = 4;
@@ -35,7 +46,7 @@ struct Equipment {
         return id == 0 || reg.equip(id) == accepts(slotIndex);
     }
 
-    // Aggregated effect of everything equipped.
+    /** @brief Aggregated scalar modifiers from all equipped items; fed to PlayerController. */
     struct Stats {
         float armorReduction = 0.0f; // damage-reduction FRACTION (0..0.8), already capped
         float speedMul       = 1.0f;

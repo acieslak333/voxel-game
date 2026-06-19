@@ -1,3 +1,14 @@
+/**
+ * @file Structure.cpp
+ * @brief YAML loader for hand-authored Structure voxel templates and StructureSet.
+ *
+ * Parses assets/structures/*.yaml files (legend map + layer grid) into Structure
+ * objects. Size is inferred from the layer geometry; the anchor defaults to the
+ * horizontal centre of the bottom layer when not specified. Files are sorted for
+ * deterministic load order so pick-weight cumulation is stable across runs.
+ * @see docs/CODE_INDEX.md
+ */
+
 #include "world/Structure.h"
 
 #include "world/BlockRegistry.h"

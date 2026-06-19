@@ -1,3 +1,11 @@
+/**
+ * @file SkyRenderer.cpp
+ * @brief SkyRenderer implementation: descriptor/pipeline setup and per-frame sky UBO upload.
+ *
+ * The sky UBO packs the full DayNight::SkyState plus CloudSystem::GpuParams (13 vec4s)
+ * into one host-coherent buffer. record() strips camera translation for the view ray
+ * reconstruction and issues a single vkCmdDraw(3) for the fullscreen triangle.
+ */
 #include "render/SkyRenderer.h"
 
 #include "render/VulkanContext.h"

@@ -1,5 +1,16 @@
 #pragma once
 
+/**
+ * @file SpanAllocator.h
+ * @brief Best-fit free-list sub-allocator for a linear byte arena (CPU side).
+ *
+ * Manages a contiguous [0, capacity) address space without owning backing storage.
+ * Supports aligned allocation with front-padding absorbed into the reserved span,
+ * and free() with adjacent-range coalescing. Used by GpuAllocator to manage
+ * per-VkBuffer chunk mesh arenas. Main-thread only (no thread-safety).
+ * @see docs/CODE_INDEX.md
+ */
+
 #include <cstdint>
 #include <map>
 #include <vector>
@@ -39,6 +50,7 @@ namespace vg {
 //  thread in this renderer, consistent with GpuAllocator's contract).
 // -----------------------------------------------------------------------------
 
+/** @brief Best-fit free-list sub-allocator; callers receive byte offsets, not pointers. */
 class SpanAllocator {
 public:
     static constexpr uint64_t kInvalid = ~0ull;

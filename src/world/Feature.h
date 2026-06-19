@@ -1,5 +1,18 @@
 #pragma once
 
+/**
+ * @file Feature.h
+ * @brief Data-driven procedural scatter objects stamped into the world during generation.
+ *
+ * A Feature is a list of geometric ops (box/sphere/cylinder/cone/etc.) whose sizes and
+ * block palettes may be randomised per-instance. Every random value is derived from
+ * hash(origin, seed, op-salt), making each instance a pure function of its origin cell
+ * and the world seed — seam-safe for chunk streaming. Authored as YAML under
+ * assets/features/ and edited with tools/feature_tool.py.
+ * @note Feature::at() is a pure function of (originSeed, local coords, world coords).
+ * @see docs/CODE_INDEX.md
+ */
+
 #include <glm/glm.hpp>
 
 #include <cstdint>
@@ -28,7 +41,12 @@ class Noise;
 //  like Structure stamping and trees. blockAt() is that pure function.
 // -----------------------------------------------------------------------------
 
-// A randomizable scalar: a fixed value, or [a,b] resolved per-instance from a hash.
+/**
+ * @brief A scalar that is either fixed or randomised per-instance from a hash.
+ *
+ * fixed=true -> always returns `a`. fixed=false -> linearly interpolates [a,b]
+ * using hash01(h), where `h` is derived from the instance origin and op salt.
+ */
 struct RandF {
     float a = 0.0f, b = 0.0f;
     bool  fixed = true;
@@ -99,6 +117,13 @@ struct Feature {
 // -----------------------------------------------------------------------------
 //  FeatureSet — every feature template under assets/features/.
 // -----------------------------------------------------------------------------
+/**
+ * @brief Loaded collection of all Feature templates under assets/features/.
+ *
+ * Constructed once at startup; each Feature template is placed explicitly by the
+ * worldgen code. Automatic scatter/spawn logic was removed with the worldgen
+ * overhaul; only the voxel-op data (size/anchor/ops) is retained.
+ */
 class FeatureSet {
 public:
     // Load every *.yaml under `dir` as feature templates (missing dir -> empty).

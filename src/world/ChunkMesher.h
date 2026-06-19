@@ -1,5 +1,17 @@
 #pragma once
 
+/**
+ * @file ChunkMesher.h
+ * @brief Greedy voxel mesher: turns a Chunk into a renderable MeshData.
+ *
+ * ChunkMesher::greedyMesh() merges coplanar, same-block faces into large quads
+ * (greedy meshing), performs face culling via the NeighborSampler, computes
+ * per-corner ambient occlusion, and emits opaque terrain and translucent water in
+ * separate index buffers. Per-pixel sky/block light comes from a light atlas rather
+ * than being baked into each vertex.
+ * @see docs/CODE_INDEX.md
+ */
+
 #include "render/Vertex.h"
 #include "world/Block.h"
 
@@ -17,6 +29,12 @@ class BlockRegistry;
 // renderer can draw them in a second, alpha-blended pass after the opaque
 // geometry — letting the seabed/terrain behind the water show through. The
 // water indices are 0-based into `waterVertices` (the renderer offsets them).
+/**
+ * @brief CPU-side triangle mesh output from ChunkMesher::greedyMesh().
+ *
+ * Opaque geometry and translucent water surfaces are kept in separate buffers
+ * so the renderer can draw them in two distinct passes.
+ */
 struct MeshData {
     std::vector<Vertex>   vertices;       // opaque terrain + plants
     std::vector<uint32_t> indices;
@@ -62,12 +80,23 @@ public:
     // call it for every face and only foliage actually tints.
     using TintSampler = std::function<glm::vec3(int x, int z, uint16_t id)>;
 
-    // smoothLighting: true folds per-corner ambient occlusion + averaged sky
-    // light into each vertex (soft, modern look); false uses only the flat
-    // directional top/side/bottom shade (the simpler original look).
-    // worldOrigin: this chunk's minimum-corner block coordinate in world space
-    // (chunkCoord * kChunkSize). Used to seed the per-block texture-variant hash
-    // so the choice is stable and seamless across chunk boundaries.
+    /**
+     * @brief Generate the full mesh for `chunk`.
+     *
+     * Runs the greedy merge sweep for opaque terrain and translucent water, then
+     * a second non-cube pass for plants, thin posts, flowing liquids, and shaped
+     * blocks. The result is ready to upload to the GPU via WorldRenderer.
+     *
+     * @param chunk       The source voxel data (read-only; mesh workers call this).
+     * @param registry    Block-type database for opacity, texture layers, etc.
+     * @param neighbor    Sampler for blocks one step outside chunk bounds (for culling).
+     * @param light       Sky + block light levels at chunk-local (possibly out-of-bounds) coords.
+     * @param smoothLighting True = per-corner AO + soft shading; false = flat directional only.
+     * @param worldOrigin Minimum-corner world block coord; seeds the texture-variant hash.
+     * @param tint        Biome vegetation tint for tintable block faces.
+     * @return Populated MeshData with separate opaque and water buffers.
+     * @note Thread-safe: reads only const Chunk and registry data. Called by mesh workers.
+     */
     [[nodiscard]] static MeshData greedyMesh(const Chunk& chunk,
                                              const BlockRegistry& registry,
                                              const NeighborSampler& neighbor,

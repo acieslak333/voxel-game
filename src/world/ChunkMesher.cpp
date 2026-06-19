@@ -1,3 +1,16 @@
+/**
+ * @file ChunkMesher.cpp
+ * @brief Greedy mesher implementation: cube sweep + non-cube second pass.
+ *
+ * The cube sweep iterates each of the six face directions, builds a 2D mask for
+ * each cross-section slice, merges adjacent matching cells into quads (greedy),
+ * and emits them. The non-cube pass handles Cross, Model, LeafCube, Flat plants
+ * and posts, reshaped (slab/stairs/post/wall) blocks, and flowing-liquid surfaces.
+ * Per-pixel sky/block light is read from the light atlas in the fragment shader,
+ * so only AO factors are baked into each vertex.
+ * @see docs/CODE_INDEX.md
+ */
+
 #include "world/ChunkMesher.h"
 
 #include "world/BlockRegistry.h"
@@ -13,25 +26,25 @@ namespace {
 
 constexpr int N = kChunkSize;
 
-// Cheap directional shading so the geometry reads without real lighting:
-// top faces brightest, bottom darkest, sides in between (and X != Z so adjacent
-// walls are distinguishable).
+/// Cheap directional shade factor per face (top=1.0, bottom=0.45, sides in between).
 float faceShade(int axis, bool positive) {
     if (axis == 1) return positive ? 1.0f : 0.45f; // +Y top / -Y bottom
     if (axis == 0) return 0.62f;                    // X faces
     return 0.80f;                                   // Z faces
 }
 
-// Map (axis, sign) to the Face enum used by the block registry.
+/// Map (axis, positive) to the Face enum index used by the block registry.
 int faceIndex(int axis, bool positive) {
     return axis * 2 + (positive ? 1 : 0);
 }
 
-// Deterministic spatial hash of a world block position -> a 32-bit value used to
-// pick a texture variant for a multi-texture face. Pure function of position, so
-// the choice is stable across re-meshes and identical in neighbouring chunks (no
-// seam at chunk borders). Standard xor-of-large-primes mix + an avalanche finalizer
-// so adjacent cells land on different variants instead of striping.
+/**
+ * @brief Spatial hash of a world block position used to select a texture variant.
+ *
+ * Pure function of position — stable across re-meshes and seamless at chunk
+ * borders. Adjacent cells produce different values so multi-variant faces do not
+ * visibly stripe.
+ */
 uint32_t variantHash(int x, int y, int z) {
     uint32_t h = static_cast<uint32_t>(x) * 73856093u ^
                  static_cast<uint32_t>(y) * 19349663u ^
@@ -65,9 +78,13 @@ glm::vec2 faceUV(const glm::vec3& p, int axis) {
 // faceShade; the shader interpolates the per-vertex result for smooth lighting.
 constexpr float kAoShade[4] = {0.5f, 0.7f, 0.85f, 1.0f};
 
-// One cell of the 2D mask used while sweeping a slice. Two cells may be merged
-// into the same quad only if every field matches — including the four per-corner
-// AO levels, so the smooth-lighting gradient is never stretched across a merge.
+/**
+ * @brief One cell of the 2D greedy-merge mask for a slice sweep.
+ *
+ * Two cells may be merged into a single quad only when all fields compare equal.
+ * AO corner values are part of the key so smooth-lighting gradients are never
+ * incorrectly stretched across a merged quad.
+ */
 struct Mask {
     bool     present   = false;
     uint16_t block     = 0;

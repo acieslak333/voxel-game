@@ -1,5 +1,23 @@
 #pragma once
 
+/**
+ * @file Renderer.h
+ * @brief Per-frame GPU orchestration: command recording, sync, present, and pixel-scale control.
+ *
+ * Renderer owns the command pool, per-frame command buffers, semaphores, and fences that
+ * drive a two-frame-in-flight pipeline. drawFrame() runs the full acquire->record->submit->present
+ * loop, delegating actual draw commands to caller-supplied RecordFn callbacks.
+ *
+ * The render sequence is:
+ *   1. recordPre  — transfer commands outside any render pass (e.g. chunk-mesh uploads).
+ *   2. recordScene — world geometry drawn into the low-res OffscreenTarget (reversed-Z).
+ *   3. recordUi   — 2D overlay drawn full-resolution into the swapchain render pass,
+ *      after the CompositeRenderer upscales and dithers the offscreen frame.
+ *
+ * phaseTimes() exposes the wait/acquire/record/submit split for the VG_FRAME_TIME profiler.
+ * @see docs/CODE_INDEX.md
+ */
+
 #include "render/CompositeRenderer.h"
 
 #include <vulkan/vulkan.h>
@@ -30,6 +48,15 @@ class OffscreenTarget;
 //  geometry is recorded by a caller-supplied callback that runs *inside* the
 //  render pass, so this class stays agnostic of what is being drawn.
 // -----------------------------------------------------------------------------
+/**
+ * @brief Orchestrates per-frame Vulkan command recording and presentation.
+ *
+ * Keeps kMaxFramesInFlight=2 frames in flight concurrently. Rebuild of the
+ * swapchain (on resize or VK_ERROR_OUT_OF_DATE_KHR) is handled transparently
+ * inside drawFrame(). The offscreen target is rebuilt by setPixelScale() or
+ * whenever the swapchain changes.
+ * @warning Must be used on the main thread only.
+ */
 class Renderer {
 public:
     // Records draw commands inside an already-begun render pass. Receives the

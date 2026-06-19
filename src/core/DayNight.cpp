@@ -1,3 +1,12 @@
+/**
+ * @file DayNight.cpp
+ * @brief DayNight constructor (sky.yaml parsing) and state() implementation.
+ *
+ * Parses assets/sky.yaml into all sky/atmosphere/star parameters, implements
+ * the sun/moon arc, per-day weather jitter, analytic atmosphere transmittance
+ * for terrain light, and the full SkyState snapshot computed once per frame.
+ * @see docs/CODE_INDEX.md
+ */
 #include "core/DayNight.h"
 
 #include "core/Palette.h"
@@ -19,9 +28,13 @@ float smoothstepf(float lo, float hi, float x) {
     return t * t * (3.0f - 2.0f * t);
 }
 
-// Deterministic per-day jitter in [-1, 1) from a day index + a salt (+ a seed).
-// An fmix-style integer avalanche, so each day's "weather" is stable and
-// reproducible but unrelated to its neighbours.
+/**
+ * @brief Deterministic per-day jitter in [-1, 1) for weather variation.
+ *
+ * Uses an fmix-style integer avalanche so each day's value is stable and
+ * reproducible (pure function of day + salt + seed) but uncorrelated with
+ * neighbouring days.
+ */
 float weatherJitter(int day, uint32_t salt, uint32_t seed) {
     uint32_t h = static_cast<uint32_t>(day) * 0x9e3779b9u ^ (salt * 0x85ebca6bu) ^ seed;
     h ^= h >> 16; h *= 0x7feb352du;
@@ -30,9 +43,12 @@ float weatherJitter(int day, uint32_t salt, uint32_t seed) {
     return static_cast<float>(h & 0x00FFFFFFu) / static_cast<float>(0x00800000) - 1.0f;
 }
 
-// Relative air mass for a ray leaving the ground at the given cosine of the
-// zenith angle: ~1 looking straight up, ~36 grazing the horizon (Kasten-Young).
-// Must match airMass() in sky.frag so terrain light and sky colour agree.
+/**
+ * @brief Relative air mass for a ray at the given cosine of the zenith angle.
+ *
+ * Kasten-Young approximation: ~1 straight up, ~36 at the horizon. Must match
+ * airMass() in sky.frag so terrain light colour agrees with the sky shader.
+ */
 float airMass(float cosZenith) {
     const float c = std::clamp(cosZenith, 0.0f, 1.0f);
     const float zenithDeg = glm::degrees(std::acos(c));

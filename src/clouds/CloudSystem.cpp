@@ -1,3 +1,12 @@
+/**
+ * @file CloudSystem.cpp
+ * @brief CloudSystem implementation: YAML config load, autonomous weather scheduler,
+ *        wind drift, and per-frame GpuParams assembly.
+ *
+ * The scheduler uses a deterministic sequence hash (hashSeq) so transitions are
+ * reproducible and day-independent. update() advances the front phase, glides
+ * secondary parameters via exponential lerp, and writes gpu_ from the result.
+ */
 #include "clouds/CloudSystem.h"
 
 #include "core/DayNight.h"

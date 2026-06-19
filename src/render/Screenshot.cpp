@@ -1,3 +1,12 @@
+/**
+ * @file Screenshot.cpp
+ * @brief Implements screenshot::saveImage: GPU readback and PNG write via stb_image_write.
+ *
+ * Transitions the swapchain image from PRESENT_SRC to TRANSFER_SRC, copies it to a
+ * host-visible Buffer, restores the layout, performs optional BGRA->RGBA swizzle,
+ * and writes the result as a PNG. stb_image_write is compiled in this translation unit.
+ */
+
 #include "render/Screenshot.h"
 
 #include "render/Buffer.h"

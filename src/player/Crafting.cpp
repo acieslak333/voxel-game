@@ -1,3 +1,9 @@
+/**
+ * @file Crafting.cpp
+ * @brief Recipe loading from YAML and inventory-driven crafting logic.
+ * @see docs/CODE_INDEX.md
+ */
+
 #include "player/Crafting.h"
 
 #include "world/BlockRegistry.h"
@@ -6,6 +12,7 @@
 
 namespace vg {
 
+/// Load recipes from `recipesFile` YAML; recipes with unknown block names are silently skipped.
 Crafting::Crafting(const std::string& recipesFile, const BlockRegistry& registry) {
     YAML::Node root;
     try {
@@ -44,6 +51,7 @@ Crafting::Crafting(const std::string& recipesFile, const BlockRegistry& registry
     }
 }
 
+/// True when `inv` holds at least the required count of every input in `r`.
 bool Crafting::canCraft(const Recipe& r, const Inventory& inv) {
     for (const auto& in : r.inputs) {
         if (inv.count(in.first) < in.second) return false;
@@ -51,6 +59,7 @@ bool Crafting::canCraft(const Recipe& r, const Inventory& inv) {
     return true;
 }
 
+/// Atomically consume inputs and add output; returns false (no-op) when inputs are missing.
 bool Crafting::craft(const Recipe& r, Inventory& inv) {
     if (!canCraft(r, inv)) return false;
     for (const auto& in : r.inputs) {
@@ -60,6 +69,7 @@ bool Crafting::craft(const Recipe& r, Inventory& inv) {
     return true;
 }
 
+/// Indices into recipes() of every recipe that canCraft() returns true for `inv`.
 std::vector<int> Crafting::craftable(const Inventory& inv) const {
     std::vector<int> out;
     for (int i = 0; i < static_cast<int>(recipes_.size()); ++i) {

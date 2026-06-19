@@ -1,5 +1,18 @@
 #pragma once
 
+/**
+ * @file CloudSystem.h
+ * @brief Declares CloudSystem, the high-level cloud model and weather scheduler.
+ *
+ * Owns CloudNoise and WeatherMap, and evolves weather state over time: wind drift,
+ * discrete state transitions via a front-sweep scheduler, and smoothly tracked
+ * secondary parameters (layer band, cirrus decks, fog density, star clarity).
+ * Exposes gpuParams() — a 13-vec4 block appended verbatim to the sky UBO and
+ * consumed by the volumetric cloud raymarch in sky.frag.
+ * All tunables are loaded from assets/clouds.yaml.
+ * @see docs/CODE_INDEX.md
+ */
+
 #include "clouds/CloudNoise.h"
 #include "clouds/WeatherMap.h"
 
@@ -12,18 +25,18 @@ namespace vg {
 class VulkanContext;
 class DayNight;
 
-// -----------------------------------------------------------------------------
-//  CloudSystem
-// -----------------------------------------------------------------------------
-//  Owns the cloud model: the noise fields, the weather map, and the weather
-//  *state* that evolves over time (wind drift, diurnal cumulus growth, multi-day
-//  variation driven by DayNight's clock). Exposes gpuParams() — a UBO block the
-//  sky shader consumes for the volumetric raymarch.
-//  All tunables come from assets/clouds.yaml.
-// -----------------------------------------------------------------------------
+/**
+ * @brief High-level cloud model: noise fields, weather map, and autonomous weather scheduler.
+ *
+ * Weather transitions are driven by an independent clock (not the game day); each
+ * change is a wind-driven front that sweeps from one state to the next over
+ * frontDuration seconds. Secondary parameters (layer, decks, fog, clarity) glide
+ * smoothly toward the target state via exponential lerp. The GPU parameter block
+ * is rebuilt every update() call and forwarded to SkyRenderer via gpuParams().
+ */
 class CloudSystem {
 public:
-    // GPU parameter block, appended verbatim to the sky UBO (std140: vec4s only).
+    /// GPU parameter block appended verbatim to the sky UBO (std140, vec4s only, 13 elements).
     struct GpuParams {
         glm::vec4 layer;   // x bottom, y top (world Y), z aerial fade dist, w enabled
         glm::vec4 wind;    // xyz accumulated wind offset (world units), w time (s)
@@ -44,35 +57,54 @@ public:
                            // w frontActive (1 during a transition, else 0)
     };
 
+    /**
+     * @brief Construct the cloud system and load tunables from @p cloudsYaml.
+     * @param ctx             Vulkan device context (passed to CloudNoise + WeatherMap).
+     * @param cloudsYaml      Path to assets/clouds.yaml; missing file uses all defaults.
+     * @param noiseCacheFile  Path to the noise cache binary; regenerated on first run.
+     */
     CloudSystem(VulkanContext& ctx, const std::string& cloudsYaml,
                 const std::string& noiseCacheFile);
 
-    // Advance weather: wind drift, diurnal cumulus cycle (builds through the
-    // afternoon, fades by evening), multi-day drift via dn.totalDays().
+    /**
+     * @brief Advance the weather simulation by @p dt seconds.
+     *
+     * Updates the autonomous scheduler (front phase, hold timer, state transitions),
+     * glides wind and secondary parameters, and rebuilds gpu_ ready for the next frame.
+     *
+     * @param dt  Frame delta time in seconds.
+     * @param dn  DayNight instance (provides sun/moon colours consumed by gpu_.sun/moon).
+     */
     void update(float dt, const DayNight& dn);
 
+    /// Current GPU parameter block; call after update() and pass to SkyRenderer::record().
     [[nodiscard]] const GpuParams& gpuParams() const { return gpu_; }
+    /// The noise textures (passed to SkyRenderer at construction).
     [[nodiscard]] const CloudNoise& noise() const { return noise_; }
+    /// The weather variation map (passed to SkyRenderer at construction).
     [[nodiscard]] const WeatherMap& weatherMap() const { return weather_; }
 
-    // Current weather-state outputs for systems beyond the cloud shader
-    // (Phase D light, E fog, F stars). Smoothly tracked, 0..1.
+    /// Smoothly-tracked fog density (0..1), consumed by the fog pass (Phase E).
     [[nodiscard]] float fogDensity() const { return fogDensity_; }
+    /// Smoothly-tracked night star clarity (0..1), consumed by sky.frag (Phase F).
     [[nodiscard]] float starClarity() const { return starClarity_; }
-    // Overhead cloud cover (0 clear .. 1 overcast): how much the clouds block the
-    // sun/moon, for dimming + greying the terrain light (issue #10 D). Honours the
-    // debug force override so a forced overcast sky also dims the ground.
+    /**
+     * @brief Overhead cloud coverage (0 = clear, 1 = overcast).
+     *
+     * Used to dim and grey terrain lighting (Phase D). Respects forceCoverage_ debug
+     * overrides so a forced overcast sky also dims the ground.
+     */
     [[nodiscard]] float coverage() const {
         return forceCoverage_ >= 0.0f ? forceCoverage_ : baseCoverage_;
     }
+    /// Current cloud type (0 = cumulus, 1 = cumulonimbus). Respects forceType_ override.
     [[nodiscard]] float type() const {
         return forceType_ >= 0.0f ? forceType_ : baseType_;
     }
 
     // --- Live tuning (in-game options panel) ---------------------------------
-    // forcedState: -1 = daily auto, 0..5 = clear/fair/broken/overcast/stormy/foggy.
-    // forceCoverage/forceType: -1 = off, else pin the value. The rest mutate the
-    // static shape/scatter config the per-frame GpuParams are built from.
+
+    /// Number of discrete weather states (clear / fair / broken / overcast / stormy / foggy).
     static constexpr int kStateCount = 6;
     void setForcedState(int s)    { forcedState_ = s; }
     void setForceCoverage(float c){ forceCoverage_ = c; }

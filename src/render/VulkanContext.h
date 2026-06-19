@@ -1,5 +1,17 @@
 #pragma once
 
+/**
+ * @file VulkanContext.h
+ * @brief Device-level Vulkan context: instance, surface, physical/logical device, queues.
+ *
+ * Owns the long-lived objects (instance -> debug messenger -> surface ->
+ * physicalDevice -> device) that outlive the swapchain and are shared by every
+ * renderer subsystem. Also owns the GpuAllocator (shared block sub-allocator)
+ * and the transient command pool used for one-off GPU operations.
+ * @warning All Vulkan object creation and destruction must happen on the main thread.
+ * @see docs/CODE_INDEX.md
+ */
+
 #include <vulkan/vulkan.h>
 
 #include <cstdint>
@@ -20,6 +32,7 @@ class GpuAllocator;
 //  On most GPUs these are the same family, but the API allows them to differ,
 //  so we track both indices.
 // -----------------------------------------------------------------------------
+/** @brief Resolved graphics and present queue-family indices for the chosen GPU. */
 struct QueueFamilyIndices {
     std::optional<uint32_t> graphics;
     std::optional<uint32_t> present;
@@ -28,7 +41,7 @@ struct QueueFamilyIndices {
     }
 };
 
-// Everything we need to know to configure a swapchain for our surface.
+/** @brief Swapchain capabilities, formats, and present modes for the current surface. */
 struct SwapChainSupportDetails {
     VkSurfaceCapabilitiesKHR        capabilities{};
     std::vector<VkSurfaceFormatKHR> formats;
@@ -44,6 +57,16 @@ struct SwapChainSupportDetails {
 //  These outlive the swapchain (which is rebuilt on every resize), so they
 //  live here in their own object with strict RAII teardown.
 // -----------------------------------------------------------------------------
+/**
+ * @brief Owns the core Vulkan device-level objects shared by the entire renderer.
+ *
+ * Constructs the Vulkan instance, optional debug messenger, window surface,
+ * physical device selection, logical device, graphics/present queues, a transient
+ * command pool for one-off GPU work, and the shared GpuAllocator block pool.
+ * Destroyed in reverse order; all Buffers drawing from the allocator must be
+ * freed before this object is torn down.
+ * @warning Must be created and destroyed on the main thread only.
+ */
 class VulkanContext {
 public:
     explicit VulkanContext(const Window& window);

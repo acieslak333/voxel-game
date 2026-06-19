@@ -1,5 +1,15 @@
 #pragma once
 
+/**
+ * @file Inventory.h
+ * @brief Player item storage: ItemStack slot type and 9-slot hotbar + 54-slot backpack.
+ *
+ * Pure data with no world or renderer dependency — directly serialisable and
+ * exercised by `--logictest`. Mining calls add(); placing calls takeFromSelected();
+ * crafting uses count()/remove(). The HUD always shows the hotbar row.
+ * @see docs/CODE_INDEX.md
+ */
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -13,6 +23,7 @@ namespace vg {
 //  count both mean "empty". Items are blocks for now; a future item registry could
 //  widen this to tools/food without changing the slot layout.
 // -----------------------------------------------------------------------------
+/** @brief One inventory cell: a block id and a stack count. blockId 0 or count 0 = empty. */
 struct ItemStack {
     uint16_t blockId = 0;
     uint16_t count   = 0;
@@ -33,6 +44,7 @@ struct ItemStack {
 //  This is pure data — no dependency on the world or renderer — so it is trivially
 //  serialisable later (save/load) and testable in isolation.
 // -----------------------------------------------------------------------------
+/** @brief 63-slot player inventory (9 hotbar + 54 backpack); pure data, headlessly testable. */
 class Inventory {
 public:
     static constexpr int kHotbarSlots  = 9;

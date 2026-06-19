@@ -1,5 +1,19 @@
 #pragma once
 
+/**
+ * @file World.h
+ * @brief The loaded voxel world: chunk storage, worldgen, lighting, and streaming.
+ *
+ * World owns the BlockRegistry, a ring-buffer of Chunks, and two per-block light
+ * fields (sky and block). It is the single authority for block queries, edits,
+ * and streaming. Only the main thread may mutate it; mesh workers hold const
+ * references. generateColumnInto() is `const` specifically so the pregen
+ * background thread can call it safely.
+ * @warning setBlock, recenter, and relight are main-thread-only mutators.
+ *          Call streamBarrier() before any of them when workers are running.
+ * @see docs/CODE_INDEX.md
+ */
+
 #include "world/BlockRegistry.h"
 #include "world/Chunk.h"
 #include "world/Shape.h"
@@ -157,6 +171,15 @@ public:
     // — byte-identical to generating them in place. If the strip no longer
     // matches the step needed (the player turned around), it returns empty and
     // the caller simply pregens the right strip next cycle.
+    /**
+     * @brief A pre-generated edge strip of chunks for the next streaming step.
+     *
+     * Computed by pregenStrip() on a background thread and consumed by
+     * recenterWithStrip() on the main thread. If the strip no longer matches the
+     * step needed it is silently discarded and re-generated next frame.
+     * @note Thread-safe to generate: pregenStrip() is `const` and touches only
+     *       the immutable generator + save files, never the window ring buffer.
+     */
     struct PregenStrip {
         bool       valid  = false;
         int        dir    = 0;     // +1/-1 along the axis
@@ -164,8 +187,15 @@ public:
         glm::ivec2 origin{0};      // window origin (x,z) the strip was computed for
         std::vector<Chunk> chunks; // entering columns x chunksY, edge order
     };
-    // `fromX,fromZ` is the VIRTUAL window origin this strip steps from — the current
-    // origin for the next column, or origin+k for a strip staged k columns ahead.
+    /**
+     * @brief Pre-generate the entering edge strip for one streaming step.
+     *
+     * Generates the column(s) that would enter the window if it moved by `dir`
+     * (+1/-1) along X (alongX=true) or Z, starting from virtual origin (fromX,fromZ).
+     * Pure function of the immutable generator + save files — safe to call on a
+     * background thread while the main thread renders.
+     * @note This method is `const` precisely to enforce that it cannot touch window state.
+     */
     [[nodiscard]] PregenStrip pregenStrip(int dir, bool alongX, int fromX, int fromZ) const;
     std::vector<glm::ivec3> recenterWithStrip(int centerChunkX, int centerChunkZ,
                                               PregenStrip&& strip,

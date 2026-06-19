@@ -1,3 +1,13 @@
+/**
+ * @file GpuAllocator.cpp
+ * @brief Implements GpuAllocator: block creation, first-fit sub-allocation, and coalescing free.
+ *
+ * allocate() performs a first-fit scan across blocks of the matching memory type. When no
+ * existing block has room, createBlock() allocates a fresh 64 MiB VkDeviceMemory (or larger
+ * for oversized requests). free() returns the span to the block's free-list and coalesces
+ * adjacent ranges in one sorted pass to avoid fragmentation.
+ */
+
 #include "render/GpuAllocator.h"
 
 #include "render/VulkanContext.h"

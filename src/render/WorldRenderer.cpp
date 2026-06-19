@@ -1,3 +1,13 @@
+/**
+ * @file WorldRenderer.cpp
+ * @brief WorldRenderer implementation: startup meshing, streaming worker pool,
+ *        deferred buffer management, frustum cull, and per-frame draw recording.
+ *
+ * Key paths: buildMeshes() — parallel startup greedy-mesh + batched GPU upload;
+ * workerLoop() — background greedy-mesh threads (read-only World access);
+ * installMeshBatch() + recordPendingUploads() — frame-integrated staging upload
+ * with no vkDeviceWaitIdle; record() — CPU frustum cull + indirect draw.
+ */
 #include "render/WorldRenderer.h"
 
 #include "render/LightAtlas.h"

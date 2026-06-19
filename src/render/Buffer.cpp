@@ -1,3 +1,13 @@
+/**
+ * @file Buffer.cpp
+ * @brief Implements Buffer: VkBuffer creation, GpuAllocator sub-allocation, upload, and staging copy.
+ *
+ * The constructor creates the VkBuffer, queries its memory requirements, and sub-allocates
+ * from the shared GpuAllocator. createDeviceLocal() uses a temporary host-visible staging
+ * buffer to copy data into device-local memory via a single-time command. Host-visible blocks
+ * are persistently mapped by the pool, so map() is effectively free.
+ */
+
 #include "render/Buffer.h"
 
 #include "render/VulkanContext.h"

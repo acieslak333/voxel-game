@@ -1,5 +1,18 @@
 #pragma once
 
+/**
+ * @file OffscreenTarget.h
+ * @brief Low-resolution colour + depth render target for the pixelation effect.
+ *
+ * The world scene is drawn at a reduced resolution (window / pixelScale) into this
+ * target; the CompositeRenderer then nearest-upscales the colour image onto the
+ * full-resolution swapchain framebuffer, producing the PS1-style chunky pixel look.
+ * The depth image is also sampled by the composite pass for distance fog (issue #10 E).
+ * The render pass transitions colour to SHADER_READ_ONLY_OPTIMAL on completion so
+ * the composite fragment shader can sample it immediately.
+ * @see docs/CODE_INDEX.md
+ */
+
 #include <vulkan/vulkan.h>
 
 namespace vg {
@@ -16,6 +29,11 @@ class VulkanContext;
 //  The colour image is created with TRANSFER_SRC usage and the render pass leaves
 //  it in TRANSFER_SRC_OPTIMAL, so it can be blitted the moment the pass ends.
 // -----------------------------------------------------------------------------
+/**
+ * @brief Low-res colour+depth framebuffer used as the scene render target.
+ *
+ * Recreated by Renderer whenever pixelScale changes or the swapchain is rebuilt.
+ */
 class OffscreenTarget {
 public:
     OffscreenTarget(VulkanContext& ctx, VkExtent2D extent, VkFormat colorFormat);

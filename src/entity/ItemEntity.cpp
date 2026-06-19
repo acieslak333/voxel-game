@@ -1,3 +1,9 @@
+/**
+ * @file ItemEntity.cpp
+ * @brief Dropped-item gravity, ground-settle, magnet, and inventory-pickup logic.
+ * @see docs/CODE_INDEX.md
+ */
+
 #include "entity/ItemEntity.h"
 
 #include <cmath>
@@ -11,6 +17,7 @@ constexpr float kMagnetAcc = 22.0f;  // pull acceleration toward the player
 constexpr float kDrag      = 4.0f;   // horizontal damping so settled items stop sliding
 } // namespace
 
+/// Spawn a dropped item at `pos` with optional initial velocity; empty stacks are ignored.
 void ItemEntities::spawn(const glm::vec3& pos, const ItemStack& stack, const glm::vec3& vel) {
     if (stack.empty()) return;
     ItemEntity e;
@@ -20,6 +27,8 @@ void ItemEntities::spawn(const glm::vec3& pos, const ItemStack& stack, const glm
     items_.push_back(e);
 }
 
+/// Step all items: gravity, ground settle, magnet/pickup once past kPickupDelay.
+/// @return Number of stacks successfully added to `inv` this step.
 int ItemEntities::update(float dt, const SolidFn& solid, const glm::vec3& playerFeet,
                          Inventory& inv) {
     const glm::vec3 body = playerFeet + glm::vec3(0.0f, 0.9f, 0.0f); // aim at the torso

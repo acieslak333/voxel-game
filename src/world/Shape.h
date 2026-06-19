@@ -1,5 +1,17 @@
 #pragma once
 
+/**
+ * @file Shape.h
+ * @brief Sub-voxel shape system for hammer-reshaped blocks (slabs, stairs, posts, walls).
+ *
+ * ShapeKind and orientation are packed into Block::metadata (bits 0-2 = kind,
+ * bits 3-5 = orient). shapeBoxes() is the single source of truth for both the
+ * mesher (geometry) and collision/raycasting (solid volume) — they can never
+ * disagree. metadata 0 decodes to {Cube, orient 0} so all existing saved chunks
+ * remain full cubes (backward compatible).
+ * @see docs/CODE_INDEX.md
+ */
+
 #include <glm/glm.hpp>
 
 #include <cstdint>
@@ -53,15 +65,24 @@ constexpr uint8_t shapeOrientOf(uint8_t metadata) {
     return static_cast<uint8_t>((metadata >> 3) & 0x7u);
 }
 
-// Number of distinct orientations a shape cycles through (Wall derives its own
-// connections, so it has a single stored orientation).
+/**
+ * @brief Number of distinct stored orientations for `kind` (Wall = 1; connections
+ *        are derived from neighbour state, not stored in metadata).
+ */
 [[nodiscard]] int shapeOrientCount(ShapeKind kind);
 
-// The box union for a shape, written into `out` (capacity >= kMaxShapeBoxes);
-// returns the box count. `wallMask` (bits: 0 -Z, 1 +X, 2 +Z, 3 -X) is only
-// consulted for Wall; pass 0 for every other shape. A Cube returns the single
-// full-cell box, so callers can treat all shapes uniformly. Coords are local
-// to the cell, in [0,1].
+/**
+ * @brief Write the axis-aligned box union for a shape into `out`.
+ *
+ * @param kind     The shape variant.
+ * @param orient   Orientation bits from Block::metadata (see shapeOrientOf).
+ * @param wallMask For Wall only: bitmask of connected arms (0=-Z,1=+X,2=+Z,3=-X).
+ *                 Pass 0 for all other shapes.
+ * @param out      Output buffer; must have capacity >= kMaxShapeBoxes.
+ * @return Number of boxes written (1 for Cube, up to kMaxShapeBoxes for Wall).
+ * @note This is the single source of truth shared by the mesher and by
+ *       collision / raycasting — the two subsystems can never disagree.
+ */
 int shapeBoxes(ShapeKind kind, uint8_t orient, uint8_t wallMask, ShapeBox out[]);
 
 // Convenience wrapper that fills a vector (cleared first).

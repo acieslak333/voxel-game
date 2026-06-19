@@ -1,3 +1,9 @@
+/**
+ * @file Armature.cpp
+ * @brief Skeleton helpers, keyframe sampling (lerp/slerp), world-matrix composition, and mesh bake.
+ * @see docs/CODE_INDEX.md
+ */
+
 #include "entity/Armature.h"
 
 #include <glm/gtc/matrix_transform.hpp>
@@ -88,6 +94,7 @@ glm::quat sampleQuat(const std::vector<float>& times, const std::vector<glm::qua
 
 } // namespace
 
+/// Sample all channels of `clip` at `time`; loops or clamps based on clip.loop.
 LocalPose sampleClip(const Skeleton& skel, const AnimationClip& clip, float time) {
     LocalPose pose = restPose(skel);
 
@@ -111,6 +118,8 @@ LocalPose sampleClip(const Skeleton& skel, const AnimationClip& clip, float time
     return pose;
 }
 
+/// Compose local-space transforms down the hierarchy into per-joint world matrices.
+/// @note Requires the skeleton to be topologically ordered (parent index < child index).
 std::vector<glm::mat4> worldMatrices(const Skeleton& skel, const LocalPose& pose) {
     const size_t n = skel.joints.size();
     std::vector<glm::mat4> world(n, glm::mat4(1.0f));
@@ -123,6 +132,8 @@ std::vector<glm::mat4> worldMatrices(const Skeleton& skel, const LocalPose& pose
     return world;
 }
 
+/// Bake every box into a non-indexed triangle list (36 verts/box), transforming corners
+/// and normals by each box's joint world matrix. Suitable for upload to a dynamic VBO.
 std::vector<EntityVertex> bakeMesh(const Skeleton& skel,
                                    const std::vector<glm::mat4>& world) {
     // Six faces, each defined by its outward axis + sign and two in-plane axes

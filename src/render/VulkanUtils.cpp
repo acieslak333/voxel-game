@@ -1,3 +1,13 @@
+/**
+ * @file VulkanUtils.cpp
+ * @brief Implements vkutil image/format helpers: create, view, transition, copy, depth format.
+ *
+ * transitionImageLayout() handles two transitions used by this renderer:
+ *   UNDEFINED -> TRANSFER_DST_OPTIMAL (before texel upload) and
+ *   TRANSFER_DST_OPTIMAL -> SHADER_READ_ONLY_OPTIMAL (after upload).
+ * copyBufferToImage() copies all array layers in a single region (buffer is tightly packed).
+ */
+
 #include "render/VulkanUtils.h"
 
 #include "render/VulkanContext.h"

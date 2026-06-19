@@ -1,5 +1,16 @@
 #pragma once
 
+/**
+ * @file BlockRegistry.h
+ * @brief Block-type database loaded from assets/blocks.yaml (+ items.yaml).
+ *
+ * BlockRegistry owns all static, per-block-type data (BlockProperties) and the
+ * deduplicated texture-array path list required by the renderer. Ids are assigned
+ * in YAML file order; id 0 is always "air". Lookup by name goes through idByName();
+ * hot per-id queries go through the inline accessors.
+ * @see docs/CODE_INDEX.md
+ */
+
 #include "world/Block.h"
 
 #include <glm/glm.hpp>
@@ -12,19 +23,31 @@
 
 namespace vg {
 
-// Texture-array layers of the 9-patch UI sprites (ISSUES #15). Resolved once at
-// registry load; the UI draws each sliced into corners/edges/centre.
+/**
+ * @brief Texture-array layers for the 9-patch UI sprites (ISSUES #15).
+ *
+ * Resolved once at registry load; the UI slices each layer into
+ * corners/edges/centre for scalable panel rendering.
+ */
 struct UiSpriteLayers {
     uint32_t border = 0, eq = 0, bg = 0, bg2 = 0, bg3 = 0,
              button = 0, slider = 0, sliderBg = 0;
 };
 
-// What kind of tool an item IS (when held) or a block PREFERS (to be mined fast).
-// Survival starts with just two tools (see ISSUES #13B): a pickaxe and a sword.
+/**
+ * @brief Tool category for mining speed and tool identity (ISSUES #13B).
+ *
+ * Used both to classify what a held item IS and which tool a block PREFERS
+ * for fast mining. Matching kind + sufficient tier yields full mining speed.
+ */
 enum class ToolKind { None, Pickaxe, Sword };
 
-// Equipment slot an item occupies: four armour pieces + a generic Trinket
-// (accessory) slot. None = an ordinary item/block (ISSUES #13B, Terraria-style).
+/**
+ * @brief Equipment slot an item occupies (ISSUES #13B, Terraria-style).
+ *
+ * None means the item is an ordinary placeable block or consumable rather than
+ * an equippable piece of gear.
+ */
 enum class EquipSlot { None, Head, Chest, Legs, Feet, Trinket };
 
 // -----------------------------------------------------------------------------

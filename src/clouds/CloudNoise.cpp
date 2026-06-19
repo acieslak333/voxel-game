@@ -1,3 +1,12 @@
+/**
+ * @file CloudNoise.cpp
+ * @brief CloudNoise implementation: tileable Perlin-Worley base and Worley-fBm
+ *        detail generation, disk cache I/O, and 3D texture upload.
+ *
+ * Both volumes use a tileable-noise construction (trilinear blend of period-shifted
+ * copies of FastNoise samples) so they repeat seamlessly under REPEAT sampling.
+ * Cache magic "CLD1" + version guard ensures stale caches are regenerated.
+ */
 #include "clouds/CloudNoise.h"
 
 #include "render/Buffer.h"

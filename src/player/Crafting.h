@@ -1,5 +1,16 @@
 #pragma once
 
+/**
+ * @file Crafting.h
+ * @brief Data-driven Terraria-style crafting: recipe list loaded from YAML, pure logic.
+ *
+ * Recipes are resolved against a BlockRegistry at load time; unknown block names are
+ * skipped silently. craftable() returns the subset of recipes satisfiable from the
+ * current inventory; craft() pays inputs and delivers output atomically. No renderer
+ * or world dependency — headlessly testable via `--logictest`.
+ * @see docs/CODE_INDEX.md
+ */
+
 #include "player/Inventory.h"
 
 #include <cstdint>
@@ -23,8 +34,10 @@ class BlockRegistry;
 //  (--logictest) and has no dependency on the renderer/UI. A future `station`
 //  field (workbench/furnace/anvil) can gate recipes by nearby blocks.
 // -----------------------------------------------------------------------------
+/** @brief Data-driven recipe list; exposes craftable(inv) and craft(recipe, inv). */
 class Crafting {
 public:
+    /** @brief One crafting recipe: name, output block + count, and a list of (id, count) inputs. */
     struct Recipe {
         std::string name;                                   // output block name (display)
         uint16_t    output    = 0;                          // produced block id

@@ -1,5 +1,15 @@
 #pragma once
 
+/**
+ * @file ItemEntity.h
+ * @brief Dropped-item physics entities: gravity, ground settling, magnet pickup.
+ *
+ * Each ItemEntity holds an ItemStack, falls under gravity, settles on solid blocks,
+ * and is magnetised toward the player for collection. Collision is queried through a
+ * SolidFn predicate. Pure simulation — rendering handled separately by the caller.
+ * @see docs/CODE_INDEX.md
+ */
+
 #include "player/Inventory.h" // ItemStack, Inventory
 
 #include <functional>
@@ -9,7 +19,7 @@
 namespace vg {
 
 // -----------------------------------------------------------------------------
-//  ItemEntity / ItemEntities 
+//  ItemEntity / ItemEntities
 // -----------------------------------------------------------------------------
 //  Dropped items that live in the world as physical entities: they fall, settle on
 //  the ground, get magnetised toward a nearby player and are picked up on contact
@@ -19,6 +29,7 @@ namespace vg {
 //  so it's headlessly testable; RENDERING is separate and will hang off the
 //  EntityRenderer (billboarded quads) — until then this can run with an empty list.
 // -----------------------------------------------------------------------------
+/** @brief One dropped item in the world: position, velocity, stack payload, age, and visual spin. */
 struct ItemEntity {
     glm::vec3 pos{0.0f};       // world position (item centre)
     glm::vec3 vel{0.0f};
@@ -27,6 +38,7 @@ struct ItemEntity {
     float     spin = 0.0f;     // visual yaw for the future billboard render
 };
 
+/** @brief Manager for all dropped ItemEntity instances: spawn, physics step, and pickup. */
 class ItemEntities {
 public:
     using SolidFn = std::function<bool(int x, int y, int z)>;

@@ -1,5 +1,16 @@
 #pragma once
 
+/**
+ * @file PlayerSave.h
+ * @brief Versioned binary (de)serialisation for persisted player state.
+ *
+ * Holds position, look, health, inventory slots, and equipment slots in a
+ * self-describing byte buffer (magic "VGPL" + version). No file I/O — App reads
+ * and writes the bytes. Header-only (all logic is inline). Headlessly
+ * round-trip testable via `--logictest`.
+ * @see docs/CODE_INDEX.md
+ */
+
 #include <glm/glm.hpp>
 
 #include <cstdint>
@@ -19,6 +30,7 @@ namespace vg {
 //  bytes. Block ids are stored raw (like the chunk save): appending blocks stays
 //  compatible, reordering would not.
 // -----------------------------------------------------------------------------
+/** @brief Serialisable snapshot of all player state that survives a quit/reload. */
 struct PlayerSave {
     glm::vec3 feet{0.0f};
     float     yaw    = 0.0f;

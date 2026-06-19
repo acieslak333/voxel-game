@@ -1,5 +1,16 @@
 #pragma once
 
+/**
+ * @file NoiseStack.h
+ * @brief Weighted multi-layer noise blend with domain warp, multifractal, and transfer stages.
+ *
+ * Each layer is an independently seeded Noise instance evaluated as Perlin/Ridged/Billow/Worley
+ * fBm (with optional derivative-attenuation or Musgrave multifractal). value() returns the
+ * weight-normalised blend in ~[-1, 1]. A transfer stage (redistribution + terrace) shapes the
+ * final field. Deterministic pure function of (seed, coords) — streaming-safe.
+ * @see docs/CODE_INDEX.md
+ */
+
 #include "utilities/noise/Noise.h"
 
 #include <algorithm>
@@ -28,12 +39,13 @@ namespace vg {
 //  Determinism: every layer owns its own seeded Noise, so the blend is a pure
 //  function of (seed, world coords) — streaming-safe, like the rest of worldgen.
 // -----------------------------------------------------------------------------
+/** @brief Data-driven multi-layer noise blend; drop-in replacement for a single fbm call. */
 class NoiseStack {
 public:
-    // Perlin (raw rolling field), Ridged (sharp ridgelines), Billow (rounded
-    // blobs), or Worley (cellular — spires/cracks/craters; see Noise::worley).
+    /// @brief Base noise shape per layer: raw gradient, sharp ridgelines, rounded blobs, or cellular.
     enum class Type { Perlin, Ridged, Billow, Worley };
 
+    /** @brief Configuration for one noise layer: shape, frequency, octaves, weight, warp, etc. */
     struct Layer {
         Type  type       = Type::Perlin;
         float frequency  = 0.01f;

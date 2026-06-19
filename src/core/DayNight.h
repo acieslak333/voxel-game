@@ -1,5 +1,15 @@
 #pragma once
 
+/**
+ * @file DayNight.h
+ * @brief Time-of-day model: advances the sun/moon, snapshots sky and lighting state.
+ *
+ * DayNight owns the time fraction and all sky parameters loaded from
+ * assets/sky.yaml. Each frame, state() produces a SkyState consumed by
+ * SkyRenderer (gradient + disc rendering) and WorldRenderer (chunk lighting).
+ * Per-day weather variation nudges colours without breaking reproducibility.
+ * @see docs/CODE_INDEX.md
+ */
 #include <glm/glm.hpp>
 
 #include <cstdint>
@@ -10,21 +20,16 @@ namespace vg {
 
 class Palette;
 
-// -----------------------------------------------------------------------------
-//  DayNight
-// -----------------------------------------------------------------------------
-//  The time-of-day model. Advances a fractional day [0,1) in real time (one full
-//  day every `dayLengthMinutes`), moves the sun across the sky (the moon sits
-//  opposite), and blends the sky/lighting colours loaded from assets/sky.yaml.
-//
-//  state() snapshots everything the renderers need each frame:
-//    * SkyRenderer draws the gradient + sun/moon discs from it, and
-//    * WorldRenderer feeds the light direction/colour into the chunk shader,
-//      where faces are lit by ambient + diffuse * max(dot(N, lightDir), 0) —
-//      so block shading sweeps around with the sun without any remeshing.
-// -----------------------------------------------------------------------------
+/**
+ * @brief Time-of-day controller that drives the sky and terrain light each frame.
+ *
+ * Advances a fractional day [0,1) in real time, moves the sun and moon across
+ * their arcs, applies a per-day weather mood, and computes the full SkyState
+ * snapshot once per frame via state().
+ */
 class DayNight {
 public:
+    /** @brief Per-frame snapshot of all sky and lighting parameters for the renderers. */
     struct SkyState {
         // Directions point *toward* the celestial body (unit vectors).
         glm::vec3 sunDir;

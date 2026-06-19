@@ -1,3 +1,11 @@
+/**
+ * @file WeatherMap.cpp
+ * @brief WeatherMap implementation: value-noise generation and R8G8 2D texture upload.
+ *
+ * Two tiling 2D value-noise octaves are generated for coverage (R) and type (G)
+ * variation, packed into an R8G8_UNORM texture. The shader subtracts 0.5 to recover
+ * signed offsets. Generation is deterministic given the world seed.
+ */
 #include "clouds/WeatherMap.h"
 
 #include "render/Buffer.h"

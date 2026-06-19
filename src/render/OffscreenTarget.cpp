@@ -1,3 +1,13 @@
+/**
+ * @file OffscreenTarget.cpp
+ * @brief Implements OffscreenTarget: colour + depth images, render pass, and framebuffer.
+ *
+ * The colour attachment transitions to SHADER_READ_ONLY_OPTIMAL at render-pass end so the
+ * composite pass can sample it immediately. The depth attachment is kept (storeOp STORE)
+ * and transitions to DEPTH_STENCIL_READ_ONLY_OPTIMAL so the composite fog pass can
+ * sample it as well (issue #10 E). Two subpass dependencies ensure correct ordering.
+ */
+
 #include "render/OffscreenTarget.h"
 
 #include "render/VulkanContext.h"

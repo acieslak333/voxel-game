@@ -1,3 +1,12 @@
+/**
+ * @file Renderer.cpp
+ * @brief Implements Renderer: command pools, sync primitives, UI pass, and the drawFrame loop.
+ *
+ * recordCommandBuffer() sequences the pre-pass (transfers), scene pass (low-res offscreen,
+ * reversed-Z), and UI/composite pass (full-res swapchain). drawFrame() manages the
+ * acquire->wait->record->submit->present cycle with two frames in flight.
+ */
+
 #include "render/Renderer.h"
 
 #include "core/Window.h"

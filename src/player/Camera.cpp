@@ -1,3 +1,9 @@
+/**
+ * @file Camera.cpp
+ * @brief Camera direction vectors and view-matrix computation.
+ * @see docs/CODE_INDEX.md
+ */
+
 #include "player/Camera.h"
 
 #include <glm/gtc/matrix_transform.hpp>

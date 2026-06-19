@@ -1,3 +1,12 @@
+/**
+ * @file UiRenderer.cpp
+ * @brief UiRenderer implementation: TTF atlas baking, primitive emit helpers,
+ *        pipeline setup, and per-frame vertex upload + draw recording.
+ *
+ * bakeFont() uses stb_truetype to rasterise glyphs into a 512x512 R8 atlas;
+ * a 2x2 white block in the bottom-right corner is reserved for solid-colour
+ * quads so the same pipeline handles text, panels, and block icons.
+ */
 #include "render/UiRenderer.h"
 
 #include "render/VulkanContext.h"

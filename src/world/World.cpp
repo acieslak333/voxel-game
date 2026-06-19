@@ -1,3 +1,17 @@
+/**
+ * @file World.cpp
+ * @brief World construction, terrain generation, lighting, streaming, and persistence.
+ *
+ * Contains the terrain generator (Beta 1.7.3-style 3D density field with continents,
+ * caves, biomes, trees), both light BFS flood-fills (sky and block), the ring-buffer
+ * streaming logic (recenter / shiftColumn / relightBoxes), chunk save/load (binary
+ * format, magic kChunkMagic, version kChunkVersion), and all block-mutation paths.
+ *
+ * Threading invariants: generateColumnInto() is `const` (safe on the pregen thread);
+ * all other mutators (setBlock, recenter, relight) are main-thread-only.
+ * @see docs/CODE_INDEX.md
+ */
+
 #include "world/World.h"
 
 #include "utilities/hash/Hash.h"
@@ -27,6 +41,7 @@ namespace {
 // Block-light hue packing: a linear RGB colour (0..1) <-> RGBA8 with R in the low
 // byte, matching the GPU vertex format (render/Vertex.h packColorRGBA8). The flood
 // carries the dominant emitter's packed colour alongside the intensity level.
+/// Pack a linear-RGB colour into RGBA8 (R in the low byte). Inverse of unpackLightColor.
 inline uint32_t packLightColor(const glm::vec3& c) {
     auto q = [](float v) -> uint32_t {
         const float cl = v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v);
@@ -44,14 +59,23 @@ inline glm::vec3 unpackLightColor(uint32_t p) {
 // One little binary file per *edited* chunk (unedited chunks regenerate from the
 // seed, so they are never written). Format: magic + version + edge length, then
 // id(u16)+metadata(u8) per voxel in the chunk's storage order. See docs/STREAMING.md.
+/// Chunk file magic ('CHNK'). Identifies the binary save format.
 constexpr uint32_t kChunkMagic   = 0x4B4E4843u; // 'CHNK'
+/// Chunk save-format version. Bump whenever the on-disk layout changes; old files
+/// are then regenerated from noise instead of loading stale data.
 constexpr uint32_t kChunkVersion = 44u; // bump: more plains/hills (softer relief gain + wider mid bands)
 
+/// Build the filesystem path for a chunk's save file.
 std::string chunkPath(const std::string& dir, int cx, int cy, int cz) {
     return dir + "/c." + std::to_string(cx) + '.' + std::to_string(cy) + '.' +
            std::to_string(cz) + ".bin";
 }
 
+/**
+ * @brief Attempt to load a persisted chunk from `path` into `out`.
+ * @return true on success; false if the file is absent, has wrong magic/version,
+ *         or is truncated (caller regenerates from noise).
+ */
 bool loadChunkFile(const std::string& path, Chunk& out) {
     std::ifstream f(path, std::ios::binary);
     if (!f) {
@@ -82,6 +106,8 @@ bool loadChunkFile(const std::string& path, Chunk& out) {
     return true;
 }
 
+/// Write chunk `c` to `path` in the binary save format. Silently no-ops if the
+/// file cannot be opened.
 void saveChunkFile(const std::string& path, const Chunk& c) {
     std::ofstream f(path, std::ios::binary | std::ios::trunc);
     if (!f) {

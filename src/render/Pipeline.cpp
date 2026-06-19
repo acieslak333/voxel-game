@@ -1,3 +1,13 @@
+/**
+ * @file Pipeline.cpp
+ * @brief Implements Pipeline: descriptor set layout, pipeline layout, and VkPipeline creation.
+ *
+ * createDescriptorSetLayout() wires four bindings (camera UBO, texture array, draw-data
+ * SSBO, light atlas). createPipeline() configures vertex input from Vertex::attributeDescriptions(),
+ * reversed-Z depth test (GREATER), and optionally alpha blending + depth-write-off for
+ * the translucent (water) variant.
+ */
+
 #include "render/Pipeline.h"
 
 #include "render/Vertex.h"

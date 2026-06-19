@@ -1,30 +1,36 @@
 #pragma once
 
+/**
+ * @file ShapePicker.h
+ * @brief Hammer radial shape picker constants and lookup helpers (header-only).
+ *
+ * Lives in a header rather than an anonymous .cpp namespace because both
+ * App.cpp (edit/input logic) and AppUi.cpp (picker UI drawing) need the same
+ * ordered shape list and name/index lookups after the App god-object was split
+ * (REVIEW R9).
+ * @see docs/CODE_INDEX.md
+ */
 #include "world/Shape.h"
 
 #include <cstddef>
 
 namespace vg {
 
-// -----------------------------------------------------------------------------
-//  Shape picker shared helpers
-// -----------------------------------------------------------------------------
-//  The hammer's radial shape picker. These live in a header (not a .cpp's
-//  anonymous namespace) because the picker list + lookups are used by BOTH the
-//  input/edit code in App.cpp and the picker UI in AppUi.cpp, which are separate
-//  translation units since the App god-object was split (REVIEW R9).
-// -----------------------------------------------------------------------------
-
-// The shapes the hammer radial offers, in display order (left to right).
+/// Shapes offered by the hammer radial, in left-to-right display order.
 inline constexpr ShapeKind kPickerShapes[] = {
     ShapeKind::Cube, ShapeKind::Slab, ShapeKind::Stairs,
     ShapeKind::Post, ShapeKind::Wall, ShapeKind::VerticalSlab,
 };
+
+/// Number of entries in kPickerShapes.
 inline constexpr int kPickerShapeCount =
     static_cast<int>(sizeof(kPickerShapes) / sizeof(kPickerShapes[0]));
 
-// Index of a shape within kPickerShapes (0 if absent) — maps the active build
-// shape to its slot on the radial.
+/**
+ * @brief Index of a shape within kPickerShapes (returns 0 if absent).
+ * @param k The shape kind to find.
+ * @return Slot index in the radial (0 = Cube if not found).
+ */
 inline int shapeIndex(ShapeKind k) {
     for (int i = 0; i < kPickerShapeCount; ++i) {
         if (kPickerShapes[i] == k) return i;
@@ -32,7 +38,11 @@ inline int shapeIndex(ShapeKind k) {
     return 0;
 }
 
-// Display name for a block shape (HUD indicator + picker labels).
+/**
+ * @brief Human-readable display name for a shape (HUD indicator and picker labels).
+ * @param k The shape kind.
+ * @return A static string such as "Slab" or "Vertical Slab".
+ */
 inline const char* shapeName(ShapeKind k) {
     switch (k) {
         case ShapeKind::Cube:         return "Cube";

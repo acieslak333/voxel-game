@@ -1,3 +1,14 @@
+/**
+ * @file Feature.cpp
+ * @brief YAML loader and per-cell evaluation for procedural Feature objects.
+ *
+ * Parses assets/features/*.yaml into Feature structs (op shapes, randomisable
+ * dimensions, weighted block palettes, fill modes). Feature::at() evaluates all
+ * ops in order for a local cell and returns the block id the cell should hold,
+ * or kSkip to leave terrain untouched.
+ * @see docs/CODE_INDEX.md
+ */
+
 #include "world/Feature.h"
 
 #include "world/BlockRegistry.h"
@@ -186,7 +197,7 @@ Feature loadOne(const std::string& path, const BlockRegistry& reg) {
     return f;
 }
 
-// Weighted pick from an op's palette for a roll in [0,1).
+/// Weighted pick from an op's block palette for a roll value in [0,1).
 uint16_t pickBlock(const Feature::Op& op, float roll) {
     if (op.blocks.empty() || op.totalW <= 0.0f) return Feature::kSkip;
     float t = roll * op.totalW;

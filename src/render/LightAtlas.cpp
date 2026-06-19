@@ -1,3 +1,16 @@
+/**
+ * @file LightAtlas.cpp
+ * @brief Implements LightAtlas: 3D image creation, slot allocation, deferred recycling, writes.
+ *
+ * The constructor lays out slots as a 2D grid (~sqrt x sqrt) in X/Y, one slot deep in Z,
+ * then transitions the image to VK_IMAGE_LAYOUT_GENERAL for its lifetime.
+ * recordWrite() copies a PAD^3 RGBA8 block from a staging Buffer into the slot's sub-region
+ * and inserts an ordering barrier (TRANSFER_WRITE -> SHADER_READ) so the draw pass can
+ * sample the updated slot later in the same submission. The staging Buffer is retired
+ * alongside the old slot (freeDeferred / retiredStaging_) and freed after framesInFlight+1
+ * tick() calls.
+ */
+
 #include "render/LightAtlas.h"
 
 #include "render/VulkanContext.h"

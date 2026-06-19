@@ -1,5 +1,14 @@
 #pragma once
 
+/**
+ * @file Palette.h
+ * @brief Named sRGB colour palette loaded from assets/colors.yaml.
+ *
+ * Provides lookup by name in both sRGB and linear colour spaces. This is the
+ * single source of truth for block tints, sky colours, and UI accents. Colour
+ * names are referenced from blocks.yaml, sky.yaml, and App settings.
+ * @see docs/CODE_INDEX.md
+ */
 #include <glm/glm.hpp>
 
 #include <string>
@@ -8,17 +17,12 @@
 
 namespace vg {
 
-// -----------------------------------------------------------------------------
-//  Palette
-// -----------------------------------------------------------------------------
-//  A named colour palette loaded from a YAML map of name -> "#RRGGBB"
-//  (assets/colors.yaml, sampled from assets/colormap.png). Colours are stored in
-//  sRGB; linear() removes the sRGB curve for use with sRGB render targets (where
-//  clear colours and lighting maths are specified in linear space).
-//
-//  This is the single place block tints, the sky colour, UI accents, etc. can
-//  pull a consistent set of colours from.
-// -----------------------------------------------------------------------------
+/**
+ * @brief Named colour palette loaded from a YAML name-to-"#RRGGBB" map.
+ *
+ * Colours are stored in sRGB [0,1]. linear() applies the inverse sRGB curve
+ * for use wherever linear-space values are required (lighting, clear colours).
+ */
 class Palette {
 public:
     // Load the palette. Throws std::runtime_error if the file is missing or any

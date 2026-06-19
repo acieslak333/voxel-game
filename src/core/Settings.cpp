@@ -1,3 +1,12 @@
+/**
+ * @file Settings.cpp
+ * @brief Settings YAML load/save implementation.
+ *
+ * Settings::load parses build/bin/assets/settings.yaml, leaving each field
+ * at its default when a key is absent or has an unexpected type.
+ * Settings::save writes all fields back; failures are silently ignored.
+ * @see docs/CODE_INDEX.md
+ */
 #include "core/Settings.h"
 
 #include <yaml-cpp/yaml.h>

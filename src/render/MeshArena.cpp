@@ -1,3 +1,12 @@
+/**
+ * @file MeshArena.cpp
+ * @brief Implements MeshArena: device-local vertex/index buffer construction and span allocation.
+ *
+ * allocate() reserves element ranges from the two SpanAllocators (element-addressed, not
+ * byte-addressed) and throws with a diagnostic message if either arena is full. On index-
+ * arena overflow the vertex reservation is rolled back atomically. free() returns both spans.
+ */
+
 #include "render/MeshArena.h"
 
 #include "render/VulkanContext.h"

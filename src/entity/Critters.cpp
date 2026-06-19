@@ -1,3 +1,9 @@
+/**
+ * @file Critters.cpp
+ * @brief Critter wander/obstacle/gravity update and LCG random helper.
+ * @see docs/CODE_INDEX.md
+ */
+
 #include "entity/Critters.h"
 
 #include <cmath>
@@ -18,6 +24,7 @@ float Critters::frand() {
     return static_cast<float>(rng_ >> 8) / 16777216.0f;
 }
 
+/// Add a critter at `feet` with a random initial facing and wander timer.
 void Critters::spawn(const glm::vec3& feet) {
     Critter c;
     c.pos     = feet;
@@ -26,6 +33,7 @@ void Critters::spawn(const glm::vec3& feet) {
     critters_.push_back(c);
 }
 
+/// Step all critters: wander decisions, horizontal movement with obstacle avoidance, gravity.
 void Critters::update(float dt, const SolidFn& solid) {
     // Solid test at a world point (treats the critter as ~1 block wide/tall).
     auto solidAt = [&](float x, float y, float z) {

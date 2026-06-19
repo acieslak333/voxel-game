@@ -1,3 +1,8 @@
+/**
+ * @file Swapchain.cpp
+ * @brief Implements Swapchain: swapchain creation, depth resources, render pass, framebuffers.
+ */
+
 #include "render/Swapchain.h"
 
 #include "core/Window.h"

@@ -1,5 +1,17 @@
 #pragma once
 
+/**
+ * @file Pipeline.h
+ * @brief Vulkan graphics pipeline for chunk geometry (opaque and translucent variants).
+ *
+ * Builds a VkPipeline from compiled SPIR-V shaders against a given render pass.
+ * The descriptor set layout declares four bindings: camera UBO (b0), block texture
+ * array (b1), per-chunk draw-data SSBO (b2), and the 3D light atlas (b3). A push
+ * constant carries the per-draw model matrix plus a vec4 of parameters.
+ * Viewport and scissor are dynamic state, so the pipeline survives window resizes.
+ * @see docs/CODE_INDEX.md
+ */
+
 #include <vulkan/vulkan.h>
 
 #include <string>
@@ -19,6 +31,13 @@ class VulkanContext;
 //  Viewport and scissor are dynamic state, so the pipeline survives window
 //  resizes without being rebuilt.
 // -----------------------------------------------------------------------------
+/**
+ * @brief RAII wrapper for a VkPipeline, VkPipelineLayout, and VkDescriptorSetLayout.
+ *
+ * Construct with `translucent=true` to obtain the water variant: alpha blending
+ * enabled, depth writes disabled, back-face culling disabled. Both variants use
+ * VK_COMPARE_OP_GREATER (reversed-Z, near=1 far=0).
+ */
 class Pipeline {
 public:
     // Size of the push constant block: a 4x4 model matrix + a vec4 of params

@@ -1,7 +1,14 @@
+/**
+ * @file Inventory.cpp
+ * @brief Inventory add/remove/count operations with two-pass slot filling.
+ * @see docs/CODE_INDEX.md
+ */
+
 #include "player/Inventory.h"
 
 namespace vg {
 
+/// Two-pass add: top up existing stacks first, then fill empty slots. Returns leftover count.
 int Inventory::add(uint16_t blockId, int count) {
     if (blockId == 0 || count <= 0) {
         return count > 0 ? count : 0;
@@ -34,6 +41,7 @@ int Inventory::add(uint16_t blockId, int count) {
     return remaining; // 0 = everything fit
 }
 
+/// Sum of counts for `blockId` across every slot; used by crafting canCraft checks.
 int Inventory::count(uint16_t blockId) const {
     if (blockId == 0) return 0;
     int total = 0;
@@ -43,6 +51,7 @@ int Inventory::count(uint16_t blockId) const {
     return total;
 }
 
+/// Remove up to `n` of `blockId` (hotbar first); returns how many could NOT be removed.
 int Inventory::remove(uint16_t blockId, int n) {
     if (blockId == 0 || n <= 0) return n > 0 ? n : 0;
     for (int i = 0; i < kSlots && n > 0; ++i) {
@@ -56,6 +65,7 @@ int Inventory::remove(uint16_t blockId, int n) {
     return n; // 0 = removed everything requested
 }
 
+/// Decrement the selected hotbar slot by one and return its blockId; 0 if slot was empty.
 uint16_t Inventory::takeFromSelected() {
     ItemStack& s = slots_[static_cast<size_t>(selected_)];
     if (s.empty()) {
