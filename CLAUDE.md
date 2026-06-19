@@ -127,6 +127,13 @@ when the task matches — don't reinvent what they cover.
   - `code-index` — build/refresh the code index (machine symbol index, the
     `CODE_INDEX.md` map, in-source Doxygen). Use after changing source or to
     document code (method: `docs/CODE_INDEX_GUIDE.md`).
+  - `grill-me` / `grilling` — relentless, one-question-at-a-time interview to
+    stress-test a plan or design before building (vendored from
+    `mattpocock/skills`, MIT).
+  - `ponytail` (+ `-review`/`-audit`/`-debt`/`-gain`/`-help`) — "lazy senior dev"
+    mode: push for the simplest, shortest solution that works (YAGNI, stdlib
+    first) and hunt over-engineering in diffs/repos (vendored from
+    `DietrichGebert/ponytail`, MIT).
   - `renderdoc-gpu-debug` — GPU frame capture/inspection via `rdc-cli`
     (Vulkan/D3D/GL). Use for rendering artifacts, shadow/z-fighting/blend bugs,
     pixel history, shader debugging. Needs RenderDoc + `pip install rdc-cli`
