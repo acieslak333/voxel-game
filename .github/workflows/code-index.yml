@@ -1,0 +1,43 @@
+# =============================================================================
+#  code-index — keep the machine-readable symbol index in sync with the source.
+# =============================================================================
+#  Runs `codeindex.py check`, which fails if any indexed source file was added,
+#  removed, or changed since docs/index/manifest.json was last regenerated.
+#  Python-only: it does NOT build the game (the build is Windows/VS-only), so
+#  this stays fast and runs on every push/PR. Fix a failure with:
+#      python tools/codeindex/codeindex.py gen   &&   git add docs/index
+#  See docs/CODE_INDEX_GUIDE.md.
+# =============================================================================
+name: code-index
+
+on:
+  push:
+    paths:
+      - 'src/**'
+      - 'shaders/**'
+      - 'tools/**'
+      - 'tests/**'
+      - 'scripts/**'
+      - 'assets/**.yaml'
+      - 'docs/index/**'
+      - '.github/workflows/code-index.yml'
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'shaders/**'
+      - 'tools/**'
+      - 'tests/**'
+      - 'scripts/**'
+      - 'assets/**.yaml'
+      - 'docs/index/**'
+
+jobs:
+  check-index:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Verify the symbol index is up to date
+        run: python tools/codeindex/codeindex.py check
