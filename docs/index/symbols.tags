@@ -345,7 +345,6 @@ applySettings	src/core/App.h	/^void applySettings();/;"	f	line:194
 applyTextures	src/world/BlockRegistry.cpp	/^void applyTextures(const YAML::Node& tex, BlockProperties& props, InternFn intern) {/;"	f	line:40
 assert	src/utilities/alloc/SpanAllocator.cpp	/^assert(liveIt != live_.end() && "SpanAllocator::free: offset not live");/;"	f	line:101
 async_streaming	assets/world.yaml	/^async_streaming/;"	m	line:50
-async_streaming	assets/world1.yaml	/^async_streaming/;"	m	line:50
 attributeDescriptions	src/render/Vertex.h	/^static std::array<VkVertexInputAttributeDescription, 7> attributeDescriptions() {/;"	f	line:109
 available	src/render/VulkanContext.cpp	/^std::vector<VkExtensionProperties> available(count);/;"	f	line:314
 available	src/render/VulkanContext.cpp	/^std::vector<VkLayerProperties> available(count);/;"	f	line:83
@@ -451,7 +450,6 @@ caveNoiseD	src/world/World.cpp	/^vg::Noise caveNoiseD   (config_.seed + 6250u);/
 caveSelNoise	src/world/World.cpp	/^vg::Noise caveSelNoise (config_.seed + 6300u);/;"	f	line:546
 caveSurf	src/world/World.cpp	/^std::vector<int>   caveSurf(static_cast<size_t>(N) * N);/;"	f	line:954
 caveVorNoise	src/world/World.cpp	/^vg::Noise caveVorNoise (config_.seed + 7500u);/;"	f	line:559
-caves	assets/world1.yaml	/^caves/;"	m	line:155
 cc	tools/gen_critter_model.py	/^def cc(v):/;"	f	line:36
 cc	tools/gen_tool_models.py	/^def cc(v):/;"	f	line:41
 cell	src/core/AppUi.cpp	/^cell(c, gridX + c * (slot + gap), hotY);/;"	f	line:337
@@ -997,7 +995,6 @@ head_version	tools/codeindex/verify_comments.py	/^def head_version(path: str) ->
 heal	src/player/PlayerController.cpp	/^heal((kRegenRate + regenBonus_) * dt);/;"	f	line:264
 heal	src/player/PlayerController.h	/^void heal(float amount);/;"	f	line:87
 height_chunks	assets/world.yaml	/^height_chunks/;"	m	line:77
-height_chunks	assets/world1.yaml	/^height_chunks/;"	m	line:71
 held	src/main.cpp	/^vg::PlayerController held(glm::vec3(0.5f, 100.0f, 0.5f));/;"	f	line:424
 heldLight	src/core/App.cpp	/^glm::vec4 heldLight(0.0f);/;"	f	line:1663
 heldLightCol	src/core/App.cpp	/^glm::vec4 heldLightCol(0.0f);/;"	f	line:1664
@@ -1096,7 +1093,6 @@ lightSteps	assets/clouds.yaml	/^lightSteps/;"	m	line:77
 lightVol	shaders/chunk.frag	/^uniform: layout(set = 0, binding = 3) uniform sampler3D lightVol;/;"	v	line:8
 lilac	assets/colors.yaml	/^lilac/;"	m	line:16
 lime	assets/colors.yaml	/^lime/;"	m	line:25
-liquids	assets/world1.yaml	/^liquids/;"	m	line:103
 listColorPalettes	src/core/ColorPalette.cpp	/^std::vector<std::string> listColorPalettes(const std::string& dir) {/;"	f	line:66
 list_effects	tools/particle_tool.py	/^def list_effects():/;"	f	line:113
 list_textures	tools/particle_tool.py	/^def list_textures():/;"	f	line:120
@@ -1244,7 +1240,6 @@ openChestAt	src/core/App.h	/^void openChestAt(const glm::ivec3& pos);/;"	f	line:
 ops	assets/features/birch_tree.yaml	/^ops/;"	m	line:6
 ops	assets/features/oak_tree.yaml	/^ops/;"	m	line:8
 ops	assets/features/pine_tree.yaml	/^ops/;"	m	line:7
-ores	assets/world1.yaml	/^ores/;"	m	line:193
 out	src/clouds/CloudNoise.cpp	/^std::ofstream out(file, std::ios::binary);/;"	f	line:221
 out	src/core/AppUi.cpp	/^std::vector<glm::vec3> out(previewThumb_.size());/;"	f	line:775
 out	src/core/Settings.cpp	/^std::ofstream out(path);/;"	f	line:86
@@ -1345,7 +1340,6 @@ queueRemesh	src/render/WorldRenderer.cpp	/^queueRemesh(chunks);/;"	f	line:869
 queueRemesh	src/render/WorldRenderer.h	/^void queueRemesh(const std::vector<glm::ivec3>& chunks);/;"	f	line:302
 rand01	src/entity/Particles.h	/^float rand01();/;"	f	line:96
 random_seed	assets/world.yaml	/^random_seed/;"	m	line:27
-random_seed	assets/world1.yaml	/^random_seed/;"	m	line:27
 ravFloor	src/world/World.cpp	/^std::vector<int>   ravFloor(static_cast<size_t>(N) * N);/;"	f	line:956
 ravFloorNoise	src/world/World.cpp	/^vg::Noise ravFloorNoise(config_.seed + 6550u);/;"	f	line:545
 ravLineNoise	src/world/World.cpp	/^vg::Noise ravLineNoise (config_.seed + 6600u);/;"	f	line:549
@@ -1473,7 +1467,6 @@ screenshot	src/render/Screenshot.h	/^screenshot/;"	n	line:20
 scrollCallback	src/core/Window.h	/^static void scrollCallback(GLFWwindow* window, double xoffset, double yoffset);/;"	f	line:78
 scrollSelected	src/player/Inventory.h	/^void scrollSelected(int delta) { setSelected(selected_ + delta); }/;"	f	line:65
 seed	assets/world.yaml	/^seed/;"	m	line:21
-seed	assets/world1.yaml	/^seed/;"	m	line:21
 segment	src/entity/Armature.cpp	/^segment(times, time, i, f);/;"	f	line:79
 segment	src/entity/Armature.cpp	/^segment(times, time, i, f);/;"	f	line:90
 segment	src/entity/Armature.cpp	/^void segment(const std::vector<float>& times, float time, size_t& i, float& f) {/;"	f	line:54
@@ -1624,16 +1617,12 @@ streamRemesh	src/render/WorldRenderer.cpp	/^streamRemesh(deferredStartup_);/;"	f
 streamRemesh	src/render/WorldRenderer.h	/^void streamRemesh(const std::vector<glm::ivec3>& chunks);/;"	f	line:142
 streamWindow	src/core/App.h	/^void streamWindow();/;"	f	line:134
 stream_tuning	assets/world.yaml	/^stream_tuning/;"	m	line:85
-stream_tuning	assets/world1.yaml	/^stream_tuning/;"	m	line:79
 stream_workers	assets/world.yaml	/^stream_workers/;"	m	line:42
-stream_workers	assets/world1.yaml	/^stream_workers/;"	m	line:42
 streaming	assets/world.yaml	/^streaming/;"	m	line:36
-streaming	assets/world1.yaml	/^streaming/;"	m	line:36
 strip_block_comments_stateful	tools/codeindex/codeindex.py	/^def strip_block_comments_stateful(lines):/;"	f	line:113
 strip_comments	tools/codeindex/verify_comments.py	/^def strip_comments(src: str) -> str:/;"	f	line:38
 struct_list	tools/structure_tool.py	/^def struct_list():/;"	f	line:87
 struct_to_cells	tools/structure_tool.py	/^def struct_to_cells(doc):/;"	f	line:94
-structures	assets/world1.yaml	/^structures/;"	m	line:138
 sum	src/core/AppUi.cpp	/^glm::vec3 sum(0.0f);/;"	f	line:731
 sunColor	assets/sky.yaml	/^sunColor/;"	m	line:119
 sunGlow	assets/sky.yaml	/^sunGlow/;"	m	line:122
@@ -1865,7 +1854,6 @@ vg	src/world/World.h	/^vg/;"	n	line:29
 vg	src/world/WorldConfig.cpp	/^vg/;"	n	line:19
 vg	src/world/WorldConfig.h	/^vg/;"	n	line:17
 view_radius	assets/world.yaml	/^view_radius/;"	m	line:62
-view_radius	assets/world1.yaml	/^view_radius/;"	m	line:62
 vkAllocateCommandBuffers	src/render/VulkanContext.cpp	/^vkAllocateCommandBuffers(device_, &alloc, &cmd);/;"	f	line:365
 vkBeginCommandBuffer	src/render/VulkanContext.cpp	/^vkBeginCommandBuffer(cmd, &begin);/;"	f	line:370
 vkBindBufferMemory	src/render/Buffer.cpp	/^vkBindBufferMemory(ctx_->device(), buffer_, alloc_.memory, alloc_.offset);/;"	f	line:41

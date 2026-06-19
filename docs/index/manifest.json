@@ -15,7 +15,6 @@
   "assets/structures/well.yaml": "352970be6ff55c07b393ee259004f4554bafab88",
   "assets/textures.yaml": "78ad560b20d7a2da87eb7a129974b2dfa39ba232",
   "assets/world.yaml": "7a6a48e578ddcde464da5ac42aefd5e5e979d508",
-  "assets/world1.yaml": "aa1fc9772062940454c8a938e244c0f30934838f",
   "scripts/gen_colors.py": "74ca8b398dc04514c982ad385ec1471c8a27f1c4",
   "scripts/gen_cracks.py": "b93b823ad027d4a4facbe625d86f588be458c9eb",
   "scripts/gen_hammer.py": "2d095aadcf184c6d31aee7aabfa38409ddb41c99",

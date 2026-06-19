@@ -13,9 +13,7 @@ placed next to the executable at build time (`build/bin/assets/`).
 | File / dir | Read by | Controls |
 |---|---|---|
 | `blocks.yaml` | `BlockRegistry` | Block types: name, solid/opaque, emission, per-face textures, mining/tool/armor. |
-| `world.yaml` | `WorldConfig` | **The worldgen config**: world size, seed, terrain shaping, `stream_tuning`. (Not `biomes.yaml` — that file does not exist.) |
-| `world1.yaml` | (alt profile) | A second world profile. |
-| `items.yaml` | registry/UI | Non-block item definitions. |
+| `world.yaml` | `WorldConfig` | **The worldgen config**: world size, seed, terrain shaping, `stream_tuning`. (Not `biomes.yaml` — that file does not exist.) || `items.yaml` | registry/UI | Non-block item definitions. |
 | `recipes.yaml` | `Crafting` | Crafting recipes. Edit via `tools/recipe_tool.py`. |
 | `sky.yaml` | `DayNight` | Day/night look: atmosphere, sun/moon, stars, terrain light. |
 | `clouds.yaml` | `CloudSystem` | Volumetric clouds: altitude, noise, density, light transport, weather. |
