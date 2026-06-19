@@ -448,9 +448,7 @@ in [`docs/index/SYMBOLS.md`](index/SYMBOLS.md).
 | File / dir | Read by | Controls |
 |---|---|---|
 | `assets/blocks.yaml` | `BlockRegistry` (runtime) | Block types: name, solid/opaque, emission, per-face textures, mining/tool/armor, render type. |
-| `assets/world.yaml` | `WorldConfig` (runtime) | World size (view radius / height), seed, terrain shaping, `stream_tuning:` knobs. **This is the worldgen config** (not `biomes.yaml`). |
-| `assets/world1.yaml` | (alt profile) | A second world profile. |
-| `assets/items.yaml` | registry/UI | Non-block item definitions. |
+| `assets/world.yaml` | `WorldConfig` (runtime) | World size (view radius / height), seed, terrain shaping, `stream_tuning:` knobs. **This is the worldgen config** (not `biomes.yaml`). || `assets/items.yaml` | registry/UI | Non-block item definitions. |
 | `assets/recipes.yaml` | `Crafting` (runtime) | Crafting recipes (output + inputs). Edited via `recipe_tool.py`. |
 | `assets/sky.yaml` | `DayNight` (runtime) | Day/night look: atmosphere (betaR/betaM/mieG/exposure), sun/moon discs, stars/Milky-Way, terrain light. |
 | `assets/clouds.yaml` | `CloudSystem` (runtime) | Volumetric clouds: altitude/quality, noise tiling, density/erosion, light transport, wind, weather scheduler. |
