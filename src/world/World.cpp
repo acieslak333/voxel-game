@@ -63,7 +63,7 @@ inline glm::vec3 unpackLightColor(uint32_t p) {
 constexpr uint32_t kChunkMagic   = 0x4B4E4843u; // 'CHNK'
 /// Chunk save-format version. Bump whenever the on-disk layout changes; old files
 /// are then regenerated from noise instead of loading stale data.
-constexpr uint32_t kChunkVersion = 44u; // bump: more plains/hills (softer relief gain + wider mid bands)
+constexpr uint32_t kChunkVersion = 50u; // bump: erosion regional + shore-gated; trees use eroded surface (shared erodeHeight)
 
 /// Build the filesystem path for a chunk's save file.
 std::string chunkPath(const std::string& dir, int cx, int cy, int cz) {
@@ -327,8 +327,9 @@ void World::generateColumnInto(int cx, int cz, Chunk* const* stack,
         // mountain & island fields) a value WINDOW, so the terrain is layered, not flat.
 
         // ---- 2D macro: continent (sea vs land), hills, mountain mask ----------
-        constexpr double kContFreq    = 0.0013;  // continent field: BIG contiguous continents/seas (lower = bigger,
+        constexpr double kContFreq    = 0.0006;  // continent field: BIG contiguous continents/seas (lower = bigger,
                                                  // more continental landmasses with open oceans between them)
+                                                 // [0.0013 -> 0.0009 -> 0.0006: huge continents/seas, low-freq pass]
         constexpr int    kContOct     = 4;       // low octaves -> full swing (deep seas form)
         constexpr double kBaseY       = 33.0;    // continent zero ≈ sea level (low sea = 32)
         constexpr double kSeaSpan     = 42.0;    // continent=-1 -> deep ocean floor (deeper -> larger water basins)
@@ -359,7 +360,8 @@ void World::generateColumnInto(int cx, int cz, Chunk* const* stack,
         //   relief ~0.72-1.00  tall SPIKY MOUNTAINS (snow-capped needles)
         // Continentalness (contN) still gates land vs ocean independently. See the
         // reliefHeight()/reliefRough() splines below; edit them to reshape the world.
-        constexpr double kReliefFreq  = 0.0040;  // size of plains/hills/mountain regions
+        constexpr double kReliefFreq  = 0.0016;  // size of plains/hills/mountain regions
+                                                 // [0.0040 -> 0.0026 -> 0.0016: very large, long-traverse terrain regions]
         constexpr int    kReliefOct   = 4;
         constexpr double kReliefGain  = 1.40;    // CONTRAST on the relief value. Higher pushes t to the plains/
                                                  // mountain extremes (abrupt: plains jump straight to peaks);
@@ -368,7 +370,8 @@ void World::generateColumnInto(int cx, int cz, Chunk* const* stack,
                                                  // restore the hill/plain middle ground between coast and peaks.
         constexpr double kPeakRelief  = 118.0;   // broad mountain-mass height — kept BELOW the world-top taper
                                                  // (~y168) so peaks don't shear flat; sharp spikes add the height
-        constexpr double kHillFreq    = 0.0095;  // medium rolling-hill modulation (× roughness)
+        constexpr double kHillFreq    = 0.0040;  // medium rolling-hill modulation (× roughness)
+                                                 // [0.0095 -> 0.0062 -> 0.0040: broad, sweeping rolling hills]
         constexpr int    kHillOct     = 4;
         constexpr double kHillRelief  = 30.0;
         constexpr double kRidgeFreq   = 0.0220;  // SPIKY alpine ridgelines (higher freq -> more, sharper needles)
@@ -384,8 +387,9 @@ void World::generateColumnInto(int cx, int cz, Chunk* const* stack,
         constexpr double kGrad        = 1.0;     // density per block of the height gradient
         constexpr double kBaseDetail  = 5.0;     // min 3D wobble (plains stay smooth & green)
         constexpr double kMtnDetail   = 48.0;    // added 3D swing at full roughness (overhangs/cliffs/spikes)
-        constexpr double kMainFreqXZ  = 0.0130;  // 3D: min<->max density selector
-        constexpr double kMainFreqY   = 0.0065;
+        constexpr double kMainFreqXZ  = 0.0055;  // 3D: min<->max density selector
+                                                 // [0.0130 -> 0.0085 -> 0.0055: large smooth/rough density zones]
+        constexpr double kMainFreqY   = 0.0027;  // [0.0065 -> 0.0042 -> 0.0027 in step with XZ]
         constexpr double kDetailFreqXZ= 0.0340;  // 3D: min/max detail density
         constexpr double kDetailFreqY = 0.0170;  // half of XZ -> vertical stretch (Beta look)
         constexpr int    kMainOct     = 6;
@@ -395,7 +399,7 @@ void World::generateColumnInto(int cx, int cz, Chunk* const* stack,
         // Domain warp: offset the macro sampling coords by a low-freq noise so the
         // continent coastlines and mountain ranges WANDER organically instead of
         // forming smooth rounded blobs (warps cont/mtn/ridge together for coherence).
-        constexpr double kWarpFreq    = 0.0045;
+        constexpr double kWarpFreq    = 0.0020;  // [0.0045 -> 0.0030 -> 0.0020: sweeping coastline/range wander]
         constexpr int    kWarpOct     = 3;
         constexpr double kWarpAmp     = 55.0;    // ± blocks the macro fields are displaced
         // Worley cell-edge (F2-F1) fields = SHARP fluting, not smooth fbm. A 3D field
@@ -407,6 +411,26 @@ void World::generateColumnInto(int cx, int cz, Chunk* const* stack,
         constexpr double kCliffSurfThr  = 0.72;  // cell-edge value above this -> bare stone
                                                  // (high -> only sharp cell walls = crags/cliff
                                                  //  lines poke through; grass keeps the lowland)
+
+        // ---- Analytic erosion: regional badlands -> stepped mesa/butte/canyon tiers ----
+        // A low-freq "erosion strength" field gates a vertical STRATIFICATION carve into the
+        // density near the surface, so some regions step down in flat rock tiers (true 3D —
+        // it's density, so the tier faces can undercut) while most of the world is untouched.
+        // Tiers are coarse (>= the latY=8 density lattice) so the trilerp resolves them; the
+        // carve is height-gated above the shore so it never gouges coasts into the sea.
+        // Cheap: +2 fbm samples per column, pure arithmetic per cell. See VG_MESH_TIME.
+        constexpr double kErosFreq    = 0.0016;  // erosion-region size (lower -> bigger badland zones)
+        constexpr int    kErosOct     = 3;
+        constexpr double kErosThr     = 0.32;    // REGIONAL: erosion forms as occasional inland badland patches, not everywhere
+                                                 // (lower -> more common; 0.15 was too frequent; 0.05 = near-universal)
+        constexpr double kErosGain    = 2.4;     // CONTRAST so strong-erosion cores reach full strength (clamped)
+        constexpr double kStrataBand  = 18.0;    // vertical height of one rock tier (blocks) — PRIMARY: surface snaps to these
+        constexpr double kStrataAmp   = 16.0;    // SECONDARY density notch per tier -> riser-face texture (height-snap does the tiers)
+        constexpr double kErosWindow  = 64.0;    // blocks around the surface that terrace (vertical reach of cliffs)
+        constexpr double kErosSeaPad  = 10.0;    // erosion stays OFF near the ocean (coasts/beaches smooth) — needs ~10 above sea
+        constexpr double kErosSeaRamp = 22.0;    // long fade-in: only well-inland higher terrain terraces, not the shore
+        constexpr double kStrataWarpFreq = 0.005;// per-region tier rise/fall region size
+        constexpr double kStrataWarpAmp  = 12.0; // ± blocks the tiers wander vertically per region (not globally level)
 
         // ---- Floating islands: sparse 2D mask + per-region altitude + 3D shape -
         // A 2D mask (thresholded -> sparse) says WHERE an island is; a 2D altitude
@@ -534,6 +558,7 @@ void World::generateColumnInto(int cx, int cz, Chunk* const* stack,
         vg::Noise surfNoise  (config_.seed + 6006u);
         vg::Noise warpNoise    (config_.seed + 1234u); // domain warp (organic coastlines/ranges)
         vg::Noise cliff3DNoise (config_.seed + 1357u); // 3D worley crack carving (mountain cliffs)
+        vg::Noise erosionNoise (config_.seed + 8821u); // 2D erosion-strength + strata-warp field
         vg::Noise cliffSurfNoise(config_.seed + 1470u);// 2D worley rocky-outcrop scatter (skin)
         vg::Noise coastCliffNoise(config_.seed + 1580u);// voronoi COASTAL CLIFFS (un-flatten some shore)
         vg::Noise biomeNoise   (config_.seed + 5150u); // low-freq biome-variety selector (forest/mountain style)
@@ -645,6 +670,34 @@ void World::generateColumnInto(int cx, int cz, Chunk* const* stack,
             return h * kPlateMaster;
         };
 
+        // --- Erosion height-snap (SINGLE source of truth) -------------------------
+        // Snap a column's macro surface DOWN to the flat stratum shelf below it (mesa
+        // terraces), blended by an erosion strength that is regional (low-freq field,
+        // contrast-gained + thresholded) and shore-gated (fades out near the ocean so
+        // coasts/beaches stay smooth). Returns the snapped height and reports strength +
+        // strataPhase so the lattice can also carve riser texture. BOTH the density surface
+        // and the tree-placement estimate call this, so they always agree -> no floating
+        // or buried trees on eroded terrain.
+        const auto erodeHeight = [&](double wx, double wz, double base,
+                                     double& strengthOut, double& phaseOut) -> double {
+            strengthOut = 0.0; phaseOut = 0.0;
+            double e = erosionNoise.fbm(static_cast<float>(wx * kErosFreq),
+                                        static_cast<float>(wz * kErosFreq), kErosOct) * kErosGain * 0.5 + 0.5;
+            e = (e - kErosThr) / (1.0 - kErosThr);
+            if (e <= 0.0) return base;
+            e = e > 1.0 ? 1.0 : e;
+            double gate = (base - (kSeaLevel + kErosSeaPad)) / kErosSeaRamp;
+            gate = gate < 0.0 ? 0.0 : (gate > 1.0 ? 1.0 : gate);
+            const double s = e * e * (3.0 - 2.0 * e) * gate; // smoothstep edges × shore gate
+            if (s <= 0.0) return base;
+            strengthOut = s;
+            phaseOut = erosionNoise.fbm(static_cast<float>(wx * kStrataWarpFreq + 91.7),
+                                        static_cast<float>(wz * kStrataWarpFreq - 13.2), 2) * kStrataWarpAmp;
+            const double band  = (base + phaseOut) / kStrataBand;
+            const double shelf = std::floor(band) * kStrataBand - phaseOut;
+            return base + (shelf - base) * s;
+        };
+
         // --- Tree-root surface estimate (for the seam-safe biome scatter) ---------
         // Trees are decoration whose canopies cross chunk borders, so each chunk must
         // re-derive them from a PURE function of world coords. That needs the surface Y at
@@ -703,7 +756,9 @@ void World::generateColumnInto(int cx, int cz, Chunk* const* stack,
                 const double over = broad - (kBroadCap - kBroadSoft);
                 broad = (kBroadCap - kBroadSoft) + kBroadSoft * (1.0 - std::exp(-over / kBroadSoft));
             }
-            const double base = broad + spike * lift;
+            double base = broad + spike * lift;
+            double erosS_unused, erosP_unused;
+            base = erodeHeight(dwx, dwz, base, erosS_unused, erosP_unused); // match the eroded surface
             const double detailAmp = kBaseDetail + rough * kMtnDetail;
             const double yB = base;
             const double mainV = mainNoise.fbm(static_cast<float>(dwx * kMainFreqXZ * fmul),
@@ -855,7 +910,7 @@ void World::generateColumnInto(int cx, int cz, Chunk* const* stack,
                     const double over = broad - (kBroadCap - kBroadSoft);
                     broad = (kBroadCap - kBroadSoft) + kBroadSoft * (1.0 - std::exp(-over / kBroadSoft));
                 }
-                const double baseHeightBlocks = broad + spike * lift;
+                double baseHeightBlocks = broad + spike * lift; // mutable: erosion snaps it to tiers below
                 const double detailAmp = kBaseDetail + rough * kMtnDetail;
 
                 // Floating islands (per column): a SPARSE 2D mask decides whether this
@@ -875,6 +930,15 @@ void World::generateColumnInto(int cx, int cz, Chunk* const* stack,
                         islCenterY = kIslLow + alt * (kIslHigh - kIslLow);
                     }
                 }
+
+                // Erosion strength for this column (0 = pristine, 1 = heavy badlands). A
+                // low-freq field, contrast-gained and thresholded so erosion is regional and
+                // sparse, then height-gated so it only bites well above the shoreline (never
+                // carving coastal flats down into the sea). strataPhase wanders the tier
+                // heights per region so the mesas aren't globally level.
+                double erosStrength = 0.0;
+                double strataPhase  = 0.0;
+                baseHeightBlocks = erodeHeight(wxL, wzL, baseHeightBlocks, erosStrength, strataPhase);
 
                 for (int iy = 0; iy < gy; ++iy) {
                     const double yB = static_cast<double>(iy) * latY; // world Y of this lattice row
@@ -910,6 +974,22 @@ void World::generateColumnInto(int cx, int cz, Chunk* const* stack,
                             static_cast<float>(wzL * kCliff3DFreq),
                             vg::Noise::Metric::Euclidean, vg::Noise::Cell::F2mF1);
                         out -= (crack * 0.5 + 0.5) * kCliff3DAmp * rough;
+                    }
+
+                    // Erosion terraces: in badland regions, carve a horizontal notch per rock
+                    // tier near the surface so the slope steps down in flat mesa/butte shelves
+                    // (true 3D — carving density, so the tier faces can undercut). The sawtooth
+                    // carves more density toward each tier's TOP, leaving a flat shelf at its
+                    // base. Gated to the surface skin (kErosWindow) so deep rock is never
+                    // hollowed into caves.
+                    if (erosStrength > 0.0) {
+                        double nearSurf = 1.0 - std::fabs(yB - baseHeightBlocks) / kErosWindow;
+                        if (nearSurf > 0.0) {
+                            if (nearSurf > 1.0) nearSurf = 1.0;
+                            const double band = (yB + strataPhase) / kStrataBand;
+                            const double frac = band - std::floor(band); // 0 at a tier base -> 1 below next
+                            out -= frac * kStrataAmp * erosStrength * nearSurf;
+                        }
                     }
 
                     // Floating islands: a slab centred on islCenterY, made irregular by a
